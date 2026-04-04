@@ -1,5 +1,5 @@
 {
-    "strategy": "ClaudeSentimentStrategy",
+    "strategy": "SygnifStrategy",
     "trading_mode": "spot",
     "margin_mode": "",
     "max_open_trades": 10,
@@ -114,7 +114,7 @@
         "username": "freqtrader",
         "password": "CHANGE_ME"
     },
-    "bot_name": "Claude_NFI_Sentiment_Bot",
+    "bot_name": "Sygnif",
     "initial_state": "running",
     "force_entry_enable": true,
     "internals": {

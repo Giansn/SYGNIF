@@ -1,5 +1,5 @@
 """
-ClaudeSentimentStrategy v2 - NFI-Enhanced with Claude API Sentiment Layer
+SygnifStrategy - NFI-Enhanced Trading Bot with AI Sentiment Layer
 
 Architecture (inspired by NostalgiaForInfinityX7):
 - Multi-timeframe analysis: 5m base + 15m/1h/4h/1d informative
@@ -34,10 +34,10 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Claude Sentiment Layer
+# Sygnif Sentiment Layer
 # ---------------------------------------------------------------------------
 
-class ClaudeSentiment:
+class SygnifSentiment:
     """Lightweight Claude API wrapper for crypto sentiment analysis."""
 
     def __init__(self):
@@ -182,9 +182,9 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
 # Strategy
 # ---------------------------------------------------------------------------
 
-class ClaudeSentimentStrategy(IStrategy):
+class SygnifStrategy(IStrategy):
     """
-    NFI-Enhanced Freqtrade strategy with Claude API sentiment analysis.
+    Sygnif — NFI-Enhanced Freqtrade strategy with AI sentiment analysis.
 
     Based on NostalgiaForInfinityX7 patterns:
     - Multi-timeframe indicators (5m + 15m/1h/4h/1d)
@@ -228,7 +228,7 @@ class ClaudeSentimentStrategy(IStrategy):
     _movers_refresh_secs: int = 14400  # 4h
 
     # Claude layer
-    claude = ClaudeSentiment()
+    claude = SygnifSentiment()
 
     # -------------------------------------------------------------------------
     # Fetch top gainers/losers from Bybit API (refreshed every 4h)

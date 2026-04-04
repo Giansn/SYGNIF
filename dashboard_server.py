@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple HTTP server for the Claude NFI Bot Dashboard on port 8888."""
+"""Sygnif Dashboard server on port 8888."""
 import http.server
 import os
 

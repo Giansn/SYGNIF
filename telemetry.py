@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude NFI Bot Telemetry — Read-only Telegram reports.
+Sygnif Telemetry — Read-only Telegram reports.
 Queries Freqtrade API locally and sends formatted overview to Telegram.
 
 Usage:
@@ -68,7 +68,7 @@ def build_report():
     max_trades = config.get("max_open_trades", "?")
 
     # --- Header ---
-    lines = [f"*Claude NFI Bot* | {state} | {mode}", f"_{now} | {pairs_count} pairs | {len(trades)}/{max_trades} trades_", ""]
+    lines = [f"*SYGNIF* | {state} | {mode}", f"_{now} | {pairs_count} pairs | {len(trades)}/{max_trades} trades_", ""]
 
     # --- Portfolio ---
     wallet = config.get("dry_run_wallet", 100) if config.get("dry_run") else "?"
@@ -138,7 +138,7 @@ def parse_interval(s):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Claude NFI Bot Telemetry")
+    parser = argparse.ArgumentParser(description="Sygnif Telemetry")
     parser.add_argument("--loop", type=str, help="Send reports on interval (e.g. 4h, 30m)")
     parser.add_argument("--stdout", action="store_true", help="Print to stdout instead of Telegram")
     args = parser.parse_args()
