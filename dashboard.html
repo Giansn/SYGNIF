@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude NFI Bot</title>
+<style>
+:root{--bg:#0a0e14;--s1:#111820;--s2:#1a2030;--bd:#252d3a;--t1:#e4e8ee;--t2:#8893a5;--ac:#4da6ff;--g:#22c55e;--r:#ef4444;--y:#eab308}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,sans-serif;background:var(--bg);color:var(--t1);font-size:14px}
+.wrap{max-width:1400px;margin:0 auto;padding:12px}
+
+.head{display:flex;justify-content:space-between;align-items:center;padding:12px 0;margin-bottom:16px}
+.head h1{font-size:16px;font-weight:700}.head h1 b{color:var(--ac)}
+.badges{display:flex;gap:6px;align-items:center}
+.badge{padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700}
+.b-run{background:#22c55e20;color:var(--g)}.b-dry{background:#eab30820;color:var(--y)}
+.clock{font-size:11px;color:var(--t2)}
+
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:20px}
+.stat{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:14px}
+.stat-lbl{font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.stat-val{font-size:26px;font-weight:800;letter-spacing:-1px;line-height:1.1}
+.stat-sub{font-size:11px;color:var(--t2);margin-top:3px}
+.up{color:var(--g)}.dn{color:var(--r)}.nt{color:var(--y)}
+
+.sec{margin-bottom:20px}
+.sec-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sec-t{font-size:13px;font-weight:700}.sec-count{font-size:11px;color:var(--t2)}
+
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+
+/* Desktop table */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:8px 10px;font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:0.6px;border-bottom:2px solid var(--bd);position:sticky;top:0;background:var(--s1)}
+td{padding:8px 10px;border-bottom:1px solid #1a2030;font-size:12px;white-space:nowrap}
+tr:hover td{background:#ffffff06}
+.pair{color:var(--ac);font-weight:700;font-size:13px}
+.pair span{color:var(--t2);font-weight:400}
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;background:#4da6ff15;color:var(--ac);font-weight:600}
+.bar-wrap{width:70px;height:5px;background:var(--s2);border-radius:3px;display:inline-block;vertical-align:middle;margin-left:6px}
+.bar{height:100%;border-radius:3px;transition:width .3s}
+.lvl{display:inline-block;padding:3px 7px;border-radius:5px;font-size:10px;font-weight:600;margin:1px 2px}
+.lvl-sl{background:#ef444415;color:var(--r);border:1px solid #ef444430}
+.lvl-entry{background:#4da6ff10;color:var(--ac);border:1px solid #4da6ff25}
+.lvl-tp{background:#22c55e12;color:var(--g);border:1px solid #22c55e30}
+
+/* Mobile trade cards (hidden on desktop) */
+.trade-cards{display:none}
+.tc{background:var(--s1);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:10px}
+.tc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.tc-pair{font-size:16px;font-weight:700;color:var(--ac)}
+.tc-pair span{color:var(--t2);font-weight:400;font-size:12px}
+.tc-pnl{font-size:18px;font-weight:800;text-align:right}
+.tc-pnl-sub{font-size:11px;color:var(--t2);text-align:right}
+.tc-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
+.tc-item{background:var(--s2);border-radius:6px;padding:7px 9px}
+.tc-item-lbl{font-size:9px;color:var(--t2);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:2px}
+.tc-item-val{font-size:12px;font-weight:600}
+.tc-levels{display:flex;gap:4px;flex-wrap:wrap}
+.tc-bar{height:4px;background:var(--s2);border-radius:2px;margin-top:8px;overflow:hidden}
+.tc-bar-fill{height:100%;border-radius:2px}
+.tc-foot{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--t2)}
+
+/* Bottom sections */
+.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;padding:12px}
+.chip{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;background:var(--s2);border:1px solid var(--bd)}
+.chip-g{border-color:#22c55e40;color:var(--g)}.chip-r{border-color:#ef444440;color:var(--r)}
+.perf-row{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--bd)}
+.perf-row:last-child{border:none}
+.perf-pair{width:80px;font-weight:600;color:var(--ac);font-size:13px}
+.perf-val{width:100px;font-weight:600;font-size:13px}
+.perf-count{width:50px;font-size:12px;color:var(--t2)}
+.perf-bar{flex:1;height:6px;background:var(--s2);border-radius:3px;overflow:hidden}
+.perf-bar-fill{height:100%;border-radius:3px}
+.empty{padding:24px;text-align:center;color:var(--t2);font-size:13px}
+#err{display:none;background:#ef444415;border:1px solid #ef444444;border-radius:10px;padding:12px;margin-bottom:16px;color:var(--r);font-size:13px}
+
+@media(max-width:768px){
+  .stats{grid-template-columns:repeat(3,1fr)}
+  .stat-val{font-size:20px}
+  .desktop-table{display:none !important}
+  .trade-cards{display:block !important}
+  .bottom-grid{grid-template-columns:1fr}
+  .tc-grid{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div id="err"></div>
+
+<div class="head">
+  <h1><b>Claude NFI</b> Sentiment Bot</h1>
+  <div>
+    <div class="badges"><span id="badge" class="badge b-run">...</span><span id="dry" class="badge b-dry" style="display:none">DRY RUN</span></div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-lbl">Balance</div><div class="stat-val" id="bal">--</div><div class="stat-sub" id="bal-s">USDT</div></div>
+  <div class="stat"><div class="stat-lbl">Open P/L</div><div class="stat-val" id="pnl">--</div><div class="stat-sub" id="pnl-s">unrealized</div></div>
+  <div class="stat"><div class="stat-lbl">Closed P/L</div><div class="stat-val" id="cpnl">--</div><div class="stat-sub" id="cpnl-s">realized</div></div>
+  <div class="stat"><div class="stat-lbl">Trades</div><div class="stat-val" id="tcount">--</div><div class="stat-sub" id="tcount-s">open / max</div></div>
+  <div class="stat"><div class="stat-lbl">Win Rate</div><div class="stat-val" id="wr">--</div><div class="stat-sub" id="wr-s">W / L</div></div>
+  <div class="stat"><div class="stat-lbl">Best Pair</div><div class="stat-val" id="bp" style="font-size:18px">--</div><div class="stat-sub" id="bp-s">--</div></div>
+</div>
+
+<div class="sec">
+  <div class="sec-head"><div class="sec-t">Open Positions</div><div class="sec-count" id="pos-count"></div></div>
+  <!-- Desktop: Table -->
+  <div class="card desktop-table" style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Pair</th><th>Entry</th><th>Current</th><th>P/L %</th><th>P/L</th>
+        <th>SL / Entry / TP</th><th>Stake</th><th>Dur</th><th>Tag</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="10" class="empty">Loading...</td></tr></tbody>
+    </table>
+  </div>
+  <!-- Mobile: Cards -->
+  <div class="trade-cards" id="trade-cards"></div>
+</div>
+
+<div class="bottom-grid">
+  <div class="sec">
+    <div class="sec-head"><div class="sec-t">Active Pairlist</div><div class="sec-count" id="pair-count"></div></div>
+    <div class="card"><div class="chips" id="pairlist"></div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-head"><div class="sec-t">Top Movers</div><div class="sec-count">4h refresh</div></div>
+    <div class="card"><div class="chips" id="movers"><span style="color:var(--t2);padding:12px">--</span></div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sec-head"><div class="sec-t">Performance</div><div class="sec-count">closed trades</div></div>
+  <div class="card" id="perf-container"><div class="empty">No closed trades yet</div></div>
+</div>
+</div>
+
+<script>
+const API=window.location.protocol+'//'+window.location.hostname+':8080';
+const U='freqtrader',P='CHANGE_ME';
+let tk='';
+
+async function login(){const r=await fetch(`${API}/api/v1/token/login`,{method:'POST',headers:{'Authorization':'Basic '+btoa(U+':'+P)}});const d=await r.json();tk=d.access_token;}
+async function api(ep){const r=await fetch(`${API}/api/v1/${ep}`,{headers:{'Authorization':`Bearer ${tk}`}});if(r.status===401){await login();return api(ep);}return r.json();}
+
+const pc=v=>v>0?'up':v<0?'dn':'nt';
+const fmt=(v,d=4)=>(v>=0?'+':'')+v.toFixed(d);
+function calcDur(od){if(!od)return'--';try{const s=Math.floor((Date.now()-new Date(od+'Z').getTime())/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'+String(Math.floor(s%3600/60)).padStart(2,'0')+'m';}catch(e){return'--';}}
+function prec(v){return v<0.01?8:v<1?6:v<100?4:2;}
+
+async function refresh(){
+  try{
+    if(!tk)await login();
+    const[trades,profit,cfg,wl,perf]=await Promise.all([api('status'),api('profit'),api('show_config'),api('whitelist'),api('performance')]);
+
+    const state=cfg.state||'stopped';
+    document.getElementById('badge').textContent=state.toUpperCase();
+    document.getElementById('badge').className=`badge ${state==='running'?'b-run':'b-stop'}`;
+    document.getElementById('dry').style.display=cfg.dry_run?'inline-block':'none';
+    document.getElementById('clock').textContent=new Date().toLocaleTimeString();
+    document.getElementById('pair-count').textContent=`${(wl.whitelist||[]).length} pairs`;
+    document.getElementById('pos-count').textContent=`${trades.length} open`;
+
+    const wallet=cfg.dry_run?(cfg.dry_run_wallet||100):0;
+    const totalPnl=profit.profit_all_coin||0;
+    document.getElementById('bal').textContent=(wallet+totalPnl).toFixed(2);
+    document.getElementById('bal').className=`stat-val ${pc(totalPnl)}`;
+    document.getElementById('bal-s').textContent=`${wallet} base ${fmt(totalPnl)}`;
+
+    const openPnl=trades.reduce((s,t)=>s+(t.profit_abs||0),0);
+    document.getElementById('pnl').textContent=fmt(openPnl);
+    document.getElementById('pnl').className=`stat-val ${pc(openPnl)}`;
+    document.getElementById('pnl-s').textContent=`${trades.length} positions`;
+
+    const closedPnl=profit.profit_closed_coin||0;
+    document.getElementById('cpnl').textContent=fmt(closedPnl);
+    document.getElementById('cpnl').className=`stat-val ${pc(closedPnl)}`;
+    document.getElementById('cpnl-s').textContent=`${profit.closed_trade_count||0} closed`;
+
+    document.getElementById('tcount').textContent=`${trades.length} / ${cfg.max_open_trades||'?'}`;
+    const w=profit.winning_trades||0,l=profit.losing_trades||0,tot=w+l;
+    document.getElementById('wr').textContent=tot?`${(w/tot*100).toFixed(0)}%`:'--';
+    document.getElementById('wr-s').textContent=`${w}W / ${l}L`;
+    if(profit.best_pair){document.getElementById('bp').textContent=profit.best_pair.replace('/USDT','');document.getElementById('bp-s').textContent=`${((profit.best_rate||0)*100).toFixed(2)}%`;}
+
+    // Sort trades
+    const sorted=trades.sort((a,b)=>(b.profit_ratio||0)-(a.profit_ratio||0));
+
+    // Desktop table
+    const tb=document.getElementById('tbody');
+    if(!sorted.length){
+      tb.innerHTML='<tr><td colspan="10" class="empty">No open trades</td></tr>';
+    }else{
+      tb.innerHTML=sorted.map(t=>{
+        const e=t.open_rate,c=t.current_rate||e,pct=(t.profit_ratio||0)*100,pnl=t.profit_abs||0;
+        const p=prec(e),sl=e*0.80,tp1=e*1.02,tp2=e*1.05,tp3=e*1.10;
+        const barW=Math.min(Math.abs(pct)*5,100);
+        return`<tr>
+          <td>${t.trade_id}</td>
+          <td class="pair">${t.pair.replace('/USDT','')}<span>/USDT</span></td>
+          <td>${e.toFixed(p)}</td>
+          <td class="${pc(pct)}" style="font-weight:600">${c.toFixed(p)}</td>
+          <td><span class="${pc(pct)}" style="font-weight:700">${pct>=0?'+':''}${pct.toFixed(2)}%</span><div class="bar-wrap"><div class="bar" style="width:${barW}%;background:${pct>=0?'var(--g)':'var(--r)'}"></div></div></td>
+          <td class="${pc(pnl)}">${fmt(pnl)}</td>
+          <td>
+            <span class="lvl lvl-sl">${sl.toFixed(p)}</span>
+            <span class="lvl lvl-entry">${e.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+2% ${tp1.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+5% ${tp2.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+10% ${tp3.toFixed(p)}</span>
+          </td>
+          <td>${(t.stake_amount||0).toFixed(2)}</td>
+          <td>${calcDur(t.open_date)}</td>
+          <td><span class="tag">${t.enter_tag||'--'}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Mobile cards
+    const mc=document.getElementById('trade-cards');
+    if(!sorted.length){
+      mc.innerHTML='<div class="card"><div class="empty">No open trades</div></div>';
+    }else{
+      mc.innerHTML=sorted.map(t=>{
+        const e=t.open_rate,c=t.current_rate||e,pct=(t.profit_ratio||0)*100,pnl=t.profit_abs||0;
+        const p=prec(e),sl=e*0.80,tp1=e*1.02,tp2=e*1.05,tp3=e*1.10;
+        const barW=Math.min(Math.abs(pct)*5,100);
+        return`<div class="tc">
+          <div class="tc-top">
+            <div><div class="tc-pair">${t.pair.replace('/USDT','')}<span> /USDT</span></div><span class="tag">${t.enter_tag||'--'}</span></div>
+            <div><div class="tc-pnl ${pc(pct)}">${pct>=0?'+':''}${pct.toFixed(2)}%</div><div class="tc-pnl-sub">${fmt(pnl)} USDT</div></div>
+          </div>
+          <div class="tc-grid">
+            <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val">${e.toFixed(p)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Current</div><div class="tc-item-val ${pc(pct)}">${c.toFixed(p)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Stake</div><div class="tc-item-val">${(t.stake_amount||0).toFixed(2)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Duration</div><div class="tc-item-val">${calcDur(t.open_date)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Amount</div><div class="tc-item-val">${t.amount?.toFixed(t.amount<1?4:2)||'--'}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Trade #</div><div class="tc-item-val">${t.trade_id}</div></div>
+          </div>
+          <div class="tc-levels">
+            <span class="lvl lvl-sl">SL ${sl.toFixed(p)}</span>
+            <span class="lvl lvl-entry">Entry ${e.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+2% ${tp1.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+5% ${tp2.toFixed(p)}</span>
+            <span class="lvl lvl-tp">+10% ${tp3.toFixed(p)}</span>
+          </div>
+          <div class="tc-bar"><div class="tc-bar-fill" style="width:${barW}%;background:${pct>=0?'var(--g)':'var(--r)'}"></div></div>
+          <div class="tc-foot"><span>#${t.trade_id}</span><span>${calcDur(t.open_date)}</span></div>
+        </div>`;
+      }).join('');
+    }
+
+    // Pairlist
+    document.getElementById('pairlist').innerHTML=(wl.whitelist||[]).map(p=>`<span class="chip">${p.replace('/USDT','')}</span>`).join('');
+
+    // Movers
+    try{const mr=await fetch('/movers_pairlist.json').catch(()=>null);if(mr&&mr.ok){const m=await mr.json();const gs=(m._meta?.gainers||[]).map(p=>`<span class="chip chip-g">${p.replace('/USDT','')}</span>`);const ls=(m._meta?.losers||[]).map(p=>`<span class="chip chip-r">${p.replace('/USDT','')}</span>`);document.getElementById('movers').innerHTML=[...gs,...ls].join('')||'--';}}catch(e){}
+
+    // Performance
+    const pf=document.getElementById('perf-container');
+    if(perf&&perf.length){const mx=Math.max(...perf.map(x=>Math.abs(x.profit||0)),0.001);pf.innerHTML=perf.slice(0,10).map(p=>{const v=p.profit||0;return`<div class="perf-row"><div class="perf-pair">${p.pair?.replace('/USDT','')||'?'}</div><div class="perf-val ${v>=0?'up':'dn'}">${fmt(v)}</div><div class="perf-count">${p.count||0}x</div><div class="perf-bar"><div class="perf-bar-fill" style="width:${Math.abs(v)/mx*100}%;background:${v>=0?'var(--g)':'var(--r)'}"></div></div></div>`;}).join('');}
+    else{pf.innerHTML='<div class="empty">No closed trades yet</div>';}
+
+    document.getElementById('err').style.display='none';
+  }catch(e){document.getElementById('err').textContent=`API Error: ${e.message}`;document.getElementById('err').style.display='block';tk='';}
+}
+refresh();setInterval(refresh,10000);
+</script>
+</body>
+</html>

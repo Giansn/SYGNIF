@@ -1,0 +1,16 @@
+.env
+user_data/data/
+user_data/logs/
+user_data/tradesv3.sqlite*
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
+user_data/notebooks/
+user_data/freqaimodels/
+__pycache__/
+*.pyc
+movers_pairlist.json
+NostalgiaForInfinity/
+files.zip
+user_data/config.json
+config_claude_bot.json
