@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -55,11 +56,10 @@ def duration_str(seconds):
 
 def build_report():
     token = ft_login()
-    trades = ft_get("status", token)
-    profit = ft_get("profit", token)
-    config = ft_get("show_config", token)
-    whitelist = ft_get("whitelist", token)
-    perf = ft_get("performance", token)
+    endpoints = ["status", "profit", "show_config", "whitelist", "performance"]
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        results = list(pool.map(lambda ep: ft_get(ep, token), endpoints))
+    trades, profit, config, whitelist, perf = results
 
     now = datetime.now(timezone.utc).strftime("%H:%M UTC")
     mode = "DRY RUN" if config.get("dry_run") else "LIVE"

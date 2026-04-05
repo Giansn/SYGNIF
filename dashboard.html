@@ -169,17 +169,17 @@ async function refresh(){
 
     const wallet=cfg.dry_run?(cfg.dry_run_wallet||100):0;
     const totalPnl=profit.profit_all_coin||0;
-    document.getElementById('bal').textContent=(wallet+totalPnl).toFixed(2);
+    document.getElementById('bal').textContent='$'+(wallet+totalPnl).toFixed(2);
     document.getElementById('bal').className=`stat-val ${pc(totalPnl)}`;
-    document.getElementById('bal-s').textContent=`${wallet} base ${fmt(totalPnl)}`;
+    document.getElementById('bal-s').textContent=`$${wallet} base ${fmt(totalPnl)}`;
 
     const openPnl=trades.reduce((s,t)=>s+(t.profit_abs||0),0);
-    document.getElementById('pnl').textContent=fmt(openPnl);
+    document.getElementById('pnl').textContent='$'+fmt(openPnl);
     document.getElementById('pnl').className=`stat-val ${pc(openPnl)}`;
     document.getElementById('pnl-s').textContent=`${trades.length} positions`;
 
     const closedPnl=profit.profit_closed_coin||0;
-    document.getElementById('cpnl').textContent=fmt(closedPnl);
+    document.getElementById('cpnl').textContent='$'+fmt(closedPnl);
     document.getElementById('cpnl').className=`stat-val ${pc(closedPnl)}`;
     document.getElementById('cpnl-s').textContent=`${profit.closed_trade_count||0} closed`;
 
@@ -271,7 +271,7 @@ async function refresh(){
     document.getElementById('err').style.display='none';
   }catch(e){document.getElementById('err').textContent=`API Error: ${e.message}`;document.getElementById('err').style.display='block';tk='';}
 }
-refresh();setInterval(refresh,10000);
+let _refreshing=false;async function tick(){if(_refreshing)return;_refreshing=true;try{await refresh();}finally{_refreshing=false;}}tick();setInterval(tick,500);
 </script>
 </body>
 </html>

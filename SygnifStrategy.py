@@ -16,7 +16,9 @@ import logging
 import os
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 import feedparser
@@ -45,7 +47,9 @@ class SygnifSentiment:
         self.model = "claude-haiku-4-5-20251001"
         self.base_url = "https://api.anthropic.com/v1/messages"
         self._cache: dict[str, tuple[float, float]] = {}
+        self._news_cache: dict[str, tuple[float, list[str]]] = {}
         self.cache_ttl = 900  # 15 min cache (shorter for 5m TF)
+        self.news_cache_ttl = 600  # 10 min news cache
         self.daily_calls = 0
         self.daily_limit = 50  # Higher limit for 5m TF
         self._last_reset = datetime.now().date()
@@ -63,24 +67,22 @@ class SygnifSentiment:
                 return score
         return None
 
-    def fetch_news(self, token: str, max_items: int = 5) -> list[str]:
-        """Fetch recent crypto news from free RSS feeds."""
-        feeds = [
-            f"https://cryptopanic.com/news/{token.lower()}/rss/",
-            "https://cointelegraph.com/rss",
-            "https://www.coindesk.com/arc/outboundfeeds/rss/",
-        ]
-        headlines = []
-        for feed_url in feeds:
-            try:
-                feed = feedparser.parse(feed_url)
-                for entry in feed.entries[:3]:
-                    title = entry.get("title", "")
-                    if token.upper() in title.upper() or len(headlines) < 2:
-                        headlines.append(title)
-            except Exception as e:
-                logger.warning(f"Feed error {feed_url}: {e}")
+    def _fetch_rss(self, feed_url: str, token: str) -> list[str]:
+        """Fetch headlines from a single RSS feed."""
+        try:
+            feed = feedparser.parse(feed_url)
+            titles = []
+            for entry in feed.entries[:3]:
+                title = entry.get("title", "")
+                if token.upper() in title.upper() or len(titles) < 2:
+                    titles.append(title)
+            return titles
+        except Exception as e:
+            logger.warning(f"Feed error {feed_url}: {e}")
+            return []
 
+    def _fetch_gdelt(self, token: str) -> list[str]:
+        """Fetch headlines from GDELT API."""
         try:
             gdelt_url = (
                 f"https://api.gdeltproject.org/api/v2/doc/doc"
@@ -88,13 +90,34 @@ class SygnifSentiment:
             )
             resp = requests.get(gdelt_url, timeout=5)
             if resp.ok:
-                data = resp.json()
-                for art in data.get("articles", [])[:3]:
-                    headlines.append(art.get("title", ""))
+                return [art.get("title", "") for art in resp.json().get("articles", [])[:3]]
         except Exception:
             pass
+        return []
 
-        return headlines[:max_items]
+    def fetch_news(self, token: str, max_items: int = 5) -> list[str]:
+        """Fetch recent crypto news from free RSS feeds (parallel, cached)."""
+        if token in self._news_cache:
+            ts, cached_headlines = self._news_cache[token]
+            if time.time() - ts < self.news_cache_ttl:
+                return cached_headlines
+
+        feeds = [
+            f"https://cryptopanic.com/news/{token.lower()}/rss/",
+            "https://cointelegraph.com/rss",
+            "https://www.coindesk.com/arc/outboundfeeds/rss/",
+        ]
+        headlines = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            rss_futures = {pool.submit(self._fetch_rss, url, token): url for url in feeds}
+            gdelt_future = pool.submit(self._fetch_gdelt, token)
+            for future in as_completed(rss_futures):
+                headlines.extend(future.result())
+            headlines.extend(gdelt_future.result())
+
+        result = headlines[:max_items]
+        self._news_cache[token] = (time.time(), result)
+        return result
 
     def analyze_sentiment(
         self,
@@ -238,41 +261,17 @@ class SygnifStrategy(IStrategy):
         if now - self._movers_last_update < self._movers_refresh_secs and self._movers_pairs:
             return
         try:
-            resp = requests.get(
-                "https://api.bybit.com/v5/market/tickers?category=spot", timeout=10
-            )
-            if not resp.ok:
+            movers_file = Path(__file__).resolve().parent.parent.parent / "movers_pairlist.json"
+            if not movers_file.exists():
+                logger.warning(f"Movers file not found: {movers_file}")
                 return
-            tickers = resp.json().get("result", {}).get("list", [])
-
-            exclude_bases = {
-                "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDT",
-                "USDP", "USDS", "XUSD", "USD1", "RLUSD", "AUSD", "EURI",
-                "XAUT", "PAXG",
-            }
-            pairs_data = []
-            for t in tickers:
-                sym = t.get("symbol", "")
-                if not sym.endswith("USDT"):
-                    continue
-                base = sym.replace("USDT", "")
-                if base in exclude_bases or any(p in base for p in ("2L", "3L", "5L", "2S", "3S", "5S")):
-                    continue
-                try:
-                    change = float(t.get("price24hPcnt", 0)) * 100
-                    turnover = float(t.get("turnover24h", 0))
-                except (ValueError, TypeError):
-                    continue
-                if turnover < 500_000:
-                    continue
-                pairs_data.append({"pair": f"{base}/USDT", "change": change})
-
-            sorted_pairs = sorted(pairs_data, key=lambda x: x["change"], reverse=True)
-            gainers = [p["pair"] for p in sorted_pairs[:3]]
-            losers = [p["pair"] for p in sorted_pairs[-3:]]
-            self._movers_pairs = list(dict.fromkeys(gainers + losers))
-            self._movers_last_update = now
-            logger.info(f"Movers updated: gainers={gainers}, losers={losers}")
+            data = json.loads(movers_file.read_text())
+            pairs = data.get("exchange", {}).get("pair_whitelist", [])
+            if pairs:
+                self._movers_pairs = pairs
+                self._movers_last_update = now
+                meta = data.get("_meta", {})
+                logger.info(f"Movers loaded from file: gainers={meta.get('gainers', [])}, losers={meta.get('losers', [])}")
         except Exception as e:
             logger.warning(f"Movers refresh failed: {e}")
 
