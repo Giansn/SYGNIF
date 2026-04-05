@@ -247,8 +247,23 @@ class SygnifStrategy(IStrategy):
 
     # Movers refresh
     _movers_pairs: list[str] = []
+    _movers_gainers: list[str] = []
+    _movers_losers: list[str] = []
     _movers_last_update: float = 0.0
     _movers_refresh_secs: int = 14400  # 4h
+
+    # Mover slot management (NFI-style tag-based routing)
+    mover_max_slots_gainer = 1
+    mover_max_slots_loser = 1
+    mover_stake_multiplier = 0.5  # Half stake for higher-risk mover trades
+    mover_tags_gainer = ["mover_gainer"]
+    mover_tags_loser = ["mover_loser"]
+
+    # Mover exit thresholds
+    mover_gainer_tp_min = 0.015      # +1.5% minimum before considering exit
+    mover_gainer_sl = 0.07           # -7% stoploss (tighter — momentum can reverse fast)
+    mover_loser_tp_min = 0.01        # +1% quick scalp
+    mover_loser_sl = 0.05            # -5% stoploss (tight — losers can keep losing)
 
     # Claude layer
     claude = SygnifSentiment()
@@ -261,7 +276,7 @@ class SygnifStrategy(IStrategy):
         if now - self._movers_last_update < self._movers_refresh_secs and self._movers_pairs:
             return
         try:
-            movers_file = Path(__file__).resolve().parent.parent.parent / "movers_pairlist.json"
+            movers_file = Path(__file__).resolve().parent.parent / "movers_pairlist.json"
             if not movers_file.exists():
                 logger.warning(f"Movers file not found: {movers_file}")
                 return
@@ -269,9 +284,11 @@ class SygnifStrategy(IStrategy):
             pairs = data.get("exchange", {}).get("pair_whitelist", [])
             if pairs:
                 self._movers_pairs = pairs
-                self._movers_last_update = now
                 meta = data.get("_meta", {})
-                logger.info(f"Movers loaded from file: gainers={meta.get('gainers', [])}, losers={meta.get('losers', [])}")
+                self._movers_gainers = meta.get("gainers", [])
+                self._movers_losers = meta.get("losers", [])
+                self._movers_last_update = now
+                logger.info(f"Movers loaded from file: gainers={self._movers_gainers}, losers={self._movers_losers}")
         except Exception as e:
             logger.warning(f"Movers refresh failed: {e}")
 
@@ -657,7 +674,85 @@ class SygnifStrategy(IStrategy):
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
 
+        # --- Mover entries (last candle only, live efficiency) ---
+        if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
+            pair = metadata.get("pair", "")
+            self._refresh_movers()
+            last = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) > 1 else last
+
+            # Gainer: momentum pullback entry
+            if pair in self._movers_gainers:
+                if self._count_open_mover_trades(self.mover_tags_gainer) < self.mover_max_slots_gainer:
+                    if self._check_gainer_entry(last, prev):
+                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = "mover_gainer"
+                        logger.info(f"Mover gainer entry signal: {pair}")
+
+            # Loser: mean-reversion bounce entry
+            if pair in self._movers_losers and not df.iloc[-1].get("enter_long", 0):
+                if self._count_open_mover_trades(self.mover_tags_loser) < self.mover_max_slots_loser:
+                    if self._check_loser_entry(last, prev):
+                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = "mover_loser"
+                        logger.info(f"Mover loser entry signal: {pair}")
+
         return df
+
+    # -------------------------------------------------------------------------
+    # Gainer entry: buy the dip in a strong uptrend (NFI quick_mode pattern)
+    # -------------------------------------------------------------------------
+    def _check_gainer_entry(self, last, prev) -> bool:
+        rsi3 = last.get("RSI_3", 50)
+        rsi14 = last.get("RSI_14", 50)
+        rsi14_1h = last.get("RSI_14_1h", 50)
+        close = last.get("close", 0)
+        ema20 = last.get("EMA_20", 0)
+        bbl = last.get("BBL_20_2.0", 0)
+
+        # Pullback on 5m (RSI_3 dip) while higher TFs still bullish
+        pullback = rsi3 < 35
+        # 1h trend still intact
+        trend_ok = rsi14_1h > 50
+        # Not already overbought on 5m
+        not_ob = rsi14 < 65
+        # Price above EMA20 (uptrend structure)
+        above_ema = close > ema20 if ema20 else False
+        # Volume confirmation
+        vol_ok = last.get("volume", 0) > last.get("volume_sma_20", 0) * 0.8
+
+        # NFI-style multi-condition AND
+        return pullback and trend_ok and not_ob and above_ema and vol_ok
+
+    # -------------------------------------------------------------------------
+    # Loser entry: mean-reversion at oversold extremes (NFI grind_mode pattern)
+    # -------------------------------------------------------------------------
+    def _check_loser_entry(self, last, prev) -> bool:
+        rsi3 = last.get("RSI_3", 50)
+        rsi14 = last.get("RSI_14", 50)
+        rsi3_prev = prev.get("RSI_3", 50)
+        close = last.get("close", 0)
+        bbl = last.get("BBL_20_2.0", 0)
+        cmf = last.get("CMF_20", 0)
+        stochrsi = last.get("STOCHRSIk_14_14_3_3", 50)
+        willr = last.get("WILLR_14", -50)
+
+        # Deep oversold on RSI_14
+        oversold = rsi14 < 30
+        # RSI_3 turning up (bounce starting)
+        rsi3_turning = rsi3 > rsi3_prev and rsi3 < 40
+        # Near or below Bollinger lower band
+        near_bbl = close < bbl * 1.01 if bbl else False
+        # StochRSI in oversold zone
+        stoch_os = stochrsi < 20
+        # Williams %R extreme
+        willr_os = willr < -85
+        # CMF not deeply negative (some buying pressure returning)
+        cmf_ok = cmf > -0.25
+
+        # Need at least: oversold + bounce signal + 2 confirmations
+        confirmations = sum([near_bbl, stoch_os, willr_os, cmf_ok])
+        return oversold and rsi3_turning and confirmations >= 2
 
     # -------------------------------------------------------------------------
     # Populate exit trend (basic — main exits via custom_exit)
@@ -665,6 +760,29 @@ class SygnifStrategy(IStrategy):
     def populate_exit_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
         df.loc[:, "exit_long"] = 0
         return df
+
+    # -------------------------------------------------------------------------
+    # Custom stake — reduced size for mover trades (NFI rebuy_mode pattern)
+    # -------------------------------------------------------------------------
+    def custom_stake_amount(
+        self, pair: str, current_time: datetime, current_rate: float,
+        proposed_stake: float, min_stake: float | None, max_stake: float,
+        leverage: float, entry_tag: str | None, side: str, **kwargs
+    ) -> float:
+        if entry_tag and entry_tag in (self.mover_tags_gainer + self.mover_tags_loser):
+            reduced = proposed_stake * self.mover_stake_multiplier
+            if min_stake and reduced < min_stake:
+                return min_stake
+            logger.info(f"Mover stake for {pair}: {reduced:.2f} ({self.mover_stake_multiplier}x)")
+            return reduced
+        return proposed_stake
+
+    # -------------------------------------------------------------------------
+    # Count open mover trades by tag
+    # -------------------------------------------------------------------------
+    def _count_open_mover_trades(self, tags: list[str]) -> int:
+        trades = Trade.get_trades_proxy(is_open=True)
+        return sum(1 for t in trades if t.enter_tag in tags)
 
     # -------------------------------------------------------------------------
     # Custom exit — NFI-style profit-tiered exits
@@ -683,6 +801,15 @@ class SygnifStrategy(IStrategy):
         filled_entries = trade.select_filled_orders(trade.entry_side)
         if not filled_entries:
             return None
+
+        # --- Mover-specific exits (tag-based routing, NFI pattern) ---
+        enter_tag = trade.enter_tag or ""
+
+        if enter_tag == "mover_gainer":
+            return self._exit_mover_gainer(last, prev, current_profit)
+
+        if enter_tag == "mover_loser":
+            return self._exit_mover_loser(last, prev, current_profit)
 
         # --- Exit Signal 1: Extreme overbought (NFI pattern) ---
         rsi14 = last.get("RSI_14", 50)
@@ -766,3 +893,69 @@ class SygnifStrategy(IStrategy):
             return 44.0 + offset
         else:
             return 42.0 + offset
+
+    # -------------------------------------------------------------------------
+    # Mover gainer exit — ride momentum, exit on exhaustion
+    # -------------------------------------------------------------------------
+    def _exit_mover_gainer(self, last, prev, current_profit: float):
+        rsi14 = last.get("RSI_14", 50)
+        rsi3 = last.get("RSI_3", 50)
+        rsi14_1h = last.get("RSI_14_1h", 50)
+
+        # Hard stoploss
+        if current_profit < -self.mover_gainer_sl:
+            return "exit_mover_gainer_sl"
+
+        # Momentum exhaustion: RSI was high, now dropping while in profit
+        if current_profit > self.mover_gainer_tp_min:
+            # RSI_14 declining from overbought
+            if rsi14 < 60 and prev.get("RSI_14", 50) > 65:
+                return "exit_mover_gainer_momentum_fade"
+            # Extreme overbought — take profit
+            if rsi14 > 80:
+                return "exit_mover_gainer_overbought"
+            # Multi-TF overbought
+            if rsi14 > 70 and rsi14_1h > 70:
+                return "exit_mover_gainer_multi_tf_ob"
+
+        # Bigger profit — wider trailing via RSI
+        if current_profit > 0.05:
+            if rsi3 < 20:
+                return "exit_mover_gainer_trail_5pct"
+        if current_profit > 0.10:
+            if rsi14 < 50:
+                return "exit_mover_gainer_trail_10pct"
+
+        return None
+
+    # -------------------------------------------------------------------------
+    # Mover loser exit — quick scalp on bounce, tight stoploss
+    # -------------------------------------------------------------------------
+    def _exit_mover_loser(self, last, prev, current_profit: float):
+        rsi14 = last.get("RSI_14", 50)
+        rsi3 = last.get("RSI_3", 50)
+
+        # Hard stoploss — tight, losers can keep losing
+        if current_profit < -self.mover_loser_sl:
+            return "exit_mover_loser_sl"
+
+        # Quick profit-take on bounce — don't get greedy with losers
+        if current_profit > self.mover_loser_tp_min:
+            # RSI recovering from oversold to neutral — take the bounce
+            if rsi14 > 45:
+                return "exit_mover_loser_bounce"
+            # RSI_3 spike — short-term momentum exhaustion
+            if rsi3 > 80:
+                return "exit_mover_loser_rsi3_spike"
+
+        # Moderate profit — secure it
+        if current_profit > 0.02:
+            if rsi14 > 55:
+                return "exit_mover_loser_secure"
+
+        # Larger bounce — wider target
+        if current_profit > 0.05:
+            if rsi3 < 30:
+                return "exit_mover_loser_trail_5pct"
+
+        return None

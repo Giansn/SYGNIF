@@ -18,7 +18,7 @@ EXCLUDE_STABLES = {
 }
 EXCLUDE_PATTERNS = {"2L", "3L", "5L", "2S", "3S", "5S"}
 
-OUTPUT_PATH = Path(__file__).parent / "movers_pairlist.json"
+OUTPUT_PATH = Path(__file__).parent / "user_data" / "movers_pairlist.json"
 
 
 def fetch_tickers():
