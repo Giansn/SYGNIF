@@ -16,3 +16,17 @@ files.zip
 user_data/config.json
 config_claude_bot.json
 .gitnexus
+.claude/
+movers_update.log
+user_data/movers_pairlist_futures.json
+user_data_futures/
+
+# trade_overseer
+trade_overseer/.env
+trade_overseer/__pycache__/
+trade_overseer/data/state.json
+
+# finance_agent
+finance_agent/.env
+finance_agent/__pycache__/
+finance_agent/nfi_update.log

@@ -1,0 +1,17 @@
+[Unit]
+Description=Sygnif Trade Overseer (Plutus-3B)
+After=docker.service ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trade_overseer
+EnvironmentFile=/home/ubuntu/trade_overseer/.env
+ExecStart=/usr/bin/python3 /home/ubuntu/trade_overseer/overseer.py
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
