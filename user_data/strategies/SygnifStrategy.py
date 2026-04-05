@@ -221,9 +221,9 @@ class SygnifStrategy(IStrategy):
     can_short = False  # Overridden to True in __init__ when futures mode
 
     # --- Core settings (NFI-style) ---
-    stoploss = -0.99  # Disabled — managed internally
+    stoploss = -0.20  # Base SL (overridden per-trade by custom_stoploss)
     trailing_stop = False
-    use_custom_stoploss = False
+    use_custom_stoploss = True
 
     timeframe = "5m"
     info_timeframes = ["15m", "1h", "4h", "1d"]
@@ -277,6 +277,10 @@ class SygnifStrategy(IStrategy):
     mover_loser_tp_min = 0.01        # +1% quick scalp
     mover_loser_sl = 0.05            # -5% stoploss (tight — losers can keep losing)
 
+    # Doom cooldown — per-pair lockout after stoploss hit
+    _doom_cooldown: dict[str, float] = {}
+    doom_cooldown_secs = 14400  # 4h
+
     # Claude layer
     claude = SygnifSentiment()
 
@@ -295,17 +299,33 @@ class SygnifStrategy(IStrategy):
         if now - self._movers_last_update < self._movers_refresh_secs and self._movers_pairs:
             return
         try:
-            movers_file = Path(__file__).resolve().parent.parent / "movers_pairlist.json"
+            is_futures = self.config.get("trading_mode", "") == "futures"
+            base_dir = Path(__file__).resolve().parent.parent
+            # Prefer futures-specific file when in futures mode
+            if is_futures:
+                movers_file = base_dir / "movers_pairlist_futures.json"
+                if not movers_file.exists():
+                    movers_file = base_dir / "movers_pairlist.json"
+            else:
+                movers_file = base_dir / "movers_pairlist.json"
             if not movers_file.exists():
                 logger.warning(f"Movers file not found: {movers_file}")
                 return
             data = json.loads(movers_file.read_text())
             pairs = data.get("exchange", {}).get("pair_whitelist", [])
             if pairs:
-                self._movers_pairs = pairs
                 meta = data.get("_meta", {})
-                self._movers_gainers = meta.get("gainers", [])
-                self._movers_losers = meta.get("losers", [])
+                gainers = meta.get("gainers", [])
+                losers = meta.get("losers", [])
+                # Normalize pair format for futures (XXX/USDT -> XXX/USDT:USDT)
+                if is_futures:
+                    settle = self.config.get("stake_currency", "USDT")
+                    pairs = [f"{p}:{settle}" if ":" not in p else p for p in pairs]
+                    gainers = [f"{p}:{settle}" if ":" not in p else p for p in gainers]
+                    losers = [f"{p}:{settle}" if ":" not in p else p for p in losers]
+                self._movers_pairs = pairs
+                self._movers_gainers = gainers
+                self._movers_losers = losers
                 self._movers_last_update = now
                 logger.info(f"Movers loaded from file: gainers={self._movers_gainers}, losers={self._movers_losers}")
         except Exception as e:
@@ -501,6 +521,7 @@ class SygnifStrategy(IStrategy):
         df["close_min_12"] = df["close"].rolling(12).min()
         df["close_min_48"] = df["close"].rolling(48).min()
         df["volume_sma_20"] = pta.sma(df["volume"], length=20)
+        df["ATR_14"] = pta.atr(df["high"], df["low"], df["close"], length=14)
         df["num_empty_288"] = (df["volume"] <= 0).rolling(window=288, min_periods=288).sum()
 
         # --- Handle NaN for merged columns ---
@@ -673,13 +694,50 @@ class SygnifStrategy(IStrategy):
         enter_tag = entry_tag or ""
         # 2x for movers (higher risk)
         if enter_tag in (self.mover_tags_gainer + self.mover_tags_loser):
-            return min(self.futures_mode_leverage_mover, max_leverage)
+            tier_lev = self.futures_mode_leverage_mover
         # 5x for majors (BTC, ETH, SOL, XRP)
-        base_pair = pair.split(":")[0] if ":" in pair else pair
-        if base_pair in self.major_pairs:
-            return min(self.futures_mode_leverage_majors, max_leverage)
-        # 3x default
-        return min(self.futures_mode_leverage, max_leverage)
+        elif (pair.split(":")[0] if ":" in pair else pair) in self.major_pairs:
+            tier_lev = self.futures_mode_leverage_majors
+        else:
+            # 3x default
+            tier_lev = self.futures_mode_leverage
+
+        # Volatility cap: high ATR% → lower leverage
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            if len(df) >= 14 and "ATR_14" in df.columns:
+                atr_pct = (df["ATR_14"].iloc[-1] / df["close"].iloc[-1]) * 100
+                if atr_pct > 3.0:
+                    tier_lev = min(tier_lev, 2.0)
+                elif atr_pct > 2.0:
+                    tier_lev = min(tier_lev, 3.0)
+        except Exception:
+            pass
+
+        return min(tier_lev, max_leverage)
+
+    # -------------------------------------------------------------------------
+    # Custom stoploss — leverage-aware, placed on exchange
+    # -------------------------------------------------------------------------
+    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
+                        current_rate: float, current_profit: float,
+                        after_fill: bool, **kwargs) -> float:
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        leverage = trade.leverage or 1.0
+        enter_tag = trade.enter_tag or ""
+
+        # Mover trades get tighter SL
+        if enter_tag in self.mover_tags_gainer:
+            sl = self.mover_gainer_sl  # 0.07
+        elif enter_tag in self.mover_tags_loser:
+            sl = self.mover_loser_sl   # 0.05
+        else:
+            sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot  # 0.20
+
+        # For futures: SL is price-based, divide by leverage
+        if is_futures:
+            return -(sl / leverage)
+        return -sl
 
     # -------------------------------------------------------------------------
     # Calculate vectorized TA score (enhanced with NFI indicators)
@@ -918,6 +976,24 @@ class SygnifStrategy(IStrategy):
         return sum(1 for t in trades if t.enter_tag in tags)
 
     # -------------------------------------------------------------------------
+    # Doom cooldown — block re-entry after stoploss hit
+    # -------------------------------------------------------------------------
+    def confirm_trade_entry(self, pair, order_type, amount, rate,
+                            time_in_force, current_time, entry_tag, side, **kwargs):
+        cooldown_since = self._doom_cooldown.get(pair, 0)
+        if time.time() - cooldown_since < self.doom_cooldown_secs:
+            logger.info(f"Doom cooldown active for {pair}, skipping entry")
+            return False
+        return True
+
+    def confirm_trade_exit(self, pair, trade, order_type, amount, rate,
+                           time_in_force, exit_reason, current_time, **kwargs):
+        if "stoploss" in exit_reason.lower():
+            self._doom_cooldown[pair] = time.time()
+            logger.info(f"Doom cooldown set for {pair} after {exit_reason}")
+        return True
+
+    # -------------------------------------------------------------------------
     # Custom exit — NFI-style profit-tiered exits
     # -------------------------------------------------------------------------
     def custom_exit(
@@ -986,23 +1062,14 @@ class SygnifStrategy(IStrategy):
         if willr is not None and willr > -5 and current_profit > 0.02:
             return "exit_willr_overbought"
 
-        # --- Doom stoploss (leverage-aware, NFI pattern) ---
-        entry_cost = filled_entries[0].cost
-        profit_stake = trade.calc_profit(rate=current_rate) if hasattr(trade, 'calc_profit') else (current_rate - trade.open_rate) / trade.open_rate * entry_cost
-        is_futures = self.config.get("trading_mode", "") == "futures"
-        doom_threshold = (self.stop_threshold_doom_futures / leverage) if is_futures else self.stop_threshold_doom_spot
-        if isinstance(profit_stake, (int, float)) and profit_stake < -(entry_cost * doom_threshold):
-            return "exit_stoploss_doom"
+        # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
-        # --- Normal stoploss with conditions (NFI stoploss_u_e pattern) ---
-        if (
-            current_profit < -self.stop_threshold_normal
-            and last["close"] < last.get("EMA_200", float("inf"))
-            and last.get("CMF_20", 0) < 0
-            and rsi14 > prev.get("RSI_14", 50)
-            and rsi14 > (rsi14_1h + 20)
-        ):
-            return "exit_stoploss_conditional"
+        # --- Soft stoploss — fires before exchange SL, needs fewer conditions ---
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        soft_sl = -(self.stop_threshold_doom_futures * 0.6 / leverage) if is_futures else -0.12
+        if current_profit < soft_sl:
+            if last["close"] < last.get("EMA_200", float("inf")) or rsi14 > prev.get("RSI_14", 50):
+                return "exit_stoploss_conditional"
 
         return None
 
@@ -1046,23 +1113,14 @@ class SygnifStrategy(IStrategy):
         if willr is not None and willr < -95 and current_profit > 0.02:
             return "exit_short_willr_oversold"
 
-        # --- Doom stoploss (leverage-aware) ---
-        entry_cost = filled_entries[0].cost
-        profit_stake = trade.calc_profit(rate=current_rate) if hasattr(trade, 'calc_profit') else (trade.open_rate - current_rate) / trade.open_rate * entry_cost
-        is_futures = self.config.get("trading_mode", "") == "futures"
-        doom_threshold = (self.stop_threshold_doom_futures / leverage) if is_futures else self.stop_threshold_doom_spot
-        if isinstance(profit_stake, (int, float)) and profit_stake < -(entry_cost * doom_threshold):
-            return "exit_short_stoploss_doom"
+        # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
-        # --- Normal stoploss with conditions for shorts (inverted u_e) ---
-        if (
-            current_profit < -self.stop_threshold_normal
-            and last["close"] > last.get("EMA_200", 0)
-            and last.get("CMF_20", 0) > 0
-            and rsi14 < prev.get("RSI_14", 50)
-            and rsi14 < (rsi14_1h - 20)
-        ):
-            return "exit_short_stoploss_conditional"
+        # --- Soft stoploss for shorts — fires before exchange SL ---
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        soft_sl = -(self.stop_threshold_doom_futures * 0.6 / leverage) if is_futures else -0.12
+        if current_profit < soft_sl:
+            if last["close"] > last.get("EMA_200", 0) or rsi14 < prev.get("RSI_14", 50):
+                return "exit_short_stoploss_conditional"
 
         return None
 
@@ -1135,9 +1193,7 @@ class SygnifStrategy(IStrategy):
         rsi3 = last.get("RSI_3", 50)
         rsi14_1h = last.get("RSI_14_1h", 50)
 
-        # Hard stoploss
-        if current_profit < -self.mover_gainer_sl:
-            return "exit_mover_gainer_sl"
+        # Hard stoploss now handled by custom_stoploss + stoploss_on_exchange
 
         # Momentum exhaustion: RSI was high, now dropping while in profit
         if current_profit > self.mover_gainer_tp_min:
@@ -1168,9 +1224,7 @@ class SygnifStrategy(IStrategy):
         rsi14 = last.get("RSI_14", 50)
         rsi3 = last.get("RSI_3", 50)
 
-        # Hard stoploss — tight, losers can keep losing
-        if current_profit < -self.mover_loser_sl:
-            return "exit_mover_loser_sl"
+        # Hard stoploss now handled by custom_stoploss + stoploss_on_exchange
 
         # Quick profit-take on bounce — don't get greedy with losers
         if current_profit > self.mover_loser_tp_min:

@@ -16,6 +16,7 @@ services:
     command:
       - |
         python3 /freqtrade/user_data/status_patch.py 2>/dev/null || true
+        python3 /freqtrade/user_data/notification_patch.py 2>/dev/null || true
         exec freqtrade trade \
           --logfile /freqtrade/user_data/logs/freqtrade.log \
           --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite \
@@ -38,6 +39,7 @@ services:
     command:
       - |
         python3 /freqtrade/user_data/status_patch.py 2>/dev/null || true
+        python3 /freqtrade/user_data/notification_patch.py 2>/dev/null || true
         exec freqtrade trade \
           --logfile /freqtrade/user_data/logs/freqtrade-futures.log \
           --db-url sqlite:////freqtrade/user_data/tradesv3-futures.sqlite \

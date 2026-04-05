@@ -40,8 +40,8 @@ case "$1" in
   down)
     read spot_trades spot_mode <<< $(get_bot_info 8080)
     read fut_trades fut_mode <<< $(get_bot_info 8081)
-    send_tg "$SPOT_TOKEN" "⛔ <b>Spot down.</b> ${spot_trades} open trades. [${spot_mode}]"
-    send_tg "$FUTURES_TOKEN" "⛔ <b>Futures down.</b> ${fut_trades} open trades. [${fut_mode}]"
+    send_tg "$SPOT_TOKEN" "⛔ <b>System down.</b> ${spot_trades} open trades. [${spot_mode}]"
+    send_tg "$FUTURES_TOKEN" "⛔ <b>System down.</b> ${fut_trades} open trades. [${fut_mode}]"
     ;;
   up)
     # Wait for APIs to be ready
@@ -52,7 +52,7 @@ case "$1" in
     done
     read spot_trades spot_mode <<< $(get_bot_info 8080)
     read fut_trades fut_mode <<< $(get_bot_info 8081)
-    send_tg "$SPOT_TOKEN" "✅ <b>Spot up.</b> ${spot_trades} open trades. Pairs updated. [${spot_mode}]"
-    send_tg "$FUTURES_TOKEN" "✅ <b>Futures up.</b> ${fut_trades} open trades. Pairs updated. [${fut_mode}]"
+    send_tg "$SPOT_TOKEN" "✅ <b>System up.</b> ${spot_trades} trades monitored. [${spot_mode}]"
+    send_tg "$FUTURES_TOKEN" "✅ <b>System up.</b> ${fut_trades} trades monitored. [${fut_mode}]"
     ;;
 esac

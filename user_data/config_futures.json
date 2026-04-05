@@ -60,6 +60,7 @@
         "force_entry": "market",
         "stoploss": "market",
         "stoploss_on_exchange": true,
+        "stoploss_on_exchange_interval": 60,
         "stoploss_on_exchange_limit_ratio": 0.99
     },
     "order_time_in_force": {
@@ -68,6 +69,20 @@
     },
 
     "liquidation_buffer_ratio": 0.05,
+
+    "protections": [
+        {
+            "method": "StoplossGuard",
+            "lookback_period_candles": 12,
+            "trade_limit": 2,
+            "stop_duration_candles": 48,
+            "only_per_pair": true
+        },
+        {
+            "method": "CooldownPeriod",
+            "stop_duration_candles": 5
+        }
+    ],
 
     "pairlists": [
         {
@@ -100,7 +115,7 @@
             "warning": "on",
             "startup": "on",
             "entry": "on",
-            "exit": "on",
+            "exit": "off",
             "entry_fill": "on",
             "exit_fill": "on",
             "entry_cancel": "on",
