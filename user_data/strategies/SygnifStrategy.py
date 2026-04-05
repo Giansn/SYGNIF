@@ -417,11 +417,11 @@ class SygnifStrategy(IStrategy):
     # Populate indicators
     # -------------------------------------------------------------------------
     def populate_indicators(self, df: DataFrame, metadata: dict) -> DataFrame:
-        if len(df) < 20:
+        if len(df) < self.startup_candle_count:
             return df
         try:
             return self._populate_indicators_inner(df, metadata)
-        except ValueError as e:
+        except (ValueError, KeyError) as e:
             logger.warning(f"[{metadata.get('pair')}] Skipping indicators: {e}")
             return df
 
@@ -817,6 +817,9 @@ class SygnifStrategy(IStrategy):
     def populate_entry_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
         df.loc[:, "enter_long"] = 0
         df.loc[:, "enter_tag"] = ""
+        if "RSI_14" not in df.columns:
+            df.loc[:, "enter_short"] = 0
+            return df
 
         # Global protections
         prot = df.get("protections_long_global", pd.Series(True, index=df.index))
