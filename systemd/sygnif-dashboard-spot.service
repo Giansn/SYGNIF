@@ -1,0 +1,14 @@
+[Unit]
+Description=Sygnif Spot Dashboard
+After=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/xrp_claude_bot
+ExecStart=/usr/bin/python3 /home/ubuntu/xrp_claude_bot/dashboard_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

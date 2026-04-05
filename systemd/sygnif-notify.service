@@ -1,0 +1,13 @@
+[Unit]
+Description=Sygnif Telegram reboot notifier
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/home/ubuntu/xrp_claude_bot/notify.sh up
+ExecStop=/home/ubuntu/xrp_claude_bot/notify.sh down
+
+[Install]
+WantedBy=multi-user.target
