@@ -358,7 +358,8 @@ class SygnifStrategy(IStrategy):
     def btc_informative_indicators(self, btc_df: DataFrame, timeframe: str) -> DataFrame:
         btc_df["btc_RSI_3"] = pta.rsi(btc_df["close"], length=3)
         btc_df["btc_RSI_14"] = pta.rsi(btc_df["close"], length=14)
-        btc_df["btc_EMA_200"] = pta.ema(btc_df["close"], length=200, fillna=False)
+        _r = pta.ema(btc_df["close"], length=200)
+        btc_df["btc_EMA_200"] = _r if _r is not None else np.nan
         btc_df["btc_change_pct"] = (btc_df["close"] - btc_df["open"]) / btc_df["open"] * 100.0
         # Rename to avoid collision
         ignore_columns = ["date", "btc_RSI_3", "btc_RSI_14", "btc_EMA_200", "btc_change_pct"]
@@ -377,7 +378,7 @@ class SygnifStrategy(IStrategy):
         df["RSI_3_change_pct"] = df["RSI_3"].pct_change() * 100.0
         # EMA
         df["EMA_12"] = pta.ema(df["close"], length=12)
-        df["EMA_200"] = pta.ema(df["close"], length=200, fillna=False)
+        df["EMA_200"] = pta.ema(df["close"], length=200, )
         # BB
         if len(df) >= 20:
             bbands = pta.bbands(df["close"], length=20)
@@ -418,6 +419,13 @@ class SygnifStrategy(IStrategy):
     def populate_indicators(self, df: DataFrame, metadata: dict) -> DataFrame:
         if len(df) < 20:
             return df
+        try:
+            return self._populate_indicators_inner(df, metadata)
+        except ValueError as e:
+            logger.warning(f"[{metadata.get('pair')}] Skipping indicators: {e}")
+            return df
+
+    def _populate_indicators_inner(self, df: DataFrame, metadata: dict) -> DataFrame:
         tik = time.perf_counter()
 
         # --- BTC informative (all timeframes) ---
@@ -458,8 +466,10 @@ class SygnifStrategy(IStrategy):
         df["EMA_20"] = pta.ema(df["close"], length=20)
         df["EMA_26"] = pta.ema(df["close"], length=26)
         df["EMA_50"] = pta.ema(df["close"], length=50)
-        df["EMA_100"] = pta.ema(df["close"], length=100, fillna=False)
-        df["EMA_200"] = pta.ema(df["close"], length=200, fillna=False)
+        _r = pta.ema(df["close"], length=100)
+        df["EMA_100"] = _r if _r is not None else np.nan
+        _r = pta.ema(df["close"], length=200)
+        df["EMA_200"] = _r if _r is not None else np.nan
         # SMA
         df["SMA_9"] = pta.sma(df["close"], length=9)
         df["SMA_16"] = pta.sma(df["close"], length=16)
