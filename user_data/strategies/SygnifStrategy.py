@@ -238,6 +238,13 @@ class SygnifStrategy(IStrategy):
     # Minimal ROI — let custom_exit handle exits
     minimal_roi = {"0": 100}
 
+    # Protections — lock pair after repeated stoploss hits
+    protections = [
+        {"method": "StoplossGuard", "lookback_period_candles": 12,
+         "trade_limit": 2, "stop_duration_candles": 48, "only_per_pair": True},
+        {"method": "CooldownPeriod", "stop_duration_candles": 5},
+    ]
+
     # --- Thresholds ---
     stop_threshold_doom_spot = 0.20     # -20% doom stoploss (spot)
     stop_threshold_doom_futures = 0.20  # -20% doom stoploss (futures, divided by leverage)
