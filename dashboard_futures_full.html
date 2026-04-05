@@ -92,7 +92,7 @@ tr:hover td{background:#ffffff06}
 <div id="err"></div>
 
 <div class="head">
-  <h1><b>SYGNIF SPOT</b></h1>
+  <h1><b>SYGNIFUTURE</b></h1>
   <div>
     <div class="badges"><span id="badge" class="badge b-run">...</span><span id="dry" class="badge b-dry" style="display:none">DRY RUN</span></div>
     <div class="clock" id="clock">--:--:--</div>
@@ -114,10 +114,10 @@ tr:hover td{background:#ffffff06}
   <div class="card desktop-table" style="overflow-x:auto">
     <table>
       <thead><tr>
-        <th>#</th><th>Pair</th><th>Entry</th><th>Current</th><th>P/L %</th><th>P/L</th>
+        <th>#</th><th>Pair</th><th>Side</th><th>Lev</th><th>Entry</th><th>Current</th><th>P/L %</th><th>P/L</th>
         <th>SL / Entry / TP</th><th>Stake</th><th>Dur</th><th>Tag</th>
       </tr></thead>
-      <tbody id="tbody"><tr><td colspan="10" class="empty">Loading...</td></tr></tbody>
+      <tbody id="tbody"><tr><td colspan="12" class="empty">Loading...</td></tr></tbody>
     </table>
   </div>
   <!-- Mobile: Cards -->
@@ -142,7 +142,7 @@ tr:hover td{background:#ffffff06}
 </div>
 
 <script>
-const API=window.location.protocol+'//'+window.location.hostname+':8080';
+const API=window.location.protocol+'//'+window.location.hostname+':8081';
 const U='freqtrader',P='CHANGE_ME';
 let tk='';
 
@@ -195,15 +195,20 @@ async function refresh(){
     // Desktop table
     const tb=document.getElementById('tbody');
     if(!sorted.length){
-      tb.innerHTML='<tr><td colspan="10" class="empty">No open trades</td></tr>';
+      tb.innerHTML='<tr><td colspan="12" class="empty">No open trades</td></tr>';
     }else{
       tb.innerHTML=sorted.map(t=>{
         const e=t.open_rate,c=t.current_rate||e,pct=(t.profit_ratio||0)*100,pnl=t.profit_abs||0;
         const p=prec(e),sl=e*0.80,tp1=e*1.02,tp2=e*1.05,tp3=e*1.10;
         const barW=Math.min(Math.abs(pct)*5,100);
+        const side=t.is_short?'SHORT':'LONG';
+        const sideClass=t.is_short?'dn':'up';
+        const lev=t.leverage||1;
         return`<tr>
           <td>${t.trade_id}</td>
           <td class="pair">${t.pair.replace('/USDT','')}<span>/USDT</span></td>
+          <td><span class="${sideClass}" style="font-weight:700">${side}</span></td>
+          <td>${lev}x</td>
           <td>${e.toFixed(p)}</td>
           <td class="${pc(pct)}" style="font-weight:600">${c.toFixed(p)}</td>
           <td><span class="${pc(pct)}" style="font-weight:700">${pct>=0?'+':''}${pct.toFixed(2)}%</span><div class="bar-wrap"><div class="bar" style="width:${barW}%;background:${pct>=0?'var(--g)':'var(--r)'}"></div></div></td>
@@ -231,9 +236,12 @@ async function refresh(){
         const e=t.open_rate,c=t.current_rate||e,pct=(t.profit_ratio||0)*100,pnl=t.profit_abs||0;
         const p=prec(e),sl=e*0.80,tp1=e*1.02,tp2=e*1.05,tp3=e*1.10;
         const barW=Math.min(Math.abs(pct)*5,100);
+        const side=t.is_short?'SHORT':'LONG';
+        const sideClass=t.is_short?'dn':'up';
+        const lev=t.leverage||1;
         return`<div class="tc">
           <div class="tc-top">
-            <div><div class="tc-pair">${t.pair.replace('/USDT','')}<span> /USDT</span></div><span class="tag">${t.enter_tag||'--'}</span></div>
+            <div><div class="tc-pair">${t.pair.replace('/USDT','')}<span> /USDT</span></div><span class="tag">${t.enter_tag||'--'}</span> <span class="${sideClass}" style="font-weight:700;font-size:12px">${side} ${lev}x</span></div>
             <div><div class="tc-pnl ${pc(pct)}">${pct>=0?'+':''}${pct.toFixed(2)}%</div><div class="tc-pnl-sub">${fmt(pnl)} USDT</div></div>
           </div>
           <div class="tc-grid">
@@ -241,7 +249,7 @@ async function refresh(){
             <div class="tc-item"><div class="tc-item-lbl">Current</div><div class="tc-item-val ${pc(pct)}">${c.toFixed(p)}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Stake</div><div class="tc-item-val">${(t.stake_amount||0).toFixed(2)}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Duration</div><div class="tc-item-val">${calcDur(t.open_date)}</div></div>
-            <div class="tc-item"><div class="tc-item-lbl">Amount</div><div class="tc-item-val">${t.amount?.toFixed(t.amount<1?4:2)||'--'}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Leverage</div><div class="tc-item-val">${lev}x</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Trade #</div><div class="tc-item-val">${t.trade_id}</div></div>
           </div>
           <div class="tc-levels">

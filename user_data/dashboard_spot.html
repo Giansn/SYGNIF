@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sygnif Spot</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,system-ui,sans-serif;font-size:14px;padding:8px}
+h1{font-size:16px;color:#58a6ff;padding:8px 0;border-bottom:1px solid #21262d;margin-bottom:8px}
+.row{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px;flex:1;min-width:140px}
+.card .label{font-size:11px;color:#8b949e;text-transform:uppercase}
+.card .val{font-size:20px;font-weight:700;margin-top:2px}
+.green{color:#3fb950}.red{color:#f85149}.yellow{color:#d29922}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th{text-align:left;font-size:11px;color:#8b949e;padding:6px 8px;border-bottom:1px solid #21262d}
+td{padding:6px 8px;border-bottom:1px solid #161b22;font-size:13px}
+tr:hover{background:#161b22}
+.tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;background:#1f2937}
+.status-bar{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:11px;color:#8b949e}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.dot.on{background:#3fb950}.dot.off{background:#f85149}
+#trades-empty{color:#8b949e;text-align:center;padding:30px;font-size:13px}
+@media(max-width:500px){.card .val{font-size:16px}.card{padding:8px}}
+</style>
+</head>
+<body>
+<div class="status-bar">
+  <span><b>Sygnif-Spot</b> | Bybit Spot</span>
+  <span id="clock"></span>
+</div>
+<div class="row">
+  <div class="card"><div class="label">Status</div><div class="val" id="bot-status">--</div></div>
+  <div class="card"><div class="label">Balance</div><div class="val" id="balance">--</div></div>
+  <div class="card"><div class="label">Open Trades</div><div class="val" id="open-count">--</div></div>
+</div>
+<div class="row">
+  <div class="card"><div class="label">Today P&L</div><div class="val" id="today-pnl">--</div></div>
+  <div class="card"><div class="label">Total P&L</div><div class="val" id="total-pnl">--</div></div>
+  <div class="card"><div class="label">Win Rate</div><div class="val" id="winrate">--</div></div>
+</div>
+
+<h1>Open Positions</h1>
+<div id="trades-table"></div>
+<div id="trades-empty" style="display:none">No open trades</div>
+
+<h1>Recent Closed</h1>
+<div id="closed-table"></div>
+
+<div class="status-bar" style="margin-top:12px">
+  <span><span class="dot" id="conn-dot"></span><span id="conn-text">connecting...</span></span>
+  <span id="refresh-timer"></span>
+</div>
+
+<script>
+const API = window.location.origin + '/api/v1';
+let token = null;
+
+async function login() {
+  try {
+    const r = await fetch(API + '/token/login', {
+      method: 'POST',
+      headers: {'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME')}
+    });
+    const d = await r.json();
+    token = d.access_token;
+  } catch(e) { console.error('login failed', e); }
+}
+
+async function api(path) {
+  if (!token) await login();
+  try {
+    const r = await fetch(API + path, {
+      headers: token ? {'Authorization': 'Bearer ' + token} : {}
+    });
+    if (r.status === 401) { token = null; await login(); return api(path); }
+    return await r.json();
+  } catch(e) { return null; }
+}
+
+function pnlColor(v) { return v > 0 ? 'green' : v < 0 ? 'red' : ''; }
+function fmt(v, d=2) { return v != null ? Number(v).toFixed(d) : '--'; }
+function pct(v) { return v != null ? (v > 0 ? '+' : '') + (v * 100).toFixed(2) + '%' : '--'; }
+
+async function refresh() {
+  const [status, profit, trades, closed] = await Promise.all([
+    api('/show_config'), api('/profit'), api('/status'), api('/trades?limit=10')
+  ]);
+
+  const dot = document.getElementById('conn-dot');
+  const ct = document.getElementById('conn-text');
+
+  if (!status) {
+    dot.className = 'dot off'; ct.textContent = 'disconnected';
+    return;
+  }
+  dot.className = 'dot on'; ct.textContent = 'connected';
+
+  // Status
+  document.getElementById('bot-status').innerHTML =
+    `<span class="${status.state === 'running' ? 'green' : 'yellow'}">${status.state || '--'}</span>`;
+
+  // Balance
+  if (profit) {
+    document.getElementById('balance').textContent = fmt(profit.stake_currency_balance) + ' USDT';
+    document.getElementById('today-pnl').innerHTML =
+      `<span class="${pnlColor(profit.profit_closed_coin_today)}">${fmt(profit.profit_closed_coin_today)} USDT</span>`;
+    document.getElementById('total-pnl').innerHTML =
+      `<span class="${pnlColor(profit.profit_all_coin)}">${fmt(profit.profit_all_coin)} USDT</span>`;
+    const wr = profit.winning_trades != null && profit.losing_trades != null
+      ? (profit.winning_trades / Math.max(1, profit.winning_trades + profit.losing_trades) * 100).toFixed(0) + '%'
+      : '--';
+    document.getElementById('winrate').textContent = wr;
+  }
+
+  // Open trades
+  document.getElementById('open-count').textContent = trades ? trades.length : '0';
+  const tbody = document.getElementById('trades-table');
+  const empty = document.getElementById('trades-empty');
+
+  if (trades && trades.length > 0) {
+    empty.style.display = 'none';
+    let html = '<table><tr><th>Pair</th><th>P&L</th><th>Dur</th><th>Tag</th></tr>';
+    for (const t of trades) {
+      const dur = t.trade_duration ? (t.trade_duration < 60 ? t.trade_duration + 'm' : (t.trade_duration/60).toFixed(1) + 'h') : '--';
+      html += `<tr>
+        <td><b>${t.pair}</b><br><span style="color:#8b949e;font-size:11px">${fmt(t.open_rate,4)} | ${t.leverage || 1}x</span></td>
+        <td class="${pnlColor(t.profit_ratio)}"><b>${pct(t.profit_ratio)}</b><br><span style="font-size:11px">${fmt(t.profit_abs)} USDT</span></td>
+        <td>${dur}</td>
+        <td><span class="tag">${t.enter_tag || '--'}</span></td>
+      </tr>`;
+    }
+    html += '</table>';
+    tbody.innerHTML = html;
+  } else {
+    empty.style.display = 'block';
+    tbody.innerHTML = '';
+  }
+
+  // Closed trades
+  const ct2 = document.getElementById('closed-table');
+  if (closed && closed.trades && closed.trades.length > 0) {
+    const recent = closed.trades.filter(t => !t.is_open).slice(-8).reverse();
+    if (recent.length > 0) {
+      let html = '<table><tr><th>Pair</th><th>P&L</th><th>Exit</th></tr>';
+      for (const t of recent) {
+        html += `<tr>
+          <td>${t.pair}</td>
+          <td class="${pnlColor(t.profit_ratio)}"><b>${pct(t.profit_ratio)}</b> <span style="font-size:11px">${fmt(t.profit_abs)} USDT</span></td>
+          <td><span class="tag">${t.exit_reason || '--'}</span></td>
+        </tr>`;
+      }
+      html += '</table>';
+      ct2.innerHTML = html;
+    } else { ct2.innerHTML = '<div id="trades-empty">No closed trades yet</div>'; }
+  }
+}
+
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toUTCString().slice(17,25) + ' UTC';
+}
+
+let countdown = 30;
+function tick() {
+  countdown--;
+  document.getElementById('refresh-timer').textContent = 'refresh ' + countdown + 's';
+  if (countdown <= 0) { countdown = 30; refresh(); }
+}
+
+updateClock();
+refresh();
+setInterval(updateClock, 1000);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

@@ -12,9 +12,34 @@ services:
       - .env
     ports:
       - "0.0.0.0:8080:8080"
-    command: >
-      trade
-      --logfile /freqtrade/user_data/logs/freqtrade.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
-      --config /freqtrade/user_data/config.json
-      --strategy SygnifStrategy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        python3 /freqtrade/user_data/status_patch.py 2>/dev/null || true
+        exec freqtrade trade \
+          --logfile /freqtrade/user_data/logs/freqtrade.log \
+          --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite \
+          --config /freqtrade/user_data/config.json \
+          --strategy SygnifStrategy
+
+  freqtrade-futures:
+    build:
+      context: .
+      dockerfile: "./docker/Dockerfile.custom"
+    restart: unless-stopped
+    container_name: freqtrade-futures
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    env_file:
+      - .env
+    ports:
+      - "0.0.0.0:8081:8081"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        python3 /freqtrade/user_data/status_patch.py 2>/dev/null || true
+        exec freqtrade trade \
+          --logfile /freqtrade/user_data/logs/freqtrade-futures.log \
+          --db-url sqlite:////freqtrade/user_data/tradesv3-futures.sqlite \
+          --config /freqtrade/user_data/config_futures.json \
+          --strategy SygnifStrategy

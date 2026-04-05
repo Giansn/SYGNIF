@@ -1,0 +1,136 @@
+{
+    "strategy": "SygnifStrategy",
+    "can_short": true,
+    "trading_mode": "futures",
+    "margin_mode": "isolated",
+    "max_open_trades": 10,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.80,
+    "fiat_display_currency": "CHF",
+    "dry_run": true,
+    "dry_run_wallet": 100,
+    "timeframe": "5m",
+
+    "use_exit_signal": true,
+    "exit_profit_only": false,
+    "ignore_roi_if_entry_signal": true,
+
+    "unfilledtimeout": {
+        "entry": 3,
+        "exit": 2,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": { "enabled": false, "bids_to_ask_delta": 1 }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0
+    },
+
+    "exchange": {
+        "name": "bybit",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {},
+        "ccxt_async_config": {},
+        "pair_whitelist": [],
+        "pair_blacklist": [
+            ".*(5L|5S|3L|3S|2L|2S)/.*",
+            "(BUSD|CUSD|DAI|TUSD|USDC|USDT|USDD|FDUSD|USDP|USDS|XUSD|USD1|RLUSD|AUSD|EURI|U)/.*",
+            "(ACM|AFA|ALA|ALL|ALPINE|APL|ASR|ATM|BAR|CAI|CITY|FOR|GAL|GOZ|JUV|LEG|NAVI|PORTO|PSG|ROUSH|TRA|UCH|UFC|YBO)/.*",
+            "(XAUT|PAXG)/.*"
+        ]
+    },
+
+    "order_types": {
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_exit": "market",
+        "force_entry": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": true,
+        "stoploss_on_exchange_limit_ratio": 0.99
+    },
+    "order_time_in_force": {
+        "entry": "GTC",
+        "exit": "GTC"
+    },
+
+    "liquidation_buffer_ratio": 0.05,
+
+    "pairlists": [
+        {
+            "method": "VolumePairList",
+            "number_assets": 20,
+            "sort_key": "quoteVolume",
+            "min_value": 2000000,
+            "refresh_period": 14400
+        },
+        {
+            "method": "AgeFilter",
+            "min_days_listed": 14
+        },
+        {
+            "method": "SpreadFilter",
+            "max_spread_ratio": 0.003
+        },
+        {
+            "method": "PriceFilter",
+            "min_price": 0.001
+        }
+    ],
+
+    "telegram": {
+        "enabled": true,
+        "token": "8016276540:AAFeBQfuJ0nYm68yGvNlBkEWuwaRtKVCtOQ",
+        "chat_id": "1134139785",
+        "notification_settings": {
+            "status": "on",
+            "warning": "on",
+            "startup": "on",
+            "entry": "on",
+            "exit": "on",
+            "entry_fill": "on",
+            "exit_fill": "on",
+            "entry_cancel": "on",
+            "exit_cancel": "on"
+        }
+    },
+
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8081,
+        "verbosity": "error",
+        "enable_openapi": true,
+        "jwt_secret_key": "CHANGE_ME_TO_RANDOM_STRING",
+        "CORS_origins": ["http://localhost:8081", "http://3.122.252.186:8081", "http://3.122.252.186:8889"],
+        "username": "freqtrader",
+        "password": "CHANGE_ME"
+    },
+
+    "bot_name": "Sygnif-Futures",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": { "process_throttle_secs": 5 },
+
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather",
+
+    "_comment_1": "Futures config: Bybit USDT perpetuals, isolated margin, long-only",
+    "_comment_2": "stoploss_on_exchange=true: critical for futures to prevent liquidation",
+    "_comment_3": "Run on port 8081 so spot + futures can coexist. Use dedicated Bybit subaccount.",
+    "_comment_4": "Set BYBIT_API_KEY, BYBIT_API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID in .env",
+    "_comment_5": "Leverage controlled dynamically in strategy via leverage() callback (2-5x based on ATR)"
+}
