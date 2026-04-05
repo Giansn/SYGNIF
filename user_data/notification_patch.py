@@ -220,6 +220,61 @@ content = content.replace(exit_re.group(0), r'''    def _format_exit_msg(self, m
 print("Exit patch applied.")
 
 # =====================================================================
+#  STATUS / WARNING / STARTUP — replace with "System up/down"
+# =====================================================================
+
+# Replace STATUS handler (line 693-694 area)
+old_status = '            message = f"*Status:* `{msg[\'status\']}`"'
+new_status = r'''            _st = msg['status']
+            if _st == 'running':
+                try:
+                    _trades = len(self._rpc._rpc_trade_status())
+                except Exception:
+                    _trades = 0
+                _mode = 'DRY' if self._config.get('dry_run') else 'LIVE'
+                message = f"\N{WHITE HEAVY CHECK MARK} *System up.* {_trades} trades monitored. [{_mode}]"
+            elif 'died' in _st or 'stop' in _st:
+                try:
+                    _trades = len(self._rpc._rpc_trade_status())
+                except Exception:
+                    _trades = 0
+                _mode = 'DRY' if self._config.get('dry_run') else 'LIVE'
+                message = f"\N{NO ENTRY} *System down.* {_trades} open trades. [{_mode}]"
+            else:
+                message = f"*Status:* `{_st}`"'''
+
+if old_status in content:
+    content = content.replace(old_status, new_status, 1)
+    print("Status patch applied.")
+else:
+    print("WARNING: Status pattern not found.")
+
+# Suppress WARNING messages (dry run, open trades, etc.)
+old_warning = r'            message = f"\N{WARNING SIGN} *Warning:* `{msg[' + "'status']}`" + '"'
+new_warning = '            message = None  # suppress warnings (dry run, etc.)'
+
+if old_warning in content:
+    content = content.replace(old_warning, new_warning, 1)
+    print("Warning suppressed.")
+else:
+    # Try alternate pattern
+    old_w2 = "message = f\"\\N{WARNING SIGN} *Warning:* `{msg['status']}`\""
+    if old_w2 in content:
+        content = content.replace(old_w2, 'message = None  # suppress warnings', 1)
+        print("Warning suppressed (alt).")
+    else:
+        print("WARNING: Warning pattern not found.")
+
+# Suppress STARTUP info block
+old_startup = '        elif msg["type"] == RPCMessageType.STARTUP:\n            message = f"{msg[\'status\']}"'
+new_startup = '        elif msg["type"] == RPCMessageType.STARTUP:\n            message = None  # suppress verbose startup block'
+if old_startup in content:
+    content = content.replace(old_startup, new_startup, 1)
+    print("Startup suppressed.")
+else:
+    print("WARNING: Startup pattern not found.")
+
+# =====================================================================
 #  LABEL REPLACEMENTS
 # =====================================================================
 content = content.replace('"1_enter": "New Trade"', '"1_enter": "Order Placed"')
