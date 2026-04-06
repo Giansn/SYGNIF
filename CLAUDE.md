@@ -61,6 +61,48 @@ Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment ana
 - ATR > 3%: capped at 2x
 - ATR > 2%: capped at 3x
 
+## SL Architecture (updated 2026-04-06)
+
+### Ratcheting Trail (on-exchange, price-based)
+
+| P&L Threshold | Trail Distance | Effect at 5x |
+|---|---|---|
+| >= +10% | -1.5% price | Locks in ~+7.5% P&L |
+| >= +5% | -2% price | Locks in ~+3% P&L |
+| >= +2% | -3% price | Prevents doom from +2% |
+| >= +1% | -1% price | Breakeven guard, worst ~-4% P&L |
+
+### Soft & Doom SL
+
+| Layer | Spot | Futures | Notes |
+|---|---|---|---|
+| Soft SL | -12% P&L | -12% P&L | Requires RSI slope confirmation. Configurable via `soft_sl_ratio_spot` / `soft_sl_ratio_futures` (default 0.60) |
+| Doom SL | -20% P&L | -20% P&L / leverage (price) | Hard stop on exchange. Non-negotiable. |
+
+### Validation Criteria
+
+These fixes were deployed 2026-04-06. The strategy proves itself when:
+
+1. **No more +profit-to-doom reversals** — Trades that reached +1% P&L should NOT appear in logs with `exit_reason: stoploss_on_exchange`. The breakeven guard should catch them as ratcheted trail exits instead.
+2. **Soft SL fires at correct levels** — `exit_stoploss_conditional` exits should show `current_profit` near -12%, NOT at -3% to -5% (the old broken range at 3-5x leverage).
+3. **Win/loss ratio improves on futures** — The old double-division bug was cutting winners short while letting losers run full doom distance. Futures P&L should trend toward symmetry.
+4. **Fewer doom exits overall** — With breakeven guard + correct soft SL, fewer trades should reach the -20% hard stop.
+
+### How to Check
+
+```bash
+# SSH into EC2 and check recent exits
+ssh ubuntu@3.122.252.186 "cd ~/xrp_claude_bot && \
+  sqlite3 user_data/tradesv3-futures.sqlite \
+  \"SELECT pair, enter_tag, exit_reason, close_profit, leverage, close_date \
+    FROM trades WHERE is_open=0 ORDER BY close_date DESC LIMIT 20;\""
+```
+
+Key columns to watch:
+- `exit_reason` containing `stoploss` → should decrease
+- `close_profit` on SL exits → should cluster near -0.12, not -0.03 to -0.05
+- `close_profit` on trail exits → should show more +1% to +3% captures
+
 ## Deployment
 
 ### Instance
@@ -112,7 +154,7 @@ python -m pytest tests/ -v
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **sygnif** (468 symbols, 1046 relationships, 36 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **sygnif** (505 symbols, 1209 relationships, 39 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
