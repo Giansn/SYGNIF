@@ -394,6 +394,12 @@ class SygnifStrategy(IStrategy):
     _movers_last_update: float = 0.0
     _movers_refresh_secs: int = 14400  # 4h
 
+    # New pairs tracking — externally sourced (sentiment scanner, new listings, etc)
+    _new_pairs: list[str] = []
+    _new_pairs_last_update: float = 0.0
+    _new_pairs_refresh_secs: int = 1800  # 30 min (newer signals = more frequent refresh)
+    _new_pairs_path = "user_data/new_pairs.json"
+
     # Doom cooldown — per-pair lockout after stoploss hit
     _doom_cooldown: dict[str, float] = {}
     doom_cooldown_secs = 14400  # 4h
@@ -415,16 +421,83 @@ class SygnifStrategy(IStrategy):
             self.can_short = True
         self._load_doom_cooldown()
         self._refresh_movers()
+        self._refresh_new_pairs()
 
     def bot_loop_start(self, current_time=None, **kwargs) -> None:
-        """Inject movers into active whitelist each loop iteration."""
+        """Inject movers and externally-sourced new pairs into active whitelist."""
         self._refresh_movers()
-        if self._movers_pairs and self.dp:
-            current_wl = self.dp.current_whitelist()
-            for pair in self._movers_pairs:
-                if pair not in current_wl:
-                    current_wl.append(pair)
-                    logger.info(f"Mover {pair} added to whitelist")
+        self._refresh_new_pairs()
+        if not self.dp:
+            return
+        current_wl = self.dp.current_whitelist()
+        for pair in self._movers_pairs:
+            if pair not in current_wl:
+                current_wl.append(pair)
+                logger.info(f"Mover {pair} added to whitelist")
+        for pair in self._new_pairs:
+            if pair not in current_wl:
+                current_wl.append(pair)
+                logger.info(f"New pair {pair} added to whitelist")
+
+    # -------------------------------------------------------------------------
+    # New pairs integration — externally sourced (sentiment scanner, listings)
+    # -------------------------------------------------------------------------
+    def _refresh_new_pairs(self):
+        """Read user_data/new_pairs.json and inject pairs into whitelist.
+
+        Expected file format (mirrors movers_pairlist.json):
+        {
+            "exchange": {"pair_whitelist": ["XRP/USDT", "DOGE/USDT", ...]},
+            "_meta": {"source": "finance-agent", "updated": "2026-04-06T..."}
+        }
+
+        Pairs in this file get the same whitelist injection as movers,
+        bypassing the static VolumePairList. Use this for:
+          - Pairs identified by external scanners (finance-agent)
+          - Recently listed coins below the AgeFilter threshold
+          - Manual pair additions without editing config
+        """
+        now = time.time()
+        if now - self._new_pairs_last_update < self._new_pairs_refresh_secs and self._new_pairs:
+            return
+        try:
+            base = Path(__file__).resolve().parent
+            while base != base.parent:
+                candidate = base / self._new_pairs_path
+                if candidate.exists():
+                    break
+                base = base.parent
+            np_file = base / self._new_pairs_path
+            if not np_file.exists():
+                # Silent — file is optional
+                self._new_pairs_last_update = now
+                return
+            data = json.loads(np_file.read_text())
+            pairs = data.get("exchange", {}).get("pair_whitelist", [])
+            # Filter for the right trading mode (spot vs futures syntax)
+            is_futures = self.config.get("trading_mode", "") == "futures"
+            valid = []
+            for p in pairs:
+                if is_futures:
+                    # Futures pairs use BTC/USDT:USDT syntax
+                    if ":" not in p:
+                        p = f"{p}:USDT"
+                    valid.append(p)
+                else:
+                    # Spot uses BTC/USDT (strip :USDT if present)
+                    if ":" in p:
+                        p = p.split(":")[0]
+                    valid.append(p)
+            if valid:
+                self._new_pairs = valid
+                self._new_pairs_last_update = now
+                meta = data.get("_meta", {})
+                logger.info(
+                    f"New pairs loaded ({len(valid)}): {valid[:5]}{'...' if len(valid)>5 else ''} "
+                    f"(source: {meta.get('source', 'unknown')})"
+                )
+        except Exception as e:
+            logger.warning(f"New pairs refresh failed: {e}")
 
     # -------------------------------------------------------------------------
     # Doom cooldown persistence — survive restarts
@@ -493,10 +566,11 @@ class SygnifStrategy(IStrategy):
             logger.warning(f"Movers refresh failed: {e}")
 
     # -------------------------------------------------------------------------
-    # Informative pairs — BTC data + movers
+    # Informative pairs — BTC data + movers + new pairs
     # -------------------------------------------------------------------------
     def informative_pairs(self):
         self._refresh_movers()
+        self._refresh_new_pairs()
         is_futures = self.config.get("trading_mode", "") == "futures"
         btc_pair = "BTC/USDT:USDT" if is_futures else "BTC/USDT"
 
@@ -516,6 +590,13 @@ class SygnifStrategy(IStrategy):
             for tf in [self.timeframe] + self.info_timeframes:
                 pairs.append((mover, tf))
 
+        # New pairs (externally sourced — sentiment scanner, listings)
+        for new_pair in self._new_pairs:
+            for tf in [self.timeframe] + self.info_timeframes:
+                pairs.append((new_pair, tf))
+
+        # Dedupe
+        pairs = list(dict.fromkeys(pairs))
         return pairs
 
     # -------------------------------------------------------------------------

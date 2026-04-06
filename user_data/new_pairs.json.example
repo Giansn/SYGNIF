@@ -1,0 +1,14 @@
+{
+    "_meta": {
+        "source": "finance-agent",
+        "updated": "2026-04-06T12:00:00Z",
+        "description": "Pairs identified by external scanner. Mirrors movers_pairlist.json. Both spot (BTC/USDT) and futures (BTC/USDT:USDT) syntax accepted — strategy auto-converts based on trading_mode."
+    },
+    "exchange": {
+        "pair_whitelist": [
+            "XRP/USDT",
+            "DOGE/USDT",
+            "SOL/USDT"
+        ]
+    }
+}
