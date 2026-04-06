@@ -349,6 +349,14 @@ class OverseerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode())
+        elif self.path == "/trades":
+            trades = ft_client.get_all_trades()
+            profits = ft_client.get_all_profits()
+            body = json.dumps({"trades": trades, "profits": profits})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body.encode())
         elif self.path == "/health":
             self.send_response(200)
             self.end_headers()

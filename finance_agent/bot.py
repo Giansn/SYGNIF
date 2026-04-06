@@ -79,10 +79,10 @@ def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None =
 # Persistent reply keyboard — shown at bottom of chat
 KEYBOARD = {
     "keyboard": [
-        ["/tendency", "/signals", "/market"],
+        ["/overview", "/tendency", "/signals"],
         ["/ta BTC", "/ta ETH", "/ta SOL"],
-        ["/plays", "/news", "/movers"],
-        ["/overseer", "/evaluate", "/fa_help"],
+        ["/plays", "/market", "/movers"],
+        ["/news", "/evaluate", "/fa_help"],
     ],
     "resize_keyboard": True,
     "one_time_keyboard": False,
@@ -1095,6 +1095,124 @@ def cmd_signals() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Command: /overview — Full trade + market overview (consults overseer)
+# ---------------------------------------------------------------------------
+OVERSEER_TRADES = "http://127.0.0.1:8090/trades"
+
+
+def _duration_str(seconds: float) -> str:
+    if not seconds or seconds < 0:
+        return "--"
+    h, rem = divmod(int(seconds), 3600)
+    m = rem // 60
+    return f"{h}h{m:02d}m" if h else f"{m}m"
+
+
+def cmd_overview() -> str:
+    # 1. Fetch trades + profits from overseer
+    try:
+        resp = requests.get(OVERSEER_TRADES, timeout=10)
+        data = resp.json()
+        trades = data.get("trades", [])
+        profits = data.get("profits", [])
+    except Exception as e:
+        return f"Overseer unavailable: {e}"
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    lines = [f"*SYGNIF OVERVIEW*", f"_{now_str}_\n"]
+
+    # 2. Profit summary per instance
+    for p in profits:
+        inst = p.get("instance", "?")
+        total = p.get("profit_all", 0)
+        wins = p.get("winning_trades", 0)
+        losses = p.get("losing_trades", 0)
+        total_closed = wins + losses
+        wr = f"{wins / total_closed * 100:.0f}%" if total_closed else "--"
+        lines.append(f"*{inst.upper()}:* P/L `{total:+.4f}` | W/L {wins}/{losses} ({wr})")
+
+    # 3. Open trades with TA context
+    if trades:
+        # Get TA for traded symbols
+        trade_syms = list({
+            t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+            for t in trades
+        })
+        ta_map = {}
+        for sym in trade_syms:
+            df = bybit_kline(f"{sym}USDT", "60", 200)
+            if not df.empty:
+                ind = calc_indicators(df)
+                if ind:
+                    sig = detect_signals(ind, sym)
+                    ta_map[sym] = {"ind": ind, "sig": sig}
+
+        # Group by instance
+        spot = [t for t in trades if t["instance"] == "spot"]
+        futures = [t for t in trades if t["instance"] == "futures"]
+
+        for label, group in [("Spot", spot), ("Futures", futures)]:
+            if not group:
+                continue
+            lines.append(f"\n*{label} ({len(group)}):*")
+            for t in sorted(group, key=lambda x: x["profit_pct"], reverse=True):
+                pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+                pct = t["profit_pct"]
+                pnl = t["profit_abs"]
+                dur = _duration_str(t["trade_duration"])
+                tag = (t.get("enter_tag") or "")[:14]
+                emoji = "\U0001f7e2" if pct >= 0 else "\U0001f534"
+
+                line = f"{emoji} *{pair}* `{pct:+.1f}%` ({pnl:+.4f}) {dur}"
+                if tag:
+                    line += f" _{tag}_"
+                lines.append(line)
+
+                # TA context
+                ctx = ta_map.get(pair)
+                if ctx:
+                    s = ctx["sig"]
+                    i = ctx["ind"]
+                    entry = s["entries"][0] if s["entries"] else ""
+                    exit_s = s["exits"][0] if s["exits"] else ""
+                    parts = [f"TA:{s['ta_score']}"]
+                    if entry:
+                        parts.append(entry)
+                    if exit_s:
+                        parts.append(f"EXIT:{exit_s}")
+                    parts.append(f"RSI:{i['rsi']:.0f}")
+                    parts.append(f"WR:{i['willr']:.0f}")
+                    lines.append(f"    `{' '.join(parts)}`")
+
+        total_unreal = sum(t["profit_abs"] for t in trades)
+        lines.append(f"\n*Unrealized:* `{total_unreal:+.4f}` USDT")
+    else:
+        lines.append("\n_No open trades_")
+
+    # 4. Market tendency (BTC + ETH)
+    lines.append("\n*Market:*")
+    for sym_name in ["BTC", "ETH"]:
+        df = bybit_kline(f"{sym_name}USDT", "60", 200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        ta = calc_ta_score(ind)
+        pf = _fmt_price(ind["price"])
+        trend = ind["trend"]
+        if ta["score"] >= 55:
+            icon = "\U0001f7e2"
+        elif ta["score"] <= 45:
+            icon = "\U0001f534"
+        else:
+            icon = "\u26aa"
+        lines.append(f"  {icon} {sym_name} {pf} TA:`{ta['score']}` {trend}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Command: /news — Latest headlines
 # ---------------------------------------------------------------------------
 def cmd_news(ticker: str = "") -> str:
@@ -1115,6 +1233,7 @@ def cmd_news(ticker: str = "") -> str:
 def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
+        "`/overview` — Trades + TA + market (full dashboard)\n"
         "`/tendency` — Market tendency (bull/bear)\n"
         "`/signals` — Active entry signals (top pairs)\n"
         "`/market` — Top 15 crypto overview\n"
@@ -1123,7 +1242,6 @@ def cmd_help() -> str:
         "`/research ETH` — Full AI research report\n"
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
-        "`/overseer` — Trade overseer status\n"
         "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
     )
@@ -1160,6 +1278,7 @@ def cmd_evaluate() -> str:
 # Command dispatch — returns response string (matches sygnif_bot.py pattern)
 # ---------------------------------------------------------------------------
 COMMANDS = {
+    "/overview": lambda args: cmd_overview(),
     "/tendency": lambda args: cmd_tendency(),
     "/market":   lambda args: cmd_market(),
     "/movers":   lambda args: cmd_movers(),
