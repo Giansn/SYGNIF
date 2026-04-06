@@ -80,7 +80,7 @@ def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None =
 KEYBOARD = {
     "keyboard": [
         ["/overview", "/tendency", "/signals"],
-        ["/ta BTC", "/ta ETH", "/ta SOL"],
+        ["/scan", "/ta BTC", "/ta ETH"],
         ["/plays", "/market", "/movers"],
         ["/news", "/evaluate", "/fa_help"],
     ],
@@ -1128,6 +1128,82 @@ def cmd_signals() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Command: /scan — Deep opportunity scanner (TA + news + Claude ranking)
+# ---------------------------------------------------------------------------
+def cmd_scan() -> str:
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch data."
+
+    pairs = _filter_pairs(tickers, min_turnover=2_000_000)
+    top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:15]
+
+    # 1. Compute TA + signals for all pairs
+    signal_pairs = []
+    for p in top:
+        df = bybit_kline(f"{p['sym']}USDT", "60", 200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        sig = detect_signals(ind, p["sym"])
+        entries = sig["entries"]
+        # Skip pairs with no actionable signal
+        if not entries or entries == ["ambiguous_short"]:
+            continue
+        signal_pairs.append({
+            "sym": p["sym"], "ind": ind, "sig": sig,
+            "price": ind["price"], "vol": p["vol"],
+        })
+
+    if not signal_pairs:
+        return "*Scan* | No active signals across top 15 pairs."
+
+    # 2. Fetch news for top signal pairs (max 6)
+    scan_pairs = signal_pairs[:6]
+    data_lines = []
+    for sp in scan_pairs:
+        sym = sp["sym"]
+        ind = sp["ind"]
+        sig = sp["sig"]
+        entry = sig["entries"][0]
+        side = "Short" if "short" in entry else "Long"
+
+        headlines = fetch_news(sym, max_items=2)
+        news_str = headlines[0].split(" — ")[0] if headlines else "No recent news"
+
+        data_lines.append(
+            f"{sym}: ${ind['price']:.4g} {ind['trend']} "
+            f"TA:{sig['ta_score']} {entry} RSI:{ind['rsi']:.0f} "
+            f"WR:{ind['willr']:.0f} Lev:{sig['leverage']:.0f}x "
+            f"| News: \"{news_str}\""
+        )
+
+    data_block = "\n".join(data_lines)
+
+    # 3. Claude ranking
+    prompt = f"""Rank these crypto opportunities by conviction (best first).
+Each has strategy TA signals + recent news.
+
+{data_block}
+
+For each, output one line:
+#N PAIR Side — key reason (max 10 words)
+
+Side is Long or Short. Skip weak opportunities. Max 6 lines. Be specific with numbers."""
+
+    ranking = claude_analyze(prompt, max_tokens=400)
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    lines = [f"*Scan* | {now_str}\n"]
+    lines.append(ranking)
+    lines.append(f"\n_Scanned {len(top)} pairs, {len(signal_pairs)} with signals_")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Command: /overview — Full trade + market overview (consults overseer)
 # ---------------------------------------------------------------------------
 OVERSEER_TRADES = "http://127.0.0.1:8090/trades"
@@ -1269,6 +1345,7 @@ def cmd_help() -> str:
         "`/overview` — Trades + TA + market (full dashboard)\n"
         "`/tendency` — Market tendency (bull/bear)\n"
         "`/signals` — Active entry signals (top pairs)\n"
+        "`/scan` — Deep scan: signals + news + AI ranking\n"
         "`/market` — Top 15 crypto overview\n"
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
@@ -1441,6 +1518,7 @@ COMMANDS = {
     "/movers":   lambda args: cmd_movers(),
     "/ta":       lambda args: cmd_ta(args),
     "/signals":  lambda args: cmd_signals(),
+    "/scan":     lambda args: cmd_scan(),
     "/research": lambda args: cmd_research(args),
     "/plays":    lambda args: cmd_plays(),
     "/news":     lambda args: cmd_news(args),
@@ -1451,7 +1529,7 @@ COMMANDS = {
 
 
 # Commands that take a while — send a loading message first
-_SLOW_COMMANDS = {"/overview", "/tendency", "/signals", "/research", "/plays", "/evaluate"}
+_SLOW_COMMANDS = {"/overview", "/tendency", "/signals", "/scan", "/research", "/plays", "/evaluate"}
 
 # Loading messages per command
 _LOADING_MSG = {
@@ -1460,6 +1538,7 @@ _LOADING_MSG = {
     "/signals":   "\U0001f4e1 Scanning signals across top pairs...",
     "/research":  "\U0001f9e0 Researching — TA + news + AI analysis...",
     "/plays":     "\U0001f3af Scanning opportunities — TA + AI...",
+    "/scan":      "\U0001f50e Scanning opportunities — TA + news + AI ranking...",
     "/evaluate":  "\U0001f916 Evaluating positions...",
 }
 
