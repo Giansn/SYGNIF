@@ -668,16 +668,12 @@ async function refresh() {
     document.getElementById('pair-count').textContent = `${(wl.whitelist || []).length} pairs`;
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
-    // Balance — use /balance for live, dry_run_wallet for dry
+    // Balance
     let walletBalance = 0;
-    if (cfg.dry_run) {
-      walletBalance = cfg.dry_run_wallet || 100;
-    } else {
-      try {
-        const balData = await api('balance');
-        walletBalance = balData.total || balData.value || 0;
-      } catch (e) { walletBalance = 0; }
-    }
+    try {
+      const balData = await api('balance');
+      walletBalance = balData.total || balData.value || 0;
+    } catch (e) { walletBalance = 0; }
 
     const totalPnl = profit.profit_all_coin || 0;
     document.getElementById('bal').textContent = '$' + walletBalance.toFixed(2);
