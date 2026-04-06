@@ -150,7 +150,7 @@ class TestEntryPaths:
         result = strategy.populate_entry_trend(df, {"pair": "ETH/USDT"})
         last = result.iloc[-1]
         assert last["enter_short"] == 1
-        assert last["enter_tag"] in ("swing_failure_short", "claude_swing_short")
+        assert last["enter_tag"] in ("swing_failure_short", "claude_swing_short", "strong_ta_short")
 
 
 # ═══════════════════════════════════════════════════════════════════════
