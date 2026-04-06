@@ -17,7 +17,7 @@ import os
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -30,7 +30,6 @@ import talib.abstract as ta
 from freqtrade.strategy import IStrategy, merge_informative_pair
 from freqtrade.persistence import Trade
 from pandas import DataFrame
-from functools import reduce
 
 logger = logging.getLogger(__name__)
 
@@ -248,9 +247,6 @@ class SygnifStrategy(IStrategy):
     # --- Thresholds ---
     stop_threshold_doom_spot = 0.20     # -20% doom stoploss (spot)
     stop_threshold_doom_futures = 0.20  # -20% doom stoploss (futures, divided by leverage)
-    stop_threshold_doom = 0.20          # legacy alias
-    stop_threshold_normal = 0.10        # -10% normal stoploss
-    stop_threshold_futures = 0.10       # u_e stoploss for futures
 
     # --- Leverage ---
     futures_mode_leverage = 3.0
@@ -325,7 +321,7 @@ class SygnifStrategy(IStrategy):
         if now - self._movers_last_update < self._movers_refresh_secs and self._movers_pairs:
             return
         try:
-            movers_file = Path(__file__).resolve().parent.parent.parent / "movers_pairlist.json"
+            movers_file = Path(__file__).resolve().parent.parent / "movers_pairlist.json"
             if not movers_file.exists():
                 logger.warning(f"Movers file not found: {movers_file}")
                 return
