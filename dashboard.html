@@ -585,12 +585,12 @@ async function reAuth() {
   tk = d.access_token;
 }
 
-async function api(ep) {
+async function api(ep, retried) {
   const r = await fetch(`${API}/api/v1/${ep}`, {
-    headers: { 'Authorization': `Bearer ${tk}` }
+    headers: tk ? { 'Authorization': `Bearer ${tk}` } : {}
   });
-  if (r.status === 401) { await autoLogin(); return api(ep); }
-  if (!r.ok) return [];
+  if (r.status === 401 && !retried) { await autoLogin(); return api(ep, true); }
+  if (!r.ok) return {};
   return r.json();
 }
 
@@ -652,9 +652,11 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [trades, profit, cfg, wl, perf, closed] = await Promise.all([
+    const [_trades, profit, cfg, wl, _perf, closed] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50')
     ]);
+    const trades = Array.isArray(_trades) ? _trades : [];
+    const perf = Array.isArray(_perf) ? _perf : [];
 
     // State badges
     const state = cfg.state || 'stopped';
@@ -872,6 +874,12 @@ async function tick() {
   try { await refresh(); }
   finally { _refreshing = false; }
 }
+
+// Clock
+setInterval(() => {
+  const el = document.getElementById('clock');
+  if (el) el.textContent = new Date().toLocaleTimeString();
+}, 1000);
 
 tick();
 setInterval(tick, 5000);
