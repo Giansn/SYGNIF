@@ -32,7 +32,7 @@ STALE_TRADE_HOURS = 12        # Flag trades open longer than this
 SIGNIFICANT_CHANGE_PCT = 1.5  # Profit changed more than this since last eval
 
 # Telegram — use FINANCE_BOT_TOKEN (same bot as finance_agent)
-TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") or os.environ.get("FINANCE_BOT_TOKEN", "")
+TG_TOKEN = os.environ.get("FINANCE_BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # Data paths

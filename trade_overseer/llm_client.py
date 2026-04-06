@@ -29,7 +29,7 @@ FARTCOIN[f] -2.4%: CUT — meme coin, no thesis, bleeding."""
 _history: deque[tuple[str, str]] = deque(maxlen=EVAL_HISTORY_SIZE)
 
 
-def evaluate(prompt: str, timeout: int = 120) -> str | None:
+def evaluate(prompt: str, timeout: int = 180) -> str | None:
     """Send prompt to Plutus-3B with conversation history.
 
     Returns None if Ollama is unavailable — caller should fall back to rules-only.
@@ -51,9 +51,9 @@ def evaluate(prompt: str, timeout: int = 120) -> str | None:
                 "messages": messages,
                 "stream": False,
                 "options": {
-                    "num_predict": 200,
+                    "num_predict": 150,
                     "temperature": 0.4,
-                    "num_ctx": 2048,
+                    "num_ctx": 1024,
                 },
             },
             timeout=timeout,
