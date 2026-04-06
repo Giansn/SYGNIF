@@ -247,6 +247,8 @@ class SygnifStrategy(IStrategy):
     # --- Thresholds ---
     stop_threshold_doom_spot = 0.20     # -20% doom stoploss (spot)
     stop_threshold_doom_futures = 0.20  # -20% doom stoploss (futures, divided by leverage)
+    soft_sl_ratio_spot = 0.60           # soft SL at 60% of doom = -12% P&L (spot)
+    soft_sl_ratio_futures = 0.60        # soft SL at 60% of doom = -12% P&L (futures, tighter due to margin/funding cost)
 
     # --- Leverage ---
     futures_mode_leverage = 3.0
@@ -1108,7 +1110,7 @@ class SygnifStrategy(IStrategy):
 
         # --- Soft stoploss — fires before exchange SL, needs fewer conditions ---
         is_futures = self.config.get("trading_mode", "") == "futures"
-        soft_sl = -(self.stop_threshold_doom_futures * 0.8 / leverage) if is_futures else -0.12
+        soft_sl = -(self.stop_threshold_doom_futures * self.soft_sl_ratio_futures) if is_futures else -(self.stop_threshold_doom_spot * self.soft_sl_ratio_spot)
         if current_profit < soft_sl:
             rsi_falling = rsi14 < last.get("RSI_14_shift3", rsi14)
             if rsi_falling and (last["close"] < last.get("EMA_200", float("inf")) or rsi14 > prev.get("RSI_14", 50)):
@@ -1182,7 +1184,7 @@ class SygnifStrategy(IStrategy):
 
         # --- Soft stoploss for shorts — fires before exchange SL ---
         is_futures = self.config.get("trading_mode", "") == "futures"
-        soft_sl = -(self.stop_threshold_doom_futures * 0.8 / leverage) if is_futures else -0.12
+        soft_sl = -(self.stop_threshold_doom_futures * self.soft_sl_ratio_futures) if is_futures else -(self.stop_threshold_doom_spot * self.soft_sl_ratio_spot)
         if current_profit < soft_sl:
             rsi_rising = rsi14 > last.get("RSI_14_shift3", rsi14)
             if rsi_rising and (last["close"] > last.get("EMA_200", 0) or rsi14 < prev.get("RSI_14", 50)):
