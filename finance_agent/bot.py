@@ -1351,22 +1351,29 @@ def cmd_evaluate() -> str:
     ta_block = "\n".join(ta_context) if ta_context else "No TA data"
     trades_block = "\n".join(trade_lines)
 
-    prompt = f"""You are a crypto trade monitor for the Sygnif bot (spot [s] + futures [f], Bybit).
+    prompt = f"""Crypto trade monitor. Classify each trade as CUT, TRAIL, or HOLD.
 
-TA DATA:
+TA:
 {ta_block}
 
-OPEN TRADES:
+TRADES:
 {trades_block}
 
-For each trade, output one line:
-PAIR[instance] +X.XX%: ACTION — reason
+Output exactly this format — group by action, use short reasons (max 8 words each):
 
-Actions: HOLD (keep), TRAIL (lock profit), CUT (close now)
-Use TA data to justify: RSI overbought/oversold, trend, support/resistance, Williams %R exits.
-Be specific with numbers. No disclaimers. Max one line per trade."""
+CUT:
+PAIR[x] -X.X% — short reason
+PAIR[x] -X.X% — short reason
 
-    analysis = claude_analyze(prompt, max_tokens=800)
+TRAIL:
+PAIR[x] +X.X% — short reason
+
+HOLD:
+PAIR[x] -X.X% — short reason
+
+Rules: omit empty groups. Keep reasons to key metric (e.g. "RSI:26 broke support" not long explanations). Sort worst first in CUT, best first in TRAIL."""
+
+    analysis = claude_analyze(prompt, max_tokens=500)
 
     now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
     return f"*Evaluate* | {now_str}\n\n{analysis}"
