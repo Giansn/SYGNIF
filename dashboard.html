@@ -652,8 +652,8 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [_trades, profit, cfg, wl, _perf, closed] = await Promise.all([
-      api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50')
+    const [_trades, profit, cfg, wl, _perf, closed, balData] = await Promise.all([
+      api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50'), api('balance')
     ]);
     const trades = Array.isArray(_trades) ? _trades : [];
     const perf = Array.isArray(_perf) ? _perf : [];
@@ -669,11 +669,7 @@ async function refresh() {
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
     // Balance
-    let walletBalance = 0;
-    try {
-      const balData = await api('balance');
-      walletBalance = balData.total || balData.value || 0;
-    } catch (e) { walletBalance = 0; }
+    const walletBalance = balData.total || balData.value || 0;
 
     const totalPnl = profit.profit_all_coin || 0;
     document.getElementById('bal').textContent = '$' + walletBalance.toFixed(2);
