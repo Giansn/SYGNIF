@@ -1299,12 +1299,77 @@ def cmd_overseer() -> str:
 # Command: /evaluate — Force trade evaluation
 # ---------------------------------------------------------------------------
 def cmd_evaluate() -> str:
+    # 1. Fetch trades from overseer
     try:
-        resp = requests.post("http://127.0.0.1:8090/evaluate", timeout=120)
+        resp = requests.get(OVERSEER_TRADES, timeout=10)
         data = resp.json()
-        return data.get("commentary", "No output.")
+        trades = data.get("trades", [])
+        profits = data.get("profits", [])
     except Exception as e:
-        return f"Evaluation failed: {e}"
+        return f"Overseer unavailable: {e}"
+
+    if not trades:
+        return "*Evaluate* | No open trades."
+
+    # 2. Get full TA for each traded symbol
+    trade_syms = list({
+        t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        for t in trades
+    })
+    ta_context = []
+    for sym in trade_syms:
+        df = bybit_kline(f"{sym}USDT", "60", 200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        sig = detect_signals(ind, sym)
+        entry = sig["entries"][0] if sig["entries"] else "none"
+        exit_s = sig["exits"][0] if sig["exits"] else "none"
+        ta_context.append(
+            f"{sym}: ${ind['price']:.4g} {ind['trend']} TA:{sig['ta_score']} "
+            f"RSI:{ind['rsi']:.0f} WR:{ind['willr']:.0f} "
+            f"MACD:{ind['macd_signal_text']} CMF:{ind['cmf']:.3f} "
+            f"S:{ind['support']:.4g} R:{ind['resistance']:.4g} "
+            f"signal:{entry} exit:{exit_s}"
+        )
+
+    # 3. Build trade lines
+    trade_lines = []
+    for t in sorted(trades, key=lambda x: abs(x["profit_pct"]), reverse=True):
+        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        inst = t["instance"][0]  # s or f
+        dur_s = t.get("trade_duration", 0) or 0
+        dur = f"{dur_s // 3600}h{(dur_s % 3600) // 60:02d}m" if dur_s >= 3600 else f"{dur_s // 60}m"
+        tag = t.get("enter_tag", "") or "?"
+        trade_lines.append(
+            f"{pair}[{inst}] {t['profit_pct']:+.2f}% ${t['current_rate']:.4g} {dur} {tag}"
+        )
+
+    # 4. Claude evaluation
+    ta_block = "\n".join(ta_context) if ta_context else "No TA data"
+    trades_block = "\n".join(trade_lines)
+
+    prompt = f"""You are a crypto trade monitor for the Sygnif bot (spot [s] + futures [f], Bybit).
+
+TA DATA:
+{ta_block}
+
+OPEN TRADES:
+{trades_block}
+
+For each trade, output one line:
+PAIR[instance] +X.XX%: ACTION — reason
+
+Actions: HOLD (keep), TRAIL (lock profit), CUT (close now)
+Use TA data to justify: RSI overbought/oversold, trend, support/resistance, Williams %R exits.
+Be specific with numbers. No disclaimers. Max one line per trade."""
+
+    analysis = claude_analyze(prompt, max_tokens=800)
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    return f"*Evaluate* | {now_str}\n\n{analysis}"
 
 
 # ---------------------------------------------------------------------------
@@ -1336,7 +1401,7 @@ _LOADING_MSG = {
     "/signals":   "\U0001f4e1 Scanning signals across top pairs...",
     "/research":  "\U0001f9e0 Researching — TA + news + AI analysis...",
     "/plays":     "\U0001f3af Scanning opportunities — TA + AI...",
-    "/evaluate":  "\U0001f916 Evaluating positions via Plutus-3B...",
+    "/evaluate":  "\U0001f916 Evaluating positions...",
 }
 
 
