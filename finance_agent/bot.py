@@ -668,7 +668,7 @@ def _fmt_price(price: float) -> str:
 # Command: /tendency — Market tendency (bull/bear)
 # ---------------------------------------------------------------------------
 def cmd_tendency() -> str:
-    """Quick bull/bear market gauge from BTC + ETH + top alts."""
+    """Market tendency: TA scan + Claude AI insight."""
     tickers = bybit_tickers()
     if not tickers:
         return "Failed to fetch data."
@@ -684,6 +684,7 @@ def cmd_tendency() -> str:
     bear_count = 0
     total = 0
     lines = ["*Market Tendency*\n"]
+    coin_data = []  # collect for Claude prompt
 
     for sym in scan_syms:
         df = bybit_kline(sym, interval="60", limit=200)
@@ -693,13 +694,17 @@ def cmd_tendency() -> str:
         if not ind:
             continue
         ta = calc_ta_score(ind)
+        sig = detect_signals(ind, sym.replace("USDT", ""))
         score = ta["score"]
         total += 1
 
         name = sym.replace("USDT", "")
         trend = ind.get("trend", "?")
         rsi = ind.get("rsi", 50)
+        willr = ind.get("willr", -50)
+        macd = ind.get("macd_signal_text", "?")
         pf = _fmt_price(ind["price"])
+        entry = sig["entries"][0] if sig["entries"] else "none"
 
         if score >= 55:
             bull_count += 1
@@ -711,6 +716,10 @@ def cmd_tendency() -> str:
             icon = "\u26aa"
 
         lines.append(f"{icon} `{name:>5}` {pf} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
+        coin_data.append(
+            f"{name}: ${ind['price']:.4g} {trend} TA:{score} RSI:{rsi:.0f} "
+            f"WR:{willr:.0f} MACD:{macd} signal:{entry}"
+        )
 
     lines.append("")
 
@@ -718,17 +727,41 @@ def cmd_tendency() -> str:
     if total == 0:
         verdict = "\u2753 No data"
     elif bull_count > bear_count and bull_count >= total * 0.6:
-        verdict = "\U0001f7e2 *BULLISH* — majority of market leaning up"
+        verdict = "\U0001f7e2 *BULLISH* — majority leaning up"
     elif bear_count > bull_count and bear_count >= total * 0.6:
-        verdict = "\U0001f534 *BEARISH* — majority of market leaning down"
+        verdict = "\U0001f534 *BEARISH* — majority leaning down"
     elif bull_count > bear_count:
-        verdict = "\U0001f7e1 *LEAN BULLISH* — mixed but tilting up"
+        verdict = "\U0001f7e1 *LEAN BULLISH* — mixed, tilting up"
     elif bear_count > bull_count:
-        verdict = "\U0001f7e1 *LEAN BEARISH* — mixed but tilting down"
+        verdict = "\U0001f7e1 *LEAN BEARISH* — mixed, tilting down"
     else:
         verdict = "\u26aa *NEUTRAL* — no clear direction"
-
     lines.append(verdict)
+
+    # --- Claude AI insight ---
+    headlines = fetch_news("", max_items=5)
+    news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent news."
+    data_block = "\n".join(coin_data)
+
+    prompt = f"""You are Sygnif's market analyst. Give a 3-4 sentence market tendency reading.
+
+MARKET DATA:
+{data_block}
+
+Bull/Bear count: {bull_count} bullish, {bear_count} bearish, {total - bull_count - bear_count} neutral
+
+RECENT NEWS:
+{news_text}
+
+Rules:
+- State the overall tendency clearly (bullish/bearish/neutral)
+- Mention the key driver (BTC leading? alts diverging? news catalyst?)
+- Flag any risks or watch-outs (overbought RSI, divergence, etc.)
+- 3-4 sentences max, no disclaimers, be direct"""
+
+    insight = claude_analyze(prompt, max_tokens=200)
+    lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
+
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
     return "\n".join(lines)
 
