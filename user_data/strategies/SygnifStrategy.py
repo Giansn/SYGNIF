@@ -307,16 +307,26 @@ class SygnifStrategy(IStrategy):
                 data = json.load(f)
             now = time.time()
             self._doom_cooldown = {
-                k: v for k, v in data.items()
+                k: v for k, v in data.get("cooldowns", data).items()
                 if now - v < self.doom_cooldown_secs
+            }
+            # Load consecutive loss tracking
+            loss_counts = data.get("loss_counts", {})
+            self._doom_loss_count = {
+                k: [t for t in v if now - t < 86400]
+                for k, v in loss_counts.items()
             }
         except (FileNotFoundError, json.JSONDecodeError):
             self._doom_cooldown = {}
+            self._doom_loss_count = {}
 
     def _save_doom_cooldown(self):
         try:
             with open(self._doom_cooldown_path, "w") as f:
-                json.dump(self._doom_cooldown, f)
+                json.dump({
+                    "cooldowns": self._doom_cooldown,
+                    "loss_counts": self._doom_loss_count,
+                }, f)
         except OSError as e:
             logger.warning(f"Failed to save doom cooldown: {e}")
 

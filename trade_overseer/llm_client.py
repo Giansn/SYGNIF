@@ -69,13 +69,6 @@ def evaluate(prompt: str, timeout: int = 180) -> str | None:
         return None
 
 
-def get_history_summary() -> str:
-    """Return brief summary of recent evaluations for debugging."""
-    if not _history:
-        return "No previous evaluations."
-    return f"{len(_history)} previous eval(s), latest calls: {_history[-1][1][:100]}..."
-
-
 def is_available() -> bool:
     """Check if Ollama is running."""
     try:
@@ -85,13 +78,3 @@ def is_available() -> bool:
         return False
 
 
-def force_unload():
-    """Force unload model from RAM (watchdog use)."""
-    try:
-        requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "keep_alive": 0},
-            timeout=5,
-        )
-    except Exception:
-        pass
