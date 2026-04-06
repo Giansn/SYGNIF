@@ -1,22 +1,65 @@
 #!/usr/bin/env python3
-"""Sygnif Dashboard server on port 8888."""
+"""Sygnif Dashboard server on port 8888 — proxies API requests to Freqtrade."""
 import http.server
 import os
+import urllib.request
 
 PORT = 8888
+API = "http://localhost:8080"
 DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(DIR)
 
-handler = http.server.SimpleHTTPServer if hasattr(http.server, 'SimpleHTTPServer') else http.server.SimpleHTTPRequestHandler
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/' or self.path == '/dashboard':
-            self.path = '/dashboard.html'
+        if self.path.startswith("/api/"):
+            return self._proxy()
+        if self.path in ("/", "/dashboard"):
+            self.path = "/dashboard.html"
         return super().do_GET()
 
-    def log_message(self, format, *args):
-        pass  # Suppress logs
+    def do_POST(self):
+        if self.path.startswith("/api/"):
+            return self._proxy()
+        self.send_error(404)
 
-print(f"Dashboard running on http://0.0.0.0:{PORT}")
+    def do_OPTIONS(self):
+        if self.path.startswith("/api/"):
+            return self._proxy()
+        self.send_error(404)
+
+    def _proxy(self):
+        url = API + self.path
+        headers = {}
+        for h in ("Authorization", "Content-Type"):
+            v = self.headers.get(h)
+            if v:
+                headers[h] = v
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else None
+        req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read()
+                self.send_response(resp.status)
+                for k, v in resp.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(data)
+        except urllib.error.HTTPError as e:
+            self.send_response(e.code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(e.read())
+        except Exception as e:
+            self.send_response(502)
+            self.end_headers()
+            self.wfile.write(f'{{"error":"{e}"}}'.encode())
+
+    def log_message(self, format, *args):
+        pass
+
+
+print(f"Dashboard running on http://0.0.0.0:{PORT} → API {API}")
 http.server.HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

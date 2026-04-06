@@ -267,6 +267,11 @@ class SygnifStrategy(IStrategy):
     _doom_cooldown: dict[str, float] = {}
     doom_cooldown_secs = 14400  # 4h
 
+    # Slot caps per entry type (prevent one type hogging all slots)
+    max_slots_strong = 6      # strong_ta entries (TA >= 65)
+    max_slots_swing = 4       # swing_failure, claude_swing, etc.
+    _swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
+
     # Claude layer
     claude = SygnifSentiment()
 
@@ -845,29 +850,10 @@ class SygnifStrategy(IStrategy):
         # TA score for all rows
         ta_score = self._calculate_ta_score_vectorized(df)
 
-        # Strong TA signal — entry without Claude
-        strong = prot & empty_ok & (ta_score >= 75)
+        # Strong TA signal — entry without Claude (lowered from 75 to 55)
+        strong = prot & empty_ok & (ta_score >= 65)
         df.loc[strong, "enter_long"] = 1
         df.loc[strong, "enter_tag"] = "strong_ta"
-
-        # Ambiguous zone — Claude sentiment on LAST candle only (live efficiency)
-        if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
-            last_score = ta_score.iloc[-1]
-            last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
-            last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
-
-            if last_prot and last_empty and 40 <= last_score <= 70:
-                pair = metadata.get("pair", "XRP/USDT")
-                token = pair.split("/")[0]
-                price = df.iloc[-1]["close"]
-
-                headlines = self.claude.fetch_news(token)
-                sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
-                final_score = last_score + sentiment
-
-                if final_score >= self.sentiment_threshold_buy:
-                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
 
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
@@ -930,6 +916,23 @@ class SygnifStrategy(IStrategy):
         if time.time() - cooldown_since < self.doom_cooldown_secs:
             logger.info(f"Doom cooldown active for {pair}, skipping entry")
             return False
+
+        # Slot caps per entry type
+        tag = entry_tag or ""
+        open_trades = Trade.get_trades_proxy(is_open=True)
+
+        if tag == "strong_ta":
+            count = sum(1 for t in open_trades if (t.enter_tag or "") == "strong_ta")
+            if count >= self.max_slots_strong:
+                logger.info(f"Strong TA slot cap: {count}/{self.max_slots_strong}, skipping {pair}")
+                return False
+
+        if tag in self._swing_tags:
+            count = sum(1 for t in open_trades if (t.enter_tag or "") in self._swing_tags)
+            if count >= self.max_slots_swing:
+                logger.info(f"Swing slot cap: {count}/{self.max_slots_swing}, skipping {pair} ({tag})")
+                return False
+
         return True
 
     def confirm_trade_exit(self, pair, trade, order_type, amount, rate,

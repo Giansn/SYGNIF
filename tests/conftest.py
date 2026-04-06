@@ -23,7 +23,7 @@ _ft_strategy.IStrategy = type("IStrategy", (), {
 _ft_strategy.merge_informative_pair = lambda df, info, tf_base, tf_info, ffill=True: df
 
 _ft_persistence = types.ModuleType("freqtrade.persistence")
-_ft_persistence.Trade = type("Trade", (), {})
+_ft_persistence.Trade = type("Trade", (), {"get_trades_proxy": staticmethod(lambda is_open=True: [])})
 
 _ft = types.ModuleType("freqtrade")
 sys.modules["freqtrade"] = _ft
@@ -79,6 +79,9 @@ def strategy():
     s._doom_cooldown = {}
     s.doom_cooldown_secs = 14400
     s._doom_cooldown_path = os.path.join(tempfile.mkdtemp(), "doom_cooldown.json")
+    s.max_slots_sentiment = 6
+    s.max_slots_swing = 4
+    s._swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
     s.can_short = False
     s.dp = None
 

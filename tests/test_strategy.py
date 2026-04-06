@@ -104,7 +104,7 @@ class TestGlobalProtections:
 
 class TestEntryPaths:
     def test_strong_ta_entry(self, strategy, make_df):
-        """ta_score >= 75 should trigger strong_ta entry."""
+        """ta_score >= 55 should trigger strong_ta entry."""
         df = make_df(
             RSI_14=25.0, RSI_3=8.0,
             CMF_20=0.20,
@@ -416,6 +416,68 @@ class TestSentiment:
         strategy.claude._last_reset = date.today() - timedelta(days=1)
         strategy.claude._reset_daily_counter()
         assert strategy.claude.daily_calls == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Slot Caps
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSlotCaps:
+    def _make_open_trades(self, tags):
+        """Create mock open trades with given enter_tags."""
+        trades = []
+        for tag in tags:
+            t = type("T", (), {"enter_tag": tag, "pair": "X/USDT"})()
+            trades.append(t)
+        return trades
+
+    def test_swing_cap_blocks_when_full(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["swing_failure", "claude_swing", "swing_failure", "claude_swing"])
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "swing_failure", "long")
+        assert result is False
+
+    def test_swing_cap_allows_under_limit(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["swing_failure", "claude_swing"])
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "claude_swing", "long")
+        assert result is True
+
+    def test_strong_ta_cap_blocks_when_full(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["strong_ta"] * 6)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long")
+        assert result is False
+
+    def test_strong_ta_cap_allows_under_limit(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["strong_ta"] * 4)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long")
+        assert result is True
+
+    def test_strong_full_still_allows_swing(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["strong_ta"] * 6)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "swing_failure", "long")
+        assert result is True
+
+    def test_swing_full_still_allows_strong(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["swing_failure"] * 4)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long")
+        assert result is True
 
 
 # ═══════════════════════════════════════════════════════════════════════

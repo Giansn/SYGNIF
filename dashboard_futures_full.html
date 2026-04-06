@@ -142,12 +142,12 @@ tr:hover td{background:#ffffff06}
 </div>
 
 <script>
-const API=window.location.protocol+'//'+window.location.hostname+':8081';
+const API=window.location.origin;
 const U='freqtrader',P='CHANGE_ME';
 let tk='';
 
 async function login(){const r=await fetch(`${API}/api/v1/token/login`,{method:'POST',headers:{'Authorization':'Basic '+btoa(U+':'+P)}});const d=await r.json();tk=d.access_token;}
-async function api(ep){const r=await fetch(`${API}/api/v1/${ep}`,{headers:{'Authorization':`Bearer ${tk}`}});if(r.status===401){await login();return api(ep);}return r.json();}
+async function api(ep){const r=await fetch(`${API}/api/v1/${ep}`,{headers:{'Authorization':`Bearer ${tk}`}});if(r.status===401){await login();return api(ep);}if(!r.ok)return[];return r.json();}
 
 const pc=v=>v>0?'up':v<0?'dn':'nt';
 const fmt=(v,d=4)=>(v>=0?'+':'')+v.toFixed(d);

@@ -33,6 +33,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TG_TOKEN_FUTURES = os.environ.get("TELEGRAM_FUTURES_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -49,6 +50,7 @@ def _load_dotenv():
 
 _load_dotenv()
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", TG_TOKEN)
+TG_TOKEN_FUTURES = os.environ.get("TELEGRAM_FUTURES_BOT_TOKEN", TG_TOKEN_FUTURES)
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", TG_CHAT)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
 
@@ -57,13 +59,14 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
 # Telegram sender
 # ---------------------------------------------------------------------------
 
-def tg_send(text, parse_mode="Markdown"):
-    if not TG_TOKEN or not TG_CHAT:
+def tg_send(text, parse_mode="Markdown", is_futures=False):
+    token = (TG_TOKEN_FUTURES or TG_TOKEN) if is_futures else TG_TOKEN
+    if not token or not TG_CHAT:
         logger.warning("Telegram credentials not set, skipping send")
         return None
     try:
         resp = requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": TG_CHAT,
                 "text": text,
@@ -390,6 +393,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 def _process_webhook(msg):
     msg_type = msg.get("type", "").lower()
+    is_futures = msg.get("trading_mode", "") == "futures"
     text = None
 
     if "entry" in msg_type:
@@ -400,7 +404,7 @@ def _process_webhook(msg):
         text = format_status_msg(msg)
 
     if text:
-        tg_send(text)
+        tg_send(text, is_futures=is_futures)
         logger.info(f"Sent {msg_type} notification")
 
 
@@ -421,6 +425,10 @@ def main():
     if not TG_TOKEN or not TG_CHAT:
         print("Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set")
         sys.exit(1)
+    if TG_TOKEN_FUTURES:
+        logger.info("Futures bot token loaded — routing futures messages to @sygnifuture_bot")
+    else:
+        logger.warning("TELEGRAM_FUTURES_BOT_TOKEN not set — futures messages will use spot bot")
 
     server = HTTPServer(("0.0.0.0", args.port), WebhookHandler)
     logger.info(f"Notification handler started on port {args.port}")
