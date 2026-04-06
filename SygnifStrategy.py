@@ -1000,7 +1000,13 @@ class SygnifStrategy(IStrategy):
 
     def confirm_trade_exit(self, pair, trade, order_type, amount, rate,
                            time_in_force, exit_reason, current_time, **kwargs):
-        if "stoploss" in exit_reason.lower():
+        reason = exit_reason.lower()
+        is_loss_exit = (
+            "stoploss" in reason       # stoploss_on_exchange, exit_stoploss_conditional
+            or "stop_loss" in reason   # trailing_stop_loss
+            or "vol_sl" in reason      # exit_sf_vol_sl, exit_sf_short_vol_sl
+        )
+        if is_loss_exit:
             now = time.time()
             self._doom_cooldown[pair] = now
             self._save_doom_cooldown()
@@ -1062,7 +1068,9 @@ class SygnifStrategy(IStrategy):
         rsi14 = last.get("RSI_14", 50)
         rsi14_1h = last.get("RSI_14_1h", 50)
 
-        if current_profit > 0.0:
+        # Minimum profit before RSI exits activate (don't exit tiny gains)
+        min_profit_for_rsi = 0.02 if leverage <= 1.0 else 0.02 * leverage
+        if current_profit >= min_profit_for_rsi:
             above_ema200 = last["close"] > last.get("EMA_200", 0)
             rsi_threshold = self._get_exit_rsi_threshold(current_profit, above_ema200, leverage)
             if rsi14 < rsi_threshold:
@@ -1134,7 +1142,8 @@ class SygnifStrategy(IStrategy):
         rsi14_1h = last.get("RSI_14_1h", 50)
 
         # --- Profit-tiered RSI exit for shorts (inverted) ---
-        if current_profit > 0.0:
+        min_profit_for_rsi = 0.02 if leverage <= 1.0 else 0.02 * leverage
+        if current_profit >= min_profit_for_rsi:
             below_ema200 = last["close"] < last.get("EMA_200", float("inf"))
             rsi_threshold = self._get_short_exit_rsi_threshold(current_profit, below_ema200, leverage)
             if rsi14 > rsi_threshold:
