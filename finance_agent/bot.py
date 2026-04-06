@@ -1151,7 +1151,11 @@ import json as _json
 
 
 def _briefing(symbols: list[str] | None = None) -> str:
-    """Return compact market briefing with strategy signals for Plutus-3B."""
+    """Return compact market briefing optimized for Plutus-3B consumption.
+
+    Format per line (pipe-delimited for easy 3B parsing):
+      BTC $67,200 uptrend|RSI:65 WR:-32 StRSI:45|MACD:bull CMF:+0.12|S:65800 R:68400|TA:72 strong_ta_long 5x
+    """
     lines = []
     # Always include BTC + ETH
     core = ["BTCUSDT", "ETHUSDT"]
@@ -1165,9 +1169,6 @@ def _briefing(symbols: list[str] | None = None) -> str:
             continue
         name = sym.replace("USDT", "")
         sig = detect_signals(ta, name)
-        rsi = ta.get("rsi", 0)
-        trend = ta.get("trend", "?")
-        macd = ta.get("macd_signal_text", "?")
         price = ta.get("price", 0)
         if price >= 100:
             pf = f"${price:,.0f}"
@@ -1175,10 +1176,25 @@ def _briefing(symbols: list[str] | None = None) -> str:
             pf = f"${price:.2f}"
         else:
             pf = f"${price:.5f}"
-        entry = sig["entries"][0] if sig["entries"] else "no_signal"
+        trend = ta.get("trend", "?").replace("Strong ", "s-")
+        rsi = ta.get("rsi", 0)
+        willr = ta.get("willr", -50)
+        stochrsi = ta.get("stochrsi_k", 50)
+        macd_sig = ta.get("macd_signal_text", "?").lower().replace(" ", "_")
+        cmf = ta.get("cmf", 0)
+        sup = ta.get("support", 0)
+        res = ta.get("resistance", 0)
+        entry = sig["entries"][0] if sig["entries"] else "none"
+        exit_sig = sig["exits"][0] if sig["exits"] else ""
+        exit_part = f" EXIT:{exit_sig}" if exit_sig else ""
+        lev = sig["leverage"]
+
         lines.append(
-            f"{name} {pf} {trend} RSI:{rsi:.0f} {macd} "
-            f"TA:{sig['ta_score']} {entry} Lev:{sig['leverage']:.0f}x"
+            f"{name} {pf} {trend}"
+            f"|RSI:{rsi:.0f} WR:{willr:.0f} StRSI:{stochrsi:.0f}"
+            f"|MACD:{macd_sig} CMF:{cmf:+.2f}"
+            f"|S:{sup:.4g} R:{res:.4g}"
+            f"|TA:{sig['ta_score']} {entry} {lev:.0f}x{exit_part}"
         )
     return "\n".join(lines) if lines else "No data"
 

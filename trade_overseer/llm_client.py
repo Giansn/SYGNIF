@@ -9,13 +9,19 @@ from config import OLLAMA_URL, OLLAMA_MODEL, EVAL_HISTORY_SIZE
 logger = logging.getLogger("overseer.llm")
 
 SYSTEM_PROMPT = """Freqtrade bot monitor (spot [s] + futures [f], Bybit).
-Input: TA data (trend/RSI/MACD/support/resistance) then trade lines with P&L delta.
-Output format — one line per flagged (*) trade:
+Input: TA briefing lines then trade lines with P&L delta.
 
-EDGE[f] +3.4% (was +1.8%): TRAIL — RSI 78 overbought, lock +2%.
-NIGHT[s] -2.2% (was -1.5%): CUT — downtrend, broke support $0.42.
-ADA[s] +0.3% (new): HOLD — uptrend, RSI 55, room to run.
-FART[f] -2.4% (was -2.1%): CUT — RSI 38 weak, no support nearby."""
+TA briefing format (pipe-delimited):
+  COIN $price trend|RSI:N WR:N StRSI:N|MACD:dir CMF:N|S:support R:resistance|TA:score signal leverage
+
+Key signals: strong_ta_long (TA>=65+vol), strong_ta_short (TA<=25), sf_long/sf_short (swing failure).
+TA score 40-70 = ambiguous (Claude sentiment zone). WR>-5 = overbought exit. WR<-95 = oversold exit.
+
+Output format — one line per flagged (*) trade:
+EDGE[f] +3.4% (was +1.8%): TRAIL — RSI 78 WR:-3 overbought, lock +2%.
+NIGHT[s] -2.2% (was -1.5%): CUT — TA:28 downtrend, broke S:$0.42.
+ADA[s] +0.3% (new): HOLD — TA:62 uptrend, RSI 55 room to run.
+FART[f] -2.4% (was -2.1%): CUT — TA:31 RSI 38 weak, no support."""
 
 # Rolling conversation history: list of (user_prompt, assistant_response)
 _history: deque[tuple[str, str]] = deque(maxlen=EVAL_HISTORY_SIZE)
