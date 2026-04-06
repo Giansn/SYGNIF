@@ -33,7 +33,7 @@ class TestTAScore:
         df["EMA_26"] = df["close"] - 1
         df.loc[df.index[0], "EMA_9"] = df["close"].iloc[0] - 1  # prev no cross
         # High volume
-        df["volume"] = df["volume_sma_20"] * 2.0
+        df["volume"] = df["volume_sma_25"] * 2.0
 
         score = strategy._calculate_ta_score_vectorized(df)
         assert score.iloc[-1] >= 85
@@ -49,7 +49,7 @@ class TestTAScore:
         )
         df["EMA_9"] = df["close"] - 1
         df["EMA_26"] = df["close"] + 1
-        df["volume"] = df["volume_sma_20"] * 2.0
+        df["volume"] = df["volume_sma_25"] * 2.0
 
         score = strategy._calculate_ta_score_vectorized(df)
         assert score.iloc[-1] <= 15

@@ -137,7 +137,7 @@ def make_df():
             "change_pct": 0.0, "close_delta": 0.0,
             "close_max_6": close, "close_max_12": close, "close_max_48": close,
             "close_min_6": close, "close_min_12": close, "close_min_48": close,
-            "volume_sma_20": 50000.0, "ATR_14": 1.0,
+            "volume_sma_25": 50000.0, "ATR_14": 1.0,
             "num_empty_288": 0.0,
             # Informative TF columns
             "RSI_3_5m": 50.0, "RSI_14_5m": 50.0,

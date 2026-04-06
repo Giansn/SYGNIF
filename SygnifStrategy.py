@@ -541,7 +541,7 @@ class SygnifStrategy(IStrategy):
         df["close_min_6"] = df["close"].rolling(6).min()
         df["close_min_12"] = df["close"].rolling(12).min()
         df["close_min_48"] = df["close"].rolling(48).min()
-        df["volume_sma_20"] = pta.sma(df["volume"], length=20)
+        df["volume_sma_25"] = pta.sma(df["volume"], length=25)
         df["ATR_14"] = pta.atr(df["high"], df["low"], df["close"], length=14)
         df["num_empty_288"] = (df["volume"] <= 0).rolling(window=288, min_periods=288).sum()
 
@@ -828,7 +828,7 @@ class SygnifStrategy(IStrategy):
             score += np.where(btc_rsi < 30, -5, np.where(btc_rsi > 60, 3, 0))
 
         # Volume confirmation (-3 to +3)
-        vol_ratio = np.where(df["volume_sma_20"] > 0, df["volume"] / df["volume_sma_20"], 1.0)
+        vol_ratio = np.where(df["volume_sma_25"] > 0, df["volume"] / df["volume_sma_25"], 1.0)
         score += np.where((vol_ratio > 1.5) & (score > 50), 3, np.where((vol_ratio > 1.5) & (score < 50), -3, 0))
 
         return score.clip(0, 100)
@@ -850,8 +850,9 @@ class SygnifStrategy(IStrategy):
         # TA score for all rows
         ta_score = self._calculate_ta_score_vectorized(df)
 
-        # Strong TA signal — entry without Claude (lowered from 75 to 55)
-        strong = prot & empty_ok & (ta_score >= 65)
+        # Strong TA signal — requires TA >= 65 + volume confirmation
+        vol_ok = df["volume"] > (df["volume_sma_25"] * 1.2)
+        strong = prot & empty_ok & (ta_score >= 65) & vol_ok
         df.loc[strong, "enter_long"] = 1
         df.loc[strong, "enter_tag"] = "strong_ta"
 
@@ -932,6 +933,15 @@ class SygnifStrategy(IStrategy):
             if count >= self.max_slots_swing:
                 logger.info(f"Swing slot cap: {count}/{self.max_slots_swing}, skipping {pair} ({tag})")
                 return False
+
+        # Futures: minimum average volume gate (filter micro caps, swing bypasses)
+        if self.config.get("trading_mode", "") == "futures" and tag not in self._swing_tags and self.dp:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            if len(df) > 0 and "volume_sma_25" in df.columns:
+                vol_avg = df.iloc[-1].get("volume_sma_25", 0)
+                if vol_avg < 50000:
+                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 50k, skipping")
+                    return False
 
         return True
 
