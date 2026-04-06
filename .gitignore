@@ -30,3 +30,6 @@ trade_overseer/data/state.json
 finance_agent/.env
 finance_agent/__pycache__/
 finance_agent/nfi_update.log
+
+# Skill bundles
+dist/

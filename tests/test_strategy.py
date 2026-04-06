@@ -203,9 +203,12 @@ class TestExitRSITiers:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestExitPaths:
-    def test_willr_overbought_exit(self, strategy, make_df, mock_trade):
+    def test_willr_reversal_exit(self, strategy, make_df, mock_trade):
         trade = mock_trade(enter_tag="strong_ta")
-        df = make_df(WILLR_14=-3.0, RSI_14=50.0)
+        df = make_df(WILLR_14=-50.0, RSI_14=50.0)
+        # WILLR was at peak (-3) on prev bar, now falling (-8) → reversal
+        df.iloc[-2, df.columns.get_loc("WILLR_14")] = -3.0
+        df.iloc[-1, df.columns.get_loc("WILLR_14")] = -8.0
 
         strategy.dp = type("DP", (), {
             "get_analyzed_dataframe": lambda self, pair, tf: (df, None)
@@ -214,7 +217,7 @@ class TestExitPaths:
         result = strategy.custom_exit(
             "BTC/USDT", trade, None, 51000.0, 0.03, after_fill=False,
         )
-        assert result == "exit_willr_overbought"
+        assert result == "exit_willr_reversal"
 
     def test_swing_failure_tp(self, strategy, make_df, mock_trade):
         trade = mock_trade(enter_tag="swing_failure", open_rate=100.0)

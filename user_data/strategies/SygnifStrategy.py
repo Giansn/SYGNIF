@@ -712,7 +712,7 @@ class SygnifStrategy(IStrategy):
         # --- Handle NaN for merged columns ---
         for col in ["RSI_14_1h", "RSI_14_4h", "RSI_14_1d"]:
             if col in df.columns:
-                df[col] = df[col].astype(np.float64).replace(to_replace=[np.nan, None], value=50.0)
+                df[col] = df[col].astype(np.float64).fillna(50.0)
 
         # --- Failure Swing (Stop Hunt) indicators ---
         # 48-bar S/R levels (4h on 5m TF, shifted: use closed bars only)
