@@ -611,24 +611,20 @@ def claude_analyze(prompt: str, max_tokens: int = 1500) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Command: /market — Top crypto overview
+# Pair filtering helper
 # ---------------------------------------------------------------------------
-def cmd_market():
-    tg_send("Fetching market data...")
-    tickers = bybit_tickers()
-    if not tickers:
-        tg_send("Failed to fetch market data.")
-        return
+_STABLECOIN_EXCLUDE = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
 
-    # Filter USDT pairs, sort by turnover
+
+def _filter_pairs(tickers: list[dict], min_turnover: float = 1_000_000) -> list[dict]:
+    """Filter USDT pairs, exclude stablecoins and leveraged tokens."""
     pairs = []
-    exclude = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
     for t in tickers:
         sym = t.get("symbol", "")
         if not sym.endswith("USDT"):
             continue
         base = sym.replace("USDT", "")
-        if base in exclude or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
+        if base in _STABLECOIN_EXCLUDE or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
             continue
         try:
             price = float(t.get("lastPrice", 0))
@@ -636,57 +632,52 @@ def cmd_market():
             turnover = float(t.get("turnover24h", 0))
         except (ValueError, TypeError):
             continue
-        if turnover < 1_000_000:
+        if turnover < min_turnover:
             continue
         pairs.append({"sym": base, "price": price, "change": change, "vol": turnover})
+    return pairs
 
+
+def _fmt_price(price: float) -> str:
+    if price >= 100:
+        return f"${price:,.0f}"
+    elif price >= 1:
+        return f"${price:.2f}"
+    else:
+        return f"${price:.5f}"
+
+
+# ---------------------------------------------------------------------------
+# Command: /market — Top crypto overview
+# ---------------------------------------------------------------------------
+def cmd_market() -> str:
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch market data."
+
+    pairs = _filter_pairs(tickers)
     top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:15]
 
     lines = ["*Crypto Market Overview*\n"]
     for p in top:
         arrow = "+" if p["change"] >= 0 else ""
         vol_m = p["vol"] / 1e6
-        # Format price based on magnitude
-        if p["price"] >= 100:
-            pf = f"${p['price']:,.0f}"
-        elif p["price"] >= 1:
-            pf = f"${p['price']:.2f}"
-        else:
-            pf = f"${p['price']:.5f}"
+        pf = _fmt_price(p["price"])
         lines.append(f"`{p['sym']:>6}` {pf:>12} `{arrow}{p['change']:.1f}%` Vol `${vol_m:.0f}M`")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_")
-    tg_send("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Command: /movers — Top gainers & losers
 # ---------------------------------------------------------------------------
-def cmd_movers():
+def cmd_movers() -> str:
     tickers = bybit_tickers()
     if not tickers:
-        tg_send("Failed to fetch data.")
-        return
+        return "Failed to fetch data."
 
-    pairs = []
-    exclude = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
-    for t in tickers:
-        sym = t.get("symbol", "")
-        if not sym.endswith("USDT"):
-            continue
-        base = sym.replace("USDT", "")
-        if base in exclude or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
-            continue
-        try:
-            change = float(t.get("price24hPcnt", 0)) * 100
-            turnover = float(t.get("turnover24h", 0))
-            price = float(t.get("lastPrice", 0))
-        except (ValueError, TypeError):
-            continue
-        if turnover < 500_000:
-            continue
-        pairs.append({"sym": base, "price": price, "change": change, "vol": turnover})
-
+    pairs = _filter_pairs(tickers, min_turnover=500_000)
     by_change = sorted(pairs, key=lambda x: x["change"], reverse=True)
     gainers = by_change[:5]
     losers = by_change[-5:][::-1]
@@ -700,29 +691,23 @@ def cmd_movers():
         lines.append(f"  {i}. `{l['sym']}` {l['change']:.1f}% (${l['price']:.4g})")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
-    tg_send("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Command: /ta <TICKER> — Technical analysis + strategy signals
 # ---------------------------------------------------------------------------
-def cmd_ta(ticker: str):
-    ticker = ticker.upper().strip()
-    if not ticker:
-        ticker = "BTC"
+def cmd_ta(ticker: str) -> str:
+    ticker = ticker.upper().strip() or "BTC"
     symbol = f"{ticker}USDT"
-    tg_send(f"Analyzing `{ticker}`...")
 
-    # Fetch 1h candles
     df = bybit_kline(symbol, interval="60", limit=200)
     if df.empty:
-        tg_send(f"No data for `{ticker}`. Check ticker symbol.")
-        return
+        return f"No data for `{ticker}`. Check ticker symbol."
 
     ind = calc_indicators(df)
     if not ind:
-        tg_send(f"Not enough data for `{ticker}`.")
-        return
+        return f"Not enough data for `{ticker}`."
 
     sig = detect_signals(ind, ticker)
     p = ind["price"]
@@ -782,16 +767,15 @@ def cmd_ta(ticker: str):
         f"*Volume:* `{ind['volume']:,.0f}` ({ind['vol_ratio']:.1f}x avg)\n"
         f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')} · 1h candles_"
     )
-    tg_send(msg)
+    return msg
 
 
 # ---------------------------------------------------------------------------
 # Command: /research <TICKER> — Full AI research
 # ---------------------------------------------------------------------------
-def cmd_research(ticker: str):
+def cmd_research(ticker: str) -> str:
     ticker = ticker.upper().strip() or "BTC"
     symbol = f"{ticker}USDT"
-    tg_send(f"Researching `{ticker}`... (TA + Strategy + News + AI)")
 
     # 1. Fetch market data
     df = bybit_kline(symbol, interval="60", limit=200)
@@ -861,14 +845,13 @@ Keep it under 350 words. Be specific with numbers. No disclaimers."""
         f"{analysis}\n\n"
         f"_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
     )
-    tg_send(msg)
+    return msg
 
 
 # ---------------------------------------------------------------------------
 # Command: /plays — AI investment opportunities (strategy-aware)
 # ---------------------------------------------------------------------------
-def cmd_plays():
-    tg_send("Scanning for opportunities...")
+def cmd_plays() -> str:
 
     # Gather market context
     tickers = bybit_tickers()
@@ -955,8 +938,6 @@ Risk: Low/Medium/High
 Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total under 400 words."""
 
     analysis = claude_analyze(prompt, max_tokens=2000)
-    msg = f"*Investment Plays*\n\n{analysis}\n\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
-    tg_send(msg)
 
     # Save plays for trade overseer
     try:
@@ -968,29 +949,18 @@ Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total unde
     except Exception:
         pass  # Overseer may not be running
 
+    return f"*Investment Plays*\n\n{analysis}\n\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
+
 
 # ---------------------------------------------------------------------------
 # Command: /signals — Quick scan: active entry signals across top pairs
 # ---------------------------------------------------------------------------
-def cmd_signals():
-    tg_send("Scanning signals...")
+def cmd_signals() -> str:
     tickers = bybit_tickers()
-    pairs = []
-    exclude = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
-    for t in tickers:
-        sym = t.get("symbol", "")
-        if not sym.endswith("USDT"):
-            continue
-        base = sym.replace("USDT", "")
-        if base in exclude or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
-            continue
-        try:
-            turnover = float(t.get("turnover24h", 0))
-        except (ValueError, TypeError):
-            continue
-        if turnover < 2_000_000:
-            continue
-        pairs.append({"sym": base, "vol": turnover})
+    if not tickers:
+        return "Failed to fetch data."
+
+    pairs = _filter_pairs(tickers, min_turnover=2_000_000)
 
     top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:12]
 
@@ -1035,30 +1005,29 @@ def cmd_signals():
         lines.append("_No active signals across top pairs._")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')} · 1h candles_")
-    tg_send("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Command: /news — Latest headlines
 # ---------------------------------------------------------------------------
-def cmd_news(ticker: str = ""):
+def cmd_news(ticker: str = "") -> str:
     headlines = fetch_news(ticker.upper().strip() if ticker else "")
     if not headlines:
-        tg_send("Could not fetch news.")
-        return
+        return "Could not fetch news."
     title = f"*Crypto News*" + (f" ({ticker.upper()})" if ticker else "")
     lines = [title, ""]
     for i, h in enumerate(headlines, 1):
         lines.append(f"{i}. {h}")
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
-    tg_send("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
 # Command: /fa_help
 # ---------------------------------------------------------------------------
-def cmd_help():
-    tg_send(
+def cmd_help() -> str:
+    return (
         "*Sygnif Finance Agent*\n\n"
         "`/market` — Top 15 crypto overview\n"
         "`/movers` — Gainers & losers (24h)\n"
@@ -1077,69 +1046,65 @@ def cmd_help():
 # ---------------------------------------------------------------------------
 # Command: /overseer — Trade overseer overview
 # ---------------------------------------------------------------------------
-def cmd_overseer():
+def cmd_overseer() -> str:
     try:
         resp = requests.get("http://127.0.0.1:8090/overview", timeout=5)
         data = resp.json()
         commentary = data.get("last_commentary", "")
         if commentary:
-            tg_send(commentary)
-        else:
-            tg_send(f"*Overseer* | {data.get('open_trades', 0)} trades tracked, no recent alerts.")
+            return commentary
+        return f"*Overseer* | {data.get('open_trades', 0)} trades tracked, no recent alerts."
     except Exception as e:
-        tg_send(f"Overseer unavailable: {e}")
+        return f"Overseer unavailable: {e}"
 
 
 # ---------------------------------------------------------------------------
 # Command: /evaluate — Force trade evaluation
 # ---------------------------------------------------------------------------
-def cmd_evaluate():
-    tg_send("Evaluating positions...")
+def cmd_evaluate() -> str:
     try:
         resp = requests.post("http://127.0.0.1:8090/evaluate", timeout=120)
         data = resp.json()
-        commentary = data.get("commentary", "No output.")
-        tg_send(commentary)
+        return data.get("commentary", "No output.")
     except Exception as e:
-        tg_send(f"Evaluation failed: {e}")
+        return f"Evaluation failed: {e}"
 
 
 # ---------------------------------------------------------------------------
-# Main loop
+# Command dispatch — returns response string (matches sygnif_bot.py pattern)
 # ---------------------------------------------------------------------------
 COMMANDS = {
-    "/market": lambda args: cmd_market(),
-    "/movers": lambda args: cmd_movers(),
-    "/ta": lambda args: cmd_ta(args),
-    "/signals": lambda args: cmd_signals(),
+    "/market":   lambda args: cmd_market(),
+    "/movers":   lambda args: cmd_movers(),
+    "/ta":       lambda args: cmd_ta(args),
+    "/signals":  lambda args: cmd_signals(),
     "/research": lambda args: cmd_research(args),
-    "/plays": lambda args: cmd_plays(),
-    "/news": lambda args: cmd_news(args),
+    "/plays":    lambda args: cmd_plays(),
+    "/news":     lambda args: cmd_news(args),
     "/overseer": lambda args: cmd_overseer(),
     "/evaluate": lambda args: cmd_evaluate(),
-    "/fa_help": lambda args: cmd_help(),
+    "/fa_help":  lambda args: cmd_help(),
 }
 
 
-def handle_message(text: str, chat_id: str):
-    """Route incoming message to command handler."""
-    if str(chat_id) != str(TG_CHAT):
-        return
+def handle_command(text: str) -> str | None:
+    """Route command to handler. Returns response text or None."""
+    if not text.strip().startswith("/"):
+        return None
 
-    text = text.strip()
-    if not text.startswith("/"):
-        return
-
-    parts = text.split(maxsplit=1)
+    parts = text.strip().split(maxsplit=1)
     cmd = parts[0].lower().split("@")[0]  # strip @botname suffix
     args = parts[1] if len(parts) > 1 else ""
 
-    if cmd in COMMANDS:
-        try:
-            COMMANDS[cmd](args)
-        except Exception as e:
-            logger.error(f"Command {cmd} error: {traceback.format_exc()}")
-            tg_send(f"Error: {e}")
+    handler = COMMANDS.get(cmd)
+    if handler is None:
+        return None
+
+    try:
+        return handler(args)
+    except Exception as e:
+        logger.error(f"Command {cmd} error: {traceback.format_exc()}")
+        return f"Error: {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -1254,8 +1219,10 @@ def main():
                 msg = update.get("message", {})
                 text = msg.get("text", "")
                 chat_id = str(msg.get("chat", {}).get("id", ""))
-                if text:
-                    handle_message(text, chat_id)
+                if text and str(chat_id) == str(TG_CHAT):
+                    reply = handle_command(text)
+                    if reply:
+                        tg_send(reply)
         except KeyboardInterrupt:
             logger.info("Shutting down.")
             break
