@@ -1,3 +1,114 @@
+# Sygnif — Freqtrade Trading Bot
+
+## Overview
+
+Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment analysis. Runs on Bybit via Docker on AWS EC2 (eu-central-1).
+
+## Architecture
+
+| Component | Description |
+|---|---|
+| `SygnifStrategy.py` | Main strategy — NFI-derived, multi-TF analysis, Claude sentiment layer |
+| `user_data/config.json` | Spot config (port 8080) |
+| `user_data/config_futures.json` | Futures config (port 8081, isolated margin, 2-5x leverage) |
+| `trade_overseer/` | Trade management and analysis system |
+| `notification_handler.py` | Webhook notifications |
+| `docker-compose.yml` | 3 containers: freqtrade, freqtrade-futures, notification-handler |
+
+## Strategy Design
+
+### Entry Types
+
+| Tag | Side | Trigger |
+|---|---|---|
+| `strong_ta` | Long | TA score >= 65 + volume > 1.2x SMA25 |
+| `strong_ta_short` | Short | TA score <= 25 (vectorized) |
+| `claude_s{N}` | Long | TA 40-70 + Claude sentiment, combined >= 55 |
+| `claude_short_s{N}` | Short | TA 30-60 + Claude sentiment, combined <= 40 |
+| `claude_swing` | Long | Failure swing + TA >= 50 |
+| `claude_swing_short` | Short | Failure swing + TA <= 50 |
+| `swing_failure` | Long | Failure swing standalone |
+| `swing_failure_short` | Short | Failure swing standalone |
+
+### Exit Logic
+
+- **Profit-tiered RSI exits**: leverage-aware (profit/leverage normalization)
+- **Williams %R**: overbought/oversold exits at > 2% profit
+- **Ratcheting trailing stop**: -3% at 2%+, -2% at 5%+, -1.5% at 10%+ profit
+- **Soft stoploss**: 0.8x doom threshold, requires 3-bar RSI slope confirmation
+- **Failure swing exits**: EMA-TP target or volatility-adjusted SL
+
+### Risk Management
+
+- **Doom stoploss**: -20% (divided by leverage for futures), placed on exchange
+- **Doom cooldown**: 4h lockout per pair after stoploss hit
+- **Consecutive loss lockout**: 2+ SL hits on same pair in 24h → 24h block
+- **Slot caps**: max 6 strong_ta, max 4 swing trades open simultaneously
+- **Futures volume gate**: vol_sma_25 > 50k required (except swings)
+- **Global protections**: multi-TF RSI cascade blocks entries during crashes (long) / pumps (short)
+
+### Failure Swing Parameters
+
+- S/R window: 48 bars (4h on 5m TF)
+- Volatility filter: > 3% distance from EMA_120
+- Stability: S/R unchanged for 2 bars
+- Dynamic SL/TP: volatility-adjusted coefficients
+
+### Leverage Tiers
+
+- Majors (BTC, ETH, SOL, XRP): 5x
+- Default: 3x
+- ATR > 3%: capped at 2x
+- ATR > 2%: capped at 3x
+
+## Deployment
+
+### Instance
+
+- **EC2**: `i-0cd5389584d70a7fc` at `3.122.252.186` (eu-central-1)
+- **SSH**: EC2 Instance Connect (push key first, 60s window)
+- **Repo path on instance**: `~/xrp_claude_bot`
+
+### Deploy Commands
+
+```bash
+# Push SSH key (required before each SSH session)
+aws ec2-instance-connect send-ssh-public-key \
+  --instance-id i-0cd5389584d70a7fc \
+  --instance-os-user ubuntu \
+  --ssh-public-key file://~/.ssh/id_ed25519.pub \
+  --region eu-central-1
+
+# SSH and deploy
+ssh ubuntu@3.122.252.186 "cd ~/xrp_claude_bot && git pull && docker compose restart freqtrade freqtrade-futures"
+```
+
+### Important
+
+- `SygnifStrategy.py` exists in TWO places: root and `user_data/strategies/`. Always sync both after edits.
+- Strategy is loaded at container startup — **must restart** after code changes (volume mount updates files but Freqtrade caches the loaded strategy).
+- Both configs are `dry_run: true` — change to `false` for live trading.
+
+## Development
+
+### Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Key Files
+
+| File | Purpose |
+|---|---|
+| `SygnifStrategy.py` | Strategy source (root copy) |
+| `user_data/strategies/SygnifStrategy.py` | Strategy copy (loaded by Freqtrade) |
+| `user_data/config.json` | Spot config |
+| `user_data/config_futures.json` | Futures config |
+| `tests/test_strategy.py` | Unit tests |
+| `docker-compose.yml` | Container orchestration |
+| `.env` | API keys (git-ignored) |
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

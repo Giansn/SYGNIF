@@ -2,13 +2,16 @@
 """
 Sygnif Finance Agent — Telegram bot for crypto research & analysis.
 Combines market scanning, technical analysis, and AI-powered insights.
+Strategy-aware: computes the same TA score and detects entry/exit signals
+as SygnifStrategy.py so research aligns with live bot behavior.
 
 Commands:
   /market          — Top 10 crypto overview
   /movers [1h|24h] — Top gainers & losers
-  /ta <TICKER>     — Technical analysis with indicators
+  /ta <TICKER>     — Technical analysis with strategy signals
   /research <TICK> — Full research (market + TA + news + AI)
   /plays           — AI investment opportunity scan
+  /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
   /fa_help         — Show commands
 """
@@ -39,6 +42,11 @@ TG_TOKEN = os.environ.get("FINANCE_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BYBIT = "https://api.bybit.com/v5"
+
+# Strategy constants (mirrors SygnifStrategy.py)
+MAJOR_PAIRS = {"BTC", "ETH", "SOL", "XRP"}
+LEVERAGE_MAJORS = 5.0
+LEVERAGE_DEFAULT = 3.0
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +160,69 @@ def fetch_news(token: str = "", max_items: int = 7) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Pure-pandas indicator helpers
+# ---------------------------------------------------------------------------
+def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(period).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _aroon(high: pd.Series, low: pd.Series, period: int = 14) -> tuple[pd.Series, pd.Series]:
+    aroonu = high.rolling(period + 1).apply(lambda x: x.argmax(), raw=True) / period * 100
+    aroond = low.rolling(period + 1).apply(lambda x: x.argmin(), raw=True) / period * 100
+    return aroonu, aroond
+
+
+def _stochrsi(close: pd.Series, period: int = 14) -> pd.Series:
+    rsi = _rsi(close, period)
+    rsi_min = rsi.rolling(period).min()
+    rsi_max = rsi.rolling(period).max()
+    rng = rsi_max - rsi_min
+    return ((rsi - rsi_min) / rng.replace(0, np.nan) * 100).rolling(3).mean()
+
+
+def _cmf(high: pd.Series, low: pd.Series, close: pd.Series,
+         volume: pd.Series, period: int = 20) -> pd.Series:
+    rng = high - low
+    mfv = ((close - low) - (high - close)) / rng.replace(0, np.nan)
+    return (mfv * volume).rolling(period).sum() / volume.rolling(period).sum()
+
+
+def _willr(high: pd.Series, low: pd.Series, close: pd.Series,
+           period: int = 14) -> pd.Series:
+    hh = high.rolling(period).max()
+    ll = low.rolling(period).min()
+    rng = hh - ll
+    return ((hh - close) / rng.replace(0, np.nan)) * -100
+
+
+def _cci(high: pd.Series, low: pd.Series, close: pd.Series,
+         period: int = 20) -> pd.Series:
+    tp = (high + low + close) / 3
+    sma = tp.rolling(period).mean()
+    mad = tp.rolling(period).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    return (tp - sma) / (0.015 * mad.replace(0, np.nan))
+
+
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series,
+         period: int = 14) -> pd.Series:
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(span=period, adjust=False).mean()
+
+
+# ---------------------------------------------------------------------------
 # TA: Calculate indicators from OHLCV DataFrame
 # ---------------------------------------------------------------------------
 def calc_indicators(df: pd.DataFrame) -> dict:
-    """Calculate technical indicators. Returns dict of values."""
+    """Calculate technical indicators matching SygnifStrategy. Returns dict."""
     if len(df) < 50:
         return {}
     close = df["close"]
@@ -163,18 +230,18 @@ def calc_indicators(df: pd.DataFrame) -> dict:
     low = df["low"]
     volume = df["volume"]
 
-    # EMAs
+    # EMAs (strategy set)
     ema9 = close.ewm(span=9).mean()
+    ema12 = close.ewm(span=12).mean()
     ema21 = close.ewm(span=21).mean()
+    ema26 = close.ewm(span=26).mean()
     ema50 = close.ewm(span=50).mean()
+    ema120 = close.ewm(span=120).mean()
     ema200 = close.ewm(span=200).mean() if len(df) >= 200 else pd.Series(dtype=float)
 
-    # RSI 14
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
+    # RSI (strategy uses 3 + 14)
+    rsi14 = _rsi(close, 14)
+    rsi3 = _rsi(close, 3)
 
     # Bollinger Bands 20
     sma20 = close.rolling(20).mean()
@@ -183,19 +250,28 @@ def calc_indicators(df: pd.DataFrame) -> dict:
     bb_lower = sma20 - 2 * std20
 
     # MACD
-    ema12 = close.ewm(span=12).mean()
-    ema26 = close.ewm(span=26).mean()
     macd_line = ema12 - ema26
     macd_signal = macd_line.ewm(span=9).mean()
     macd_hist = macd_line - macd_signal
 
-    # Volume SMA
-    vol_sma = volume.rolling(20).mean()
+    # Volume SMA (strategy uses 25)
+    vol_sma25 = volume.rolling(25).mean()
 
-    # Support / Resistance (simple: recent swing low/high)
-    recent = df.tail(48)
-    support = recent["low"].min()
-    resistance = recent["high"].max()
+    # --- Strategy indicators ---
+    aroonu, aroond = _aroon(high, low, 14)
+    stochrsi_k = _stochrsi(close, 14)
+    cmf20 = _cmf(high, low, close, volume, 20)
+    willr14 = _willr(high, low, close, 14)
+    cci20 = _cci(high, low, close, 20)
+    roc9 = close.pct_change(9) * 100
+    atr14 = _atr(high, low, close, 14)
+
+    # Swing Failure (SF) levels — 48-bar S/R
+    sf_resistance = high.shift(1).rolling(48).max()
+    sf_support = low.shift(1).rolling(48).min()
+    sf_resistance_stable = sf_resistance == sf_resistance.shift(1)
+    sf_support_stable = sf_support == sf_support.shift(1)
+    sf_volatility = ((close - ema120).abs() / ema120)
 
     last = close.iloc[-1]
     prev = close.iloc[-2]
@@ -204,24 +280,69 @@ def calc_indicators(df: pd.DataFrame) -> dict:
         "price": last,
         "prev_close": prev,
         "change_pct": (last - prev) / prev * 100 if prev else 0,
+        # EMAs
         "ema9": ema9.iloc[-1],
+        "ema12": ema12.iloc[-1],
         "ema21": ema21.iloc[-1],
+        "ema26": ema26.iloc[-1],
         "ema50": ema50.iloc[-1],
+        "ema120": ema120.iloc[-1],
         "ema200": ema200.iloc[-1] if len(ema200) > 0 else None,
-        "rsi": rsi.iloc[-1],
+        # RSI
+        "rsi": rsi14.iloc[-1],
+        "rsi3": rsi3.iloc[-1],
+        # Bollinger
         "bb_upper": bb_upper.iloc[-1],
         "bb_lower": bb_lower.iloc[-1],
         "bb_mid": sma20.iloc[-1],
+        # MACD
         "macd": macd_line.iloc[-1],
         "macd_signal": macd_signal.iloc[-1],
         "macd_hist": macd_hist.iloc[-1],
+        # Volume
         "volume": volume.iloc[-1],
-        "vol_avg": vol_sma.iloc[-1],
-        "support": support,
-        "resistance": resistance,
-        "high_24": recent["high"].max(),
-        "low_24": recent["low"].min(),
+        "vol_avg": vol_sma25.iloc[-1],
+        "vol_ratio": volume.iloc[-1] / vol_sma25.iloc[-1] if vol_sma25.iloc[-1] > 0 else 1.0,
+        # Strategy indicators
+        "aroonu": aroonu.iloc[-1],
+        "aroond": aroond.iloc[-1],
+        "stochrsi_k": stochrsi_k.iloc[-1],
+        "cmf": cmf20.iloc[-1],
+        "willr": willr14.iloc[-1],
+        "cci": cci20.iloc[-1],
+        "roc9": roc9.iloc[-1],
+        "atr": atr14.iloc[-1],
+        "atr_pct": (atr14.iloc[-1] / last * 100) if last > 0 else 0,
+        # Swing failure
+        "sf_support": sf_support.iloc[-1],
+        "sf_resistance": sf_resistance.iloc[-1],
+        "sf_support_stable": bool(sf_support_stable.iloc[-1]),
+        "sf_resistance_stable": bool(sf_resistance_stable.iloc[-1]),
+        "sf_volatility": sf_volatility.iloc[-1],
+        "sf_long": bool(
+            low.iloc[-1] <= sf_support.iloc[-1]
+            and close.iloc[-1] > sf_support.iloc[-1]
+            and sf_support_stable.iloc[-1]
+            and sf_volatility.iloc[-1] > 0.03
+        ),
+        "sf_short": bool(
+            high.iloc[-1] >= sf_resistance.iloc[-1]
+            and close.iloc[-1] < sf_resistance.iloc[-1]
+            and sf_resistance_stable.iloc[-1]
+            and sf_volatility.iloc[-1] > 0.03
+        ),
+        # Legacy keys
+        "support": sf_support.iloc[-1],
+        "resistance": sf_resistance.iloc[-1],
+        "high_24": df.tail(48)["high"].max(),
+        "low_24": df.tail(48)["low"].min(),
     }
+
+    # EMA crossover state (9 vs 26 — matches strategy scoring)
+    result["ema_bull"] = result["ema9"] > result["ema26"]
+    prev_ema9 = ema9.iloc[-2] if len(ema9) >= 2 else result["ema9"]
+    prev_ema26 = ema26.iloc[-2] if len(ema26) >= 2 else result["ema26"]
+    result["ema_cross"] = result["ema_bull"] and prev_ema9 <= prev_ema26
 
     # Trend
     if last > ema9.iloc[-1] > ema21.iloc[-1] > ema50.iloc[-1]:
@@ -263,6 +384,199 @@ def calc_indicators(df: pd.DataFrame) -> dict:
         result["bb_position"] = "N/A"
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Strategy TA score — mirrors _calculate_ta_score_vectorized()
+# ---------------------------------------------------------------------------
+def calc_ta_score(ind: dict) -> dict:
+    """Compute strategy TA score (0-100) from indicator dict.
+    Returns {"score": int, "components": {name: int, ...}}."""
+    if not ind:
+        return {"score": 50, "components": {}}
+
+    components = {}
+    score = 50.0
+
+    # RSI_14 component (-15 to +15)
+    rsi = ind.get("rsi", 50)
+    if rsi < 30:
+        c = 15
+    elif rsi < 40:
+        c = 8
+    elif rsi > 70:
+        c = -15
+    elif rsi > 60:
+        c = -8
+    else:
+        c = 0
+    components["rsi14"] = c
+    score += c
+
+    # RSI_3 momentum (-10 to +10)
+    rsi3 = ind.get("rsi3", 50)
+    if rsi3 < 10:
+        c = 10
+    elif rsi3 < 20:
+        c = 5
+    elif rsi3 > 90:
+        c = -10
+    elif rsi3 > 80:
+        c = -5
+    else:
+        c = 0
+    components["rsi3"] = c
+    score += c
+
+    # EMA crossover (-10 to +10)
+    if ind.get("ema_cross"):
+        c = 10
+    elif ind.get("ema_bull"):
+        c = 7
+    else:
+        c = -7
+    components["ema"] = c
+    score += c
+
+    # Bollinger (-8 to +8)
+    bb_lower = ind.get("bb_lower", 0)
+    bb_upper = ind.get("bb_upper", 0)
+    price = ind.get("price", 0)
+    if bb_lower and price <= bb_lower:
+        c = 8
+    elif bb_upper and price >= bb_upper:
+        c = -8
+    else:
+        c = 0
+    components["bb"] = c
+    score += c
+
+    # Aroon (-8 to +8)
+    aroonu = ind.get("aroonu", 50)
+    aroond = ind.get("aroond", 50)
+    if not np.isnan(aroonu) and not np.isnan(aroond):
+        if aroonu > 80 and aroond < 30:
+            c = 8
+        elif aroond > 80 and aroonu < 30:
+            c = -8
+        else:
+            c = 0
+    else:
+        c = 0
+    components["aroon"] = c
+    score += c
+
+    # StochRSI (-5 to +5)
+    stoch = ind.get("stochrsi_k", 50)
+    if not np.isnan(stoch):
+        if stoch < 20:
+            c = 5
+        elif stoch > 80:
+            c = -5
+        else:
+            c = 0
+    else:
+        c = 0
+    components["stochrsi"] = c
+    score += c
+
+    # CMF (-5 to +5)
+    cmf = ind.get("cmf", 0)
+    if not np.isnan(cmf):
+        if cmf > 0.15:
+            c = 5
+        elif cmf < -0.15:
+            c = -5
+        else:
+            c = 0
+    else:
+        c = 0
+    components["cmf"] = c
+    score += c
+
+    # Volume ratio (-3 to +3)
+    vol_ratio = ind.get("vol_ratio", 1.0)
+    if vol_ratio > 1.5 and score > 50:
+        c = 3
+    elif vol_ratio > 1.5 and score < 50:
+        c = -3
+    else:
+        c = 0
+    components["volume"] = c
+    score += c
+
+    return {"score": max(0, min(100, int(score))), "components": components}
+
+
+# ---------------------------------------------------------------------------
+# Signal detection — mirrors SygnifStrategy entry/exit conditions
+# ---------------------------------------------------------------------------
+def detect_signals(ind: dict, ticker: str = "") -> dict:
+    """Detect active strategy entry/exit signals from indicators.
+    Returns {"entries": [...], "exits": [...], "leverage": float, "atr_pct": float}."""
+    if not ind:
+        return {"entries": [], "exits": [], "leverage": LEVERAGE_DEFAULT, "atr_pct": 0}
+
+    ta = calc_ta_score(ind)
+    score = ta["score"]
+    entries = []
+    exits = []
+
+    # --- Leverage tier ---
+    atr_pct = ind.get("atr_pct", 0)
+    if ticker.upper() in MAJOR_PAIRS:
+        lev = LEVERAGE_MAJORS
+    else:
+        lev = LEVERAGE_DEFAULT
+    if atr_pct > 3.0:
+        lev = min(lev, 2.0)
+    elif atr_pct > 2.0:
+        lev = min(lev, 3.0)
+
+    vol_ratio = ind.get("vol_ratio", 1.0)
+
+    # --- Entry signals ---
+    if score >= 65 and vol_ratio > 1.2:
+        entries.append("strong_ta_long")
+    if score <= 25:
+        entries.append("strong_ta_short")
+    if 40 <= score <= 70 and not any("strong" in e for e in entries):
+        entries.append("ambiguous_long")
+    if 30 <= score <= 60 and not any("strong" in e for e in entries):
+        entries.append("ambiguous_short")
+    if ind.get("sf_long"):
+        entries.append("sf_long")
+    if ind.get("sf_short"):
+        entries.append("sf_short")
+
+    # --- Exit signals ---
+    willr = ind.get("willr", -50)
+    if not np.isnan(willr):
+        if willr > -5:
+            exits.append("willr_overbought")
+        if willr < -95:
+            exits.append("willr_oversold")
+
+    return {
+        "entries": entries,
+        "exits": exits,
+        "leverage": lev,
+        "atr_pct": atr_pct,
+        "ta_score": score,
+        "ta_components": ta["components"],
+    }
+
+
+def _format_score_label(score: int) -> str:
+    if score >= 65:
+        return "Bullish"
+    elif score <= 35:
+        return "Bearish"
+    elif score >= 55:
+        return "Lean Bullish"
+    elif score <= 45:
+        return "Lean Bearish"
+    return "Neutral"
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +704,7 @@ def cmd_movers():
 
 
 # ---------------------------------------------------------------------------
-# Command: /ta <TICKER> — Technical analysis
+# Command: /ta <TICKER> — Technical analysis + strategy signals
 # ---------------------------------------------------------------------------
 def cmd_ta(ticker: str):
     ticker = ticker.upper().strip()
@@ -410,6 +724,7 @@ def cmd_ta(ticker: str):
         tg_send(f"Not enough data for `{ticker}`.")
         return
 
+    sig = detect_signals(ind, ticker)
     p = ind["price"]
     pf = f"${p:,.2f}" if p >= 1 else f"${p:.6f}"
 
@@ -418,27 +733,53 @@ def cmd_ta(ticker: str):
         e200 = ind["ema200"]
         ema200_line = f"  EMA 200: `{e200:.4g}` {'(above)' if p > e200 else '(below)'}\n"
 
+    # Strategy signals section
+    score = sig["ta_score"]
+    label = _format_score_label(score)
+    entry_str = ", ".join(sig["entries"]) if sig["entries"] else "None"
+    exit_str = ", ".join(sig["exits"]) if sig["exits"] else "None"
+
+    # Score breakdown
+    comps = sig["ta_components"]
+    comp_parts = [f"{k}({v:+d})" for k, v in comps.items() if v != 0]
+    comp_str = " ".join(comp_parts) if comp_parts else "all neutral"
+
+    sf_status = ""
+    if ind.get("sf_long"):
+        sf_status = "SF Long active"
+    elif ind.get("sf_short"):
+        sf_status = "SF Short active"
+    else:
+        sf_status = "No active pattern"
+
     msg = (
         f"*Technical Analysis: {ticker}*\n"
         f"*Price:* `{pf}`\n\n"
+        f"*Strategy Signals:*\n"
+        f"  TA Score: `{score}/100` ({label})\n"
+        f"  Entry: `{entry_str}`\n"
+        f"  Exit: `{exit_str}`\n"
+        f"  Leverage: `{sig['leverage']:.0f}x` (ATR {sig['atr_pct']:.1f}%)\n"
+        f"  Swing Failure: {sf_status}\n"
+        f"  Score: `{comp_str}`\n\n"
         f"*Trend:* `{ind['trend']}`\n"
         f"*EMAs:*\n"
         f"  EMA 9: `{ind['ema9']:.4g}`\n"
         f"  EMA 21: `{ind['ema21']:.4g}`\n"
         f"  EMA 50: `{ind['ema50']:.4g}`\n"
         f"{ema200_line}\n"
-        f"*RSI 14:* `{ind['rsi']:.1f}` — {ind['rsi_signal']}\n"
-        f"*MACD:* `{ind['macd']:.4g}` — {ind['macd_signal_text']}\n"
-        f"  Histogram: `{ind['macd_hist']:.4g}`\n\n"
-        f"*Bollinger Bands:*\n"
-        f"  Upper: `{ind['bb_upper']:.4g}`\n"
-        f"  Mid: `{ind['bb_mid']:.4g}`\n"
-        f"  Lower: `{ind['bb_lower']:.4g}`\n"
-        f"  Position: `{ind['bb_position']}`\n\n"
-        f"*Key Levels:*\n"
-        f"  Support: `{ind['support']:.4g}`\n"
-        f"  Resistance: `{ind['resistance']:.4g}`\n\n"
-        f"*Volume:* `{ind['volume']:,.0f}` (avg `{ind['vol_avg']:,.0f}`)\n"
+        f"*RSI:* `{ind['rsi']:.1f}` — {ind['rsi_signal']} | RSI3: `{ind['rsi3']:.0f}`\n"
+        f"*MACD:* `{ind['macd']:.4g}` — {ind['macd_signal_text']}\n\n"
+        f"*Oscillators:*\n"
+        f"  Williams %R: `{ind['willr']:.0f}`\n"
+        f"  StochRSI: `{ind['stochrsi_k']:.0f}`\n"
+        f"  CCI: `{ind['cci']:.0f}` | CMF: `{ind['cmf']:.3f}`\n"
+        f"  Aroon U/D: `{ind['aroonu']:.0f}/{ind['aroond']:.0f}`\n\n"
+        f"*Bollinger:* `{ind['bb_position']}` "
+        f"(`{ind['bb_lower']:.4g}` — `{ind['bb_upper']:.4g}`)\n\n"
+        f"*Levels:*\n"
+        f"  Support: `{ind['support']:.4g}` | Resistance: `{ind['resistance']:.4g}`\n\n"
+        f"*Volume:* `{ind['volume']:,.0f}` ({ind['vol_ratio']:.1f}x avg)\n"
         f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')} · 1h candles_"
     )
     tg_send(msg)
@@ -450,11 +791,12 @@ def cmd_ta(ticker: str):
 def cmd_research(ticker: str):
     ticker = ticker.upper().strip() or "BTC"
     symbol = f"{ticker}USDT"
-    tg_send(f"Researching `{ticker}`... (TA + News + AI analysis)")
+    tg_send(f"Researching `{ticker}`... (TA + Strategy + News + AI)")
 
     # 1. Fetch market data
     df = bybit_kline(symbol, interval="60", limit=200)
     ind = calc_indicators(df) if not df.empty else {}
+    sig = detect_signals(ind, ticker)
 
     # 2. Fetch news
     headlines = fetch_news(ticker)
@@ -467,42 +809,55 @@ def cmd_research(ticker: str):
     change_24h = float(pair_data.get("price24hPcnt", 0)) * 100
     vol_24h = float(pair_data.get("turnover24h", 0))
 
-    # 4. Build prompt for Claude
+    # 4. Build prompt for Claude with strategy context
     ta_summary = "No TA data available."
+    strat_summary = ""
     if ind:
         ta_summary = (
             f"Price: ${ind['price']:.4g}, Trend: {ind['trend']}, "
-            f"RSI: {ind['rsi']:.1f} ({ind['rsi_signal']}), "
+            f"RSI14: {ind['rsi']:.1f} ({ind['rsi_signal']}), RSI3: {ind['rsi3']:.0f}, "
             f"MACD: {ind['macd_signal_text']} (hist: {ind['macd_hist']:.4g}), "
             f"BB position: {ind['bb_position']}, "
+            f"Williams%%R: {ind['willr']:.0f}, StochRSI: {ind['stochrsi_k']:.0f}, "
+            f"Aroon U/D: {ind['aroonu']:.0f}/{ind['aroond']:.0f}, CMF: {ind['cmf']:.3f}, "
             f"Support: {ind['support']:.4g}, Resistance: {ind['resistance']:.4g}, "
-            f"EMA9: {ind['ema9']:.4g}, EMA50: {ind['ema50']:.4g}, "
-            f"Volume: {ind['volume']:,.0f} vs avg {ind['vol_avg']:,.0f}"
+            f"Volume: {ind['vol_ratio']:.1f}x average"
+        )
+        entry_str = ", ".join(sig["entries"]) if sig["entries"] else "None"
+        strat_summary = (
+            f"\nSTRATEGY CONTEXT:\n"
+            f"- TA Score: {sig['ta_score']}/100 ({_format_score_label(sig['ta_score'])})\n"
+            f"- Active Signals: {entry_str}\n"
+            f"- Leverage Tier: {sig['leverage']:.0f}x (ATR {sig['atr_pct']:.1f}%)\n"
+            f"- Swing Failure: {'SF Long' if ind.get('sf_long') else 'SF Short' if ind.get('sf_short') else 'None'}"
         )
 
-    prompt = f"""You are a crypto research analyst. Provide a concise research report for {ticker}.
+    prompt = f"""You are a crypto research analyst for the Sygnif trading bot. Provide a concise research report for {ticker}.
 
 CURRENT DATA:
 - Price: ${price:.4g} (24h: {change_24h:+.1f}%)
 - 24h Volume: ${vol_24h/1e6:.1f}M
 - Technical Analysis: {ta_summary}
+{strat_summary}
 
 RECENT NEWS:
 {news_text}
 
 Write a concise research report in Markdown with these sections:
 1. **Market Status** (2 sentences: price action + trend)
-2. **Technical Outlook** (3-4 bullet points: key indicator signals)
-3. **News & Sentiment** (2-3 bullet points: what headlines suggest)
-4. **Verdict** (1 paragraph: bullish/bearish/neutral with reasoning and key levels to watch)
+2. **Technical Outlook** (3-4 bullet points: key indicator signals including strategy TA score)
+3. **Strategy View** (2 bullet points: what signals are active, would the bot enter/exit?)
+4. **News & Sentiment** (2-3 bullet points: what headlines suggest)
+5. **Verdict** (1 paragraph: bullish/bearish/neutral with reasoning and key levels)
 
-Keep it under 300 words. Be specific with numbers. No disclaimers."""
+Keep it under 350 words. Be specific with numbers. No disclaimers."""
 
     analysis = claude_analyze(prompt)
 
     msg = (
         f"*Research Report: {ticker}*\n"
-        f"*Price:* `${price:.4g}` (`{change_24h:+.1f}%` 24h)\n\n"
+        f"*Price:* `${price:.4g}` (`{change_24h:+.1f}%` 24h)\n"
+        f"*TA Score:* `{sig['ta_score']}/100` | Signals: `{', '.join(sig['entries']) or 'None'}`\n\n"
         f"{analysis}\n\n"
         f"_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
     )
@@ -510,7 +865,7 @@ Keep it under 300 words. Be specific with numbers. No disclaimers."""
 
 
 # ---------------------------------------------------------------------------
-# Command: /plays — AI investment opportunities
+# Command: /plays — AI investment opportunities (strategy-aware)
 # ---------------------------------------------------------------------------
 def cmd_plays():
     tg_send("Scanning for opportunities...")
@@ -540,9 +895,18 @@ def cmd_plays():
     top_gainers = sorted(pairs, key=lambda x: x["change"], reverse=True)[:5]
     top_losers = sorted(pairs, key=lambda x: x["change"])[:5]
 
-    market_ctx = "Top by volume:\n"
+    # Enrich top pairs with TA scores
+    market_ctx = "Top by volume (with strategy TA score):\n"
     for p in top_by_vol:
-        market_ctx += f"  {p['sym']}: ${p['price']:.4g} ({p['change']:+.1f}%) vol ${p['vol']/1e6:.0f}M\n"
+        df = bybit_kline(f"{p['sym']}USDT", "60", 200)
+        ind = calc_indicators(df) if not df.empty else {}
+        sig = detect_signals(ind, p["sym"])
+        signal_str = sig["entries"][0] if sig["entries"] else "no_signal"
+        market_ctx += (
+            f"  {p['sym']}: ${p['price']:.4g} ({p['change']:+.1f}%) "
+            f"vol ${p['vol']/1e6:.0f}M | TA:{sig['ta_score']} {signal_str} "
+            f"| Lev:{sig['leverage']:.0f}x\n"
+        )
     market_ctx += "\nTop gainers:\n"
     for p in top_gainers:
         market_ctx += f"  {p['sym']}: +{p['change']:.1f}%\n"
@@ -553,28 +917,40 @@ def cmd_plays():
     # Fetch BTC TA for macro context
     btc_df = bybit_kline("BTCUSDT", "60", 200)
     btc_ind = calc_indicators(btc_df) if not btc_df.empty else {}
+    btc_sig = detect_signals(btc_ind, "BTC")
     btc_ctx = ""
     if btc_ind:
         btc_ctx = (
             f"\nBTC Context: ${btc_ind['price']:,.0f}, {btc_ind['trend']}, "
-            f"RSI {btc_ind['rsi']:.0f}, MACD {btc_ind['macd_signal_text']}"
+            f"RSI {btc_ind['rsi']:.0f}, MACD {btc_ind['macd_signal_text']}, "
+            f"TA Score: {btc_sig['ta_score']}/100"
         )
 
-    prompt = f"""You are a crypto investment strategist. Based on current market data, provide exactly 3 actionable investment plays.
+    prompt = f"""You are a crypto strategist for the Sygnif trading bot. Based on market data AND strategy signals, provide exactly 3 actionable plays.
+
+IMPORTANT: The bot uses these entry types:
+- strong_ta (long): TA score >= 65 + volume > 1.2x avg
+- strong_ta_short: TA score <= 25
+- claude_sentiment (long): TA 40-70, news sentiment pushes combined >= 55
+- claude_sentiment_short: TA 30-60, news sentiment pushes combined <= 40
+- swing_failure: price wicks past 48-bar S/R then closes back
+
+Plays should align with what the bot would actually trade. Prioritize coins with active signals.
 
 MARKET DATA:
 {market_ctx}
 {btc_ctx}
 
 For each play, use this format:
-**Play #N: [Name]**
-Type: Spot Buy | Mean Reversion | Momentum
+**Play #N: TICKER — [Name]**
+Type: strong_ta | claude_sentiment | swing_failure | mean_reversion
+Side: Long | Short
 Risk: Low/Medium/High
 - *Thesis:* Why this opportunity exists (1-2 sentences)
 - *Entry:* Specific price or condition
 - *TP:* Target price and expected %
 - *SL:* Stop loss price and %
-- *Timeframe:* Hours/Days/Weeks
+- *Timeframe:* Hours/Days
 
 Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total under 400 words."""
 
@@ -591,6 +967,75 @@ Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total unde
         )
     except Exception:
         pass  # Overseer may not be running
+
+
+# ---------------------------------------------------------------------------
+# Command: /signals — Quick scan: active entry signals across top pairs
+# ---------------------------------------------------------------------------
+def cmd_signals():
+    tg_send("Scanning signals...")
+    tickers = bybit_tickers()
+    pairs = []
+    exclude = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
+    for t in tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        base = sym.replace("USDT", "")
+        if base in exclude or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
+            continue
+        try:
+            turnover = float(t.get("turnover24h", 0))
+        except (ValueError, TypeError):
+            continue
+        if turnover < 2_000_000:
+            continue
+        pairs.append({"sym": base, "vol": turnover})
+
+    top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:12]
+
+    longs = []
+    shorts = []
+    ambiguous = []
+
+    for p in top:
+        df = bybit_kline(f"{p['sym']}USDT", "60", 200)
+        ind = calc_indicators(df) if not df.empty else {}
+        if not ind:
+            continue
+        sig = detect_signals(ind, p["sym"])
+        score = sig["ta_score"]
+        entries = sig["entries"]
+
+        row = f"  `{p['sym']:>5}` TA:`{score}` "
+
+        if "strong_ta_long" in entries or "sf_long" in entries:
+            detail = f"RSI:{ind['rsi']:.0f} vol:{ind['vol_ratio']:.1f}x lev:{sig['leverage']:.0f}x"
+            sig_name = "strong_ta" if "strong_ta_long" in entries else "sf_long"
+            longs.append(row + f"`{sig_name}` ({detail})")
+        elif "strong_ta_short" in entries or "sf_short" in entries:
+            detail = f"RSI:{ind['rsi']:.0f} lev:{sig['leverage']:.0f}x"
+            sig_name = "strong_ta_short" if "strong_ta_short" in entries else "sf_short"
+            shorts.append(row + f"`{sig_name}` ({detail})")
+        elif "ambiguous_long" in entries or "ambiguous_short" in entries:
+            zone = "40-70" if "ambiguous_long" in entries else "30-60"
+            ambiguous.append(row + f"claude zone ({zone})")
+
+    lines = ["*Active Strategy Signals*\n"]
+    if longs:
+        lines.append("LONG:")
+        lines.extend(longs)
+    if shorts:
+        lines.append("\nSHORT:")
+        lines.extend(shorts)
+    if ambiguous:
+        lines.append("\nAMBIGUOUS (Claude sentiment zone):")
+        lines.extend(ambiguous)
+    if not longs and not shorts and not ambiguous:
+        lines.append("_No active signals across top pairs._")
+
+    lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')} · 1h candles_")
+    tg_send("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -617,13 +1062,14 @@ def cmd_help():
         "*Sygnif Finance Agent*\n\n"
         "`/market` — Top 15 crypto overview\n"
         "`/movers` — Gainers & losers (24h)\n"
-        "`/ta BTC` — Technical analysis\n"
+        "`/ta BTC` — TA + strategy signals\n"
+        "`/signals` — Quick signal scan (top pairs)\n"
         "`/research ETH` — Full AI research report\n"
-        "`/plays` — AI investment opportunities\n"
+        "`/plays` — AI investment plays (strategy-aware)\n"
         "`/news` — Latest crypto headlines\n"
         "`/news SOL` — News for specific coin\n"
         "`/overseer` — Trade overseer status\n"
-        "`/evaluate` — Force trade evaluation (Plutus-3B)\n"
+        "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
     )
 
@@ -665,6 +1111,7 @@ COMMANDS = {
     "/market": lambda args: cmd_market(),
     "/movers": lambda args: cmd_movers(),
     "/ta": lambda args: cmd_ta(args),
+    "/signals": lambda args: cmd_signals(),
     "/research": lambda args: cmd_research(args),
     "/plays": lambda args: cmd_plays(),
     "/news": lambda args: cmd_news(args),
@@ -704,7 +1151,7 @@ import json as _json
 
 
 def _briefing(symbols: list[str] | None = None) -> str:
-    """Return compact market briefing for Plutus-3B consumption."""
+    """Return compact market briefing with strategy signals for Plutus-3B."""
     lines = []
     # Always include BTC + ETH
     core = ["BTCUSDT", "ETHUSDT"]
@@ -717,19 +1164,22 @@ def _briefing(symbols: list[str] | None = None) -> str:
         if not ta:
             continue
         name = sym.replace("USDT", "")
+        sig = detect_signals(ta, name)
         rsi = ta.get("rsi", 0)
         trend = ta.get("trend", "?")
         macd = ta.get("macd_signal_text", "?")
         price = ta.get("price", 0)
-        sup = ta.get("support", 0)
-        res = ta.get("resistance", 0)
         if price >= 100:
             pf = f"${price:,.0f}"
         elif price >= 1:
             pf = f"${price:.2f}"
         else:
             pf = f"${price:.5f}"
-        lines.append(f"{name} {pf} {trend} RSI:{rsi:.0f} {macd}")
+        entry = sig["entries"][0] if sig["entries"] else "no_signal"
+        lines.append(
+            f"{name} {pf} {trend} RSI:{rsi:.0f} {macd} "
+            f"TA:{sig['ta_score']} {entry} Lev:{sig['leverage']:.0f}x"
+        )
     return "\n".join(lines) if lines else "No data"
 
 
