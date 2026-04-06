@@ -52,11 +52,96 @@ class SygnifSentiment:
         self.daily_calls = 0
         self.daily_limit = 50  # Higher limit for 5m TF
         self._last_reset = datetime.now().date()
+        # Monitoring counters
+        self.non_zero_calls = 0      # Calls that returned a non-zero score
+        self.parse_errors = 0         # JSON/regex parse failures
+        self.api_errors = 0           # HTTP/network errors
+        # Connection pooling — keep-alive for faster repeat calls
+        self._session = requests.Session()
+        # Circuit breaker — pause sentiment after N consecutive failures
+        self._consecutive_failures = 0
+        self._circuit_open_until = 0.0
+        self._circuit_threshold = 5       # failures before opening
+        self._circuit_cooldown = 300       # 5 min pause when open
+
+    def _call_api_with_retry(self, payload: dict, max_attempts: int = 3) -> Optional[requests.Response]:
+        """POST to Anthropic API with exponential backoff and circuit breaker.
+
+        Returns the Response object on success, or None on failure.
+        Honors circuit breaker — returns None immediately if open.
+        """
+        # Circuit breaker check
+        now = time.time()
+        if now < self._circuit_open_until:
+            return None
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+        for attempt in range(max_attempts):
+            try:
+                resp = self._session.post(
+                    self.base_url, headers=headers, json=payload, timeout=20
+                )
+                # 429 rate limit — long backoff
+                if resp.status_code == 429:
+                    wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
+                    logger.warning(f"Sentiment 429 rate limit, waiting {wait}s")
+                    time.sleep(wait)
+                    continue
+                # 5xx server error — short backoff
+                if 500 <= resp.status_code < 600:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.warning(f"Sentiment {resp.status_code}, retrying in {wait}s")
+                    time.sleep(wait)
+                    continue
+                # 4xx other than 429 — fail fast, no retry
+                if 400 <= resp.status_code < 500:
+                    self._consecutive_failures += 1
+                    self._maybe_trip_breaker()
+                    return resp
+                # Success
+                self._consecutive_failures = 0
+                return resp
+            except (requests.Timeout, requests.ConnectionError) as e:
+                wait = 2 ** attempt
+                logger.warning(f"Sentiment {type(e).__name__}, retrying in {wait}s")
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"Sentiment unexpected error: {e}")
+                break
+
+        # All retries exhausted
+        self._consecutive_failures += 1
+        self._maybe_trip_breaker()
+        return None
+
+    def _maybe_trip_breaker(self):
+        """Open the circuit breaker if too many consecutive failures."""
+        if self._consecutive_failures >= self._circuit_threshold:
+            self._circuit_open_until = time.time() + self._circuit_cooldown
+            logger.warning(
+                f"Sentiment circuit breaker OPEN for {self._circuit_cooldown}s "
+                f"after {self._consecutive_failures} consecutive failures"
+            )
+            self._consecutive_failures = 0  # reset after opening
 
     def _reset_daily_counter(self):
         today = datetime.now().date()
         if today > self._last_reset:
+            logger.info(
+                f"Sentiment daily stats: calls={self.daily_calls}, "
+                f"non_zero={self.non_zero_calls}, "
+                f"parse_errors={self.parse_errors}, "
+                f"api_errors={self.api_errors}"
+            )
             self.daily_calls = 0
+            self.non_zero_calls = 0
+            self.parse_errors = 0
+            self.api_errors = 0
             self._last_reset = today
 
     def _get_cached(self, token: str) -> Optional[float]:
@@ -67,18 +152,37 @@ class SygnifSentiment:
         return None
 
     def _fetch_rss(self, feed_url: str, token: str) -> list[str]:
-        """Fetch headlines from a single RSS feed."""
+        """Fetch headlines from a single RSS feed.
+        Returns top 3 headlines regardless of token match — Claude decides relevance.
+        Token-matching headlines are prioritized, then filled with general crypto news."""
         try:
             feed = feedparser.parse(feed_url)
-            titles = []
-            for entry in feed.entries[:3]:
+            token_matches = []
+            general = []
+            for entry in feed.entries[:5]:
                 title = entry.get("title", "")
-                if token.upper() in title.upper() or len(titles) < 2:
-                    titles.append(title)
-            return titles
+                if not title:
+                    continue
+                if token.upper() in title.upper():
+                    token_matches.append(title)
+                else:
+                    general.append(title)
+            return (token_matches + general)[:3]
         except Exception as e:
             logger.warning(f"Feed error {feed_url}: {e}")
             return []
+
+    def _fetch_reddit(self, token: str) -> list[str]:
+        """Fetch top posts from r/CryptoCurrency mentioning the token."""
+        try:
+            url = f"https://www.reddit.com/r/CryptoCurrency/search.json?q={token}&sort=new&limit=5&restrict_sr=1"
+            resp = requests.get(url, headers={"User-Agent": "sygnif/1.0"}, timeout=5)
+            if resp.ok:
+                posts = resp.json().get("data", {}).get("children", [])
+                return [p.get("data", {}).get("title", "") for p in posts[:3] if p.get("data", {}).get("title")]
+        except Exception as e:
+            logger.warning(f"Reddit fetch error for {token}: {e}")
+        return []
 
     def _fetch_gdelt(self, token: str) -> list[str]:
         """Fetch headlines from GDELT API."""
@@ -107,14 +211,24 @@ class SygnifSentiment:
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
         ]
         headlines = []
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=5) as pool:
             rss_futures = {pool.submit(self._fetch_rss, url, token): url for url in feeds}
             gdelt_future = pool.submit(self._fetch_gdelt, token)
+            reddit_future = pool.submit(self._fetch_reddit, token)
             for future in as_completed(rss_futures):
                 headlines.extend(future.result())
             headlines.extend(gdelt_future.result())
+            headlines.extend(reddit_future.result())
 
-        result = headlines[:max_items]
+        # Dedupe while preserving order
+        seen = set()
+        deduped = []
+        for h in headlines:
+            if h and h not in seen:
+                seen.add(h)
+                deduped.append(h)
+
+        result = deduped[:max_items]
         self._news_cache[token] = (time.time(), result)
         return result
 
@@ -144,66 +258,74 @@ class SygnifSentiment:
             logger.warning("No ANTHROPIC_API_KEY set, skipping sentiment")
             return 0.0
 
-        news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent news available."
+        news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent headlines available."
 
-        prompt = f"""Analyze the current sentiment for {token} cryptocurrency.
+        prompt = f"""Assess sentiment for trading {token}.
 
 Current price: ${current_price:.4f}
 Technical analysis score: {ta_score:.0f}/100 (50 = neutral, >60 = bullish, <40 = bearish)
 
-Recent headlines:
+Recent crypto headlines (mix of {token}-specific and general market):
 {news_text}
 
-Based on the news sentiment and market context, provide a sentiment adjustment score.
+Provide a sentiment adjustment score combining:
+1. Any {token}-specific news (most weight if present)
+2. General crypto market mood from the headlines
+3. Macro/regulatory context implied by the news
+
 Rules:
-- Score between -20 (very bearish news) and +20 (very bullish news)
-- 0 = neutral / no significant news impact
-- Consider: regulatory news, partnerships, exchange listings, whale movements, macro events
-- Be conservative — only give extreme scores for genuinely significant events
+- Score between -20 (strongly bearish) and +20 (strongly bullish)
+- 0 = no edge / pure noise / contradictory signals
+- It's OK to give a small score (±3 to ±8) based purely on general market mood when no {token}-specific news exists
+- Reserve ±15 to ±20 for major specific events (regulatory action, listings, hacks, partnerships)
+- If the headlines are pure noise or completely off-topic, return 0
 
 Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"}}"""
 
+        payload = {
+            "model": self.model,
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        resp = self._call_api_with_retry(payload)
+        self.daily_calls += 1
+
+        if resp is None:
+            self.api_errors += 1
+            logger.error(f"Claude sentiment for {token}: all retries failed (or circuit open)")
+            return None
+
+        if not resp.ok:
+            self.api_errors += 1
+            logger.error(f"Claude API error: {resp.status_code} {resp.text[:200]}")
+            return None
+
         try:
-            resp = requests.post(
-                self.base_url,
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": 100,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=10,
+            data = resp.json()
+            text = data["content"][0]["text"]
+            # Extract JSON object from text (Claude sometimes wraps in markdown/extra text)
+            import re
+            match = re.search(r'\{[^{}]*"score"[^{}]*\}', text, re.DOTALL)
+            if not match:
+                self.parse_errors += 1
+                logger.error(f"Claude sentiment: no JSON object found in response: {text[:200]}")
+                return None
+            result = json.loads(match.group(0))
+            score = max(-20, min(20, float(result["score"])))
+            reason = result.get("reason", "")
+            if score != 0:
+                self.non_zero_calls += 1
+            logger.info(
+                f"Claude sentiment for {token}: {score} — {reason} "
+                f"[stats: {self.daily_calls}c {self.non_zero_calls}nz {self.parse_errors}pe {self.api_errors}ae]"
             )
-
-            self.daily_calls += 1
-
-            if resp.ok:
-                data = resp.json()
-                text = data["content"][0]["text"]
-                # Extract JSON object from text (Claude sometimes wraps in markdown/extra text)
-                import re
-                match = re.search(r'\{[^{}]*"score"[^{}]*\}', text, re.DOTALL)
-                if not match:
-                    logger.error(f"Claude sentiment: no JSON object found in response: {text[:200]}")
-                    return None  # API error → caller decides fallback
-                result = json.loads(match.group(0))
-                score = max(-20, min(20, float(result["score"])))
-                reason = result.get("reason", "")
-                logger.info(f"Claude sentiment for {token}: {score} — {reason}")
-
-                self._cache[token] = (time.time(), score)
-                return score
-            else:
-                logger.error(f"Claude API error: {resp.status_code} {resp.text}")
-                return None  # API error → caller decides fallback
-
+            self._cache[token] = (time.time(), score)
+            return score
         except Exception as e:
-            logger.error(f"Claude sentiment error: {e}")
-            return None  # API error → caller decides fallback
+            self.parse_errors += 1
+            logger.error(f"Claude sentiment parse error: {e}")
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +895,11 @@ class SygnifStrategy(IStrategy):
                 (df["btc_RSI_3_1h"] < 85.0)
                 | (df.get("btc_RSI_14_4h", 50.0) > 70.0)
             )
+
+        # BTC structural uptrend filter — block ALL shorts when BTC 4h RSI > 60
+        # This is a hard structural filter, not just momentum-based
+        if "btc_RSI_14_4h" in df.columns:
+            prot &= df["btc_RSI_14_4h"].fillna(50.0) <= 60.0
 
         return prot
 
