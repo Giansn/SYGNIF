@@ -1378,62 +1378,55 @@ FHE CUT RSI:26 broke support"""
             if act in ("HOLD", "TRAIL", "CUT"):
                 actions[sym] = {"action": act, "reason": reason}
 
-    # 6. Build mobile-friendly grouped output
+    # 6. Build Freqtrade-style table
     now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    sorted_trades = sorted(trades, key=lambda x: x["profit_pct"], reverse=True)
+
+    # P/L totals
     total_pnl = sum(t["profit_abs"] for t in trades)
-
-    # Enrich trades with TA + action
-    enriched = []
-    for t in trades:
-        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
-        inst = t["instance"][0]
-        display = pair if inst == "s" else f"{pair}(f)"
-        pct = t["profit_pct"]
-        dur_s = t.get("trade_duration", 0) or 0
-        dur = f"{dur_s // 3600}h" if dur_s >= 3600 else f"{dur_s // 60}m"
-        ctx = ta_map.get(pair, {})
-        ta_score = ctx.get("sig", {}).get("ta_score", "?") if ctx else "?"
-        rsi = f"{ctx['ind']['rsi']:.0f}" if ctx else "?"
-        act_info = actions.get(pair, {"action": "HOLD", "reason": ""})
-        enriched.append({
-            "display": display, "pct": pct, "dur": dur,
-            "ta": ta_score, "rsi": rsi,
-            "action": act_info["action"], "reason": act_info["reason"],
-        })
-
-    # Group by action
-    cuts = [e for e in enriched if e["action"] == "CUT"]
-    trails = [e for e in enriched if e["action"] == "TRAIL"]
-    holds = [e for e in enriched if e["action"] == "HOLD"]
-
-    # Sort: CUT worst first, TRAIL best first, HOLD by TA desc
-    cuts.sort(key=lambda x: x["pct"])
-    trails.sort(key=lambda x: x["pct"], reverse=True)
-    holds.sort(key=lambda x: x["pct"], reverse=True)
+    spot_trades = [t for t in trades if t["instance"] == "spot"]
+    fut_trades = [t for t in trades if t["instance"] == "futures"]
 
     lines = [f"*Evaluate* | {now_str}\n"]
 
-    def _fmt_group(icon, label, items):
-        if not items:
-            return
-        lines.append(f"{icon} *{label}* ({len(items)}):")
-        for e in items:
-            reason = e["reason"][:18]
-            lines.append(
-                f"  `{e['display']:<10} {e['pct']:>+5.1f}%`"
-                f" TA:`{e['ta']}` RSI:`{e['rsi']}`"
-                f" `{e['dur']}`"
-            )
-            if reason:
-                lines.append(f"    _{reason}_")
-        lines.append("")
+    # Header
+    lines.append("`  # Pair         P/L%   Action  Reason`")
+    lines.append("`" + "-" * 50 + "`")
 
-    _fmt_group("\u2716", "CUT", cuts)
-    _fmt_group("\u2795", "TRAIL", trails)
-    _fmt_group("\u2022", "HOLD", holds)
+    for t in sorted_trades:
+        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        inst = t["instance"][0]
+        tid = t.get("trade_id", "?")
+        pct = t["profit_pct"]
 
-    lines.append(f"*Total:* `{total_pnl:+.4f}` USDT ({len(trades)})")
-    lines.append(f"\u2716 {len(cuts)} CUT | \u2795 {len(trails)} TRAIL | \u2022 {len(holds)} HOLD")
+        display = f"{pair}" if inst == "s" else f"{pair}(f)"
+        act_info = actions.get(pair, {"action": "HOLD", "reason": ""})
+        act = act_info["action"]
+        reason = act_info["reason"][:20]
+
+        # Action icon
+        if act == "CUT":
+            icon = "\u2716"
+        elif act == "TRAIL":
+            icon = "\u2795"
+        else:
+            icon = "\u2022"
+
+        lines.append(
+            f"`{tid:>3} {display:<12} {pct:>+6.1f}%` {icon}`{act:<5}` _{reason}_"
+        )
+
+    lines.append("`" + "-" * 50 + "`")
+    lines.append(f"`    TOTAL      {total_pnl:>+8.4f} USDT  ({len(trades)} trades)`")
+
+    # Summary counts
+    cuts = sum(1 for a in actions.values() if a["action"] == "CUT")
+    trails = sum(1 for a in actions.values() if a["action"] == "TRAIL")
+    holds = len(trades) - cuts - trails
+    if cuts:
+        lines.append(f"\n\u2716 *{cuts} CUT* | \u2795 {trails} TRAIL | \u2022 {holds} HOLD")
+    else:
+        lines.append(f"\n\u2795 {trails} TRAIL | \u2022 {holds} HOLD")
 
     return "\n".join(lines)
 
