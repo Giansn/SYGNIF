@@ -39,15 +39,18 @@ TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", TG_TOKEN)
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", TG_CHAT)
 
 
-def tg_send(text, parse_mode="Markdown"):
+def tg_send(text, parse_mode="Markdown", reply_markup=None):
+    payload = {
+        "chat_id": TG_CHAT,
+        "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     resp = requests.post(
         f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json={
-            "chat_id": TG_CHAT,
-            "text": text,
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": True,
-        },
+        json=payload,
         timeout=10,
     )
     return resp.json()
@@ -155,6 +158,119 @@ def build_status():
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Finance agent integration
+# ---------------------------------------------------------------------------
+FA_BRIEFING = "http://127.0.0.1:8091/briefing"
+
+
+def _fetch_briefing(symbols: list[str] | None = None) -> str:
+    """Fetch market briefing from finance agent."""
+    try:
+        params = {"symbols": ",".join(symbols)} if symbols else {}
+        resp = requests.get(FA_BRIEFING, params=params, timeout=15)
+        if resp.ok and resp.text.strip():
+            return resp.text.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def build_overview() -> str:
+    """Full overview: trade status + market context from finance agent."""
+    # 1. Trade status from Freqtrade
+    token = ft_login()
+    endpoints = ["status", "profit", "show_config"]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(lambda ep: ft_get(ep, token), endpoints))
+    trades, profit, config = results
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    mode = "DRY" if config.get("dry_run") else "LIVE"
+    state = config.get("state", "?").upper()
+
+    lines = [f"*SYGNIF OVERVIEW* | {state} | {mode}", f"_{now_str}_\n"]
+
+    # 2. Portfolio summary
+    total_profit = profit.get("profit_all_coin", 0) or 0
+    wins = profit.get("winning_trades", 0)
+    losses = profit.get("losing_trades", 0)
+    total_closed = wins + losses
+    win_rate = f"{wins / total_closed * 100:.0f}%" if total_closed else "--"
+    lines.append(f"*P/L:* `{total_profit:+.4f}` USDT | W/L: {wins}/{losses} ({win_rate})")
+
+    # 3. Open trades with context
+    if trades:
+        # Collect traded symbols for briefing
+        trade_syms = list({
+            t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+            for t in trades
+        })
+        briefing_raw = _fetch_briefing(trade_syms)
+
+        # Parse briefing into lookup dict
+        briefing_map = {}
+        if briefing_raw:
+            for bline in briefing_raw.split("\n"):
+                parts = bline.split(" ", 1)
+                if len(parts) == 2:
+                    briefing_map[parts[0]] = parts[1]
+
+        lines.append(f"\n*Open Trades ({len(trades)}):*")
+        for t in sorted(trades, key=lambda x: x.get("profit_ratio", 0), reverse=True):
+            pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+            pct = t.get("profit_ratio", 0) * 100
+            pnl = t.get("profit_abs", 0) or 0
+            dur = duration_str(t.get("trade_duration"))
+            tag = (t.get("enter_tag") or "")[:14]
+            emoji = "\U0001f7e2" if pct >= 0 else "\U0001f534"
+
+            line = f"{emoji} *{pair}* `{pct:+.2f}%` ({pnl:+.4f}) | {dur}"
+            if tag:
+                line += f" | _{tag}_"
+            lines.append(line)
+
+            # Add market context from finance agent
+            ctx = briefing_map.get(pair, "")
+            if ctx:
+                # Extract key fields: TA score + signal
+                ta_part = ""
+                for segment in ctx.split("|"):
+                    if "TA:" in segment:
+                        ta_part = segment.strip()
+                        break
+                if ta_part:
+                    lines.append(f"    {ta_part}")
+
+        total_unreal = sum(t.get("profit_abs", 0) or 0 for t in trades)
+        lines.append(f"\n*Total unrealized:* `{total_unreal:+.4f}` USDT")
+    else:
+        lines.append("\n_No open trades_")
+
+    # 4. Market tendency from briefing
+    briefing_all = _fetch_briefing(["BTC", "ETH"])
+    if briefing_all:
+        lines.append("\n*Market Context:*")
+        for bline in briefing_all.split("\n"):
+            if bline.strip():
+                lines.append(f"  {bline}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Command dispatch
+# ---------------------------------------------------------------------------
+KEYBOARD = {
+    "keyboard": [
+        ["/status", "/overview"],
+        ["/start"],
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": False,
+}
+
+
 def handle_command(text):
     """Handle incoming commands. Returns response text or None."""
     cmd = text.strip().lower().split()[0] if text.strip() else ""
@@ -167,11 +283,20 @@ def handle_command(text):
         except Exception as e:
             return f"*Error:* `{e}`"
 
+    if cmd == "/overview":
+        try:
+            return build_overview()
+        except requests.ConnectionError:
+            return "*Error:* Cannot reach Freqtrade API.\nIs the bot running?"
+        except Exception as e:
+            return f"*Error:* `{e}`"
+
     if cmd == "/start":
         return (
             "*Sygnif Bot*\n\n"
             "Commands:\n"
             "`/status` — Open trades & portfolio\n"
+            "`/overview` — Trades + market context from finance agent\n"
         )
 
     return None
@@ -184,7 +309,7 @@ def main():
         sys.exit(1)
 
     print(f"Sygnif Bot started (chat_id: {TG_CHAT})")
-    tg_send("*Sygnif Bot online* \U0001f4c8\nType /status for trading overview")
+    tg_send("*Sygnif Bot online* \U0001f4c8", reply_markup=KEYBOARD)
 
     offset = 0
     while True:
@@ -201,7 +326,7 @@ def main():
 
                 reply = handle_command(text)
                 if reply:
-                    tg_send(reply)
+                    tg_send(reply, reply_markup=KEYBOARD)
 
         except KeyboardInterrupt:
             print("\nStopped")
