@@ -17,10 +17,6 @@ FT_INSTANCES = [
     },
 ]
 
-# Ollama
-OLLAMA_URL = "http://127.0.0.1:11434"
-OLLAMA_MODEL = "plutus-3b"
-
 # Polling
 POLL_INTERVAL_SEC = 1800      # 30 minutes
 EVAL_COOLDOWN_SEC = 1800      # Don't re-evaluate same trade within 30 min
@@ -39,9 +35,6 @@ TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 PLAYS_FILE = os.path.join(DATA_DIR, "plays.json")
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
-
-# Conversation history
-EVAL_HISTORY_SIZE = 3             # Keep last N evaluations for context
 
 # HTTP server
 HTTP_PORT = 8090

@@ -408,23 +408,14 @@ def main():
     start_http_server()
 
     # Check dependencies
-    ollama_ok = llm_client.is_available()
-    logger.info(f"Ollama: {'OK' if ollama_ok else 'UNAVAILABLE (will use rules-only fallback)'}")
+    claude_ok = llm_client.is_available()
+    logger.info(f"Claude Haiku: {'OK' if claude_ok else 'UNAVAILABLE (will use rules-only fallback)'}")
 
     for inst in config.FT_INSTANCES:
         ok = ft_client.is_available(inst)
         logger.info(f"Freqtrade {inst['name']}: {'OK' if ok else 'UNAVAILABLE'}")
 
-    # Pre-warm Plutus-3B so first evaluation doesn't cold-start timeout
-    if ollama_ok:
-        logger.info("Warming up Plutus-3B...")
-        warmup = llm_client.evaluate("Ready.", timeout=120)
-        if warmup:
-            logger.info("Plutus-3B warm and ready")
-        else:
-            logger.warning("Plutus-3B warmup failed — first eval may use rules fallback")
-
-    tg_send("*Overseer online* | Plutus-3B trade monitor active")
+    tg_send("*Overseer online* | Claude Haiku trade monitor active")
 
     # Offset from candle boundary by 30s
     time.sleep(30)
