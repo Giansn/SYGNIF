@@ -785,6 +785,10 @@ class SygnifStrategy(IStrategy):
             # 3x default
             tier_lev = self.futures_mode_leverage
 
+        # Shorts capped at 2x — unlimited upside risk in crypto
+        if side == "short":
+            tier_lev = min(tier_lev, 2.0)
+
         # Volatility cap: high ATR% → lower leverage
         try:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
@@ -906,6 +910,26 @@ class SygnifStrategy(IStrategy):
         df.loc[strong, "enter_long"] = 1
         df.loc[strong, "enter_tag"] = "strong_ta"
 
+        # --- Claude sentiment long — ambiguous zone (TA 40-64), LAST candle only ---
+        if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
+            last_score = ta_score.iloc[-1]
+            last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
+            last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
+
+            if last_prot and last_empty and 40 <= last_score <= 64:
+                pair = metadata.get("pair", "XRP/USDT")
+                token = pair.split("/")[0]
+                price = df.iloc[-1]["close"]
+
+                headlines = self.claude.fetch_news(token)
+                sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
+                final_score = last_score + sentiment
+
+                # Require non-zero sentiment — if Claude has nothing to say, skip
+                if sentiment != 0 and final_score >= self.sentiment_threshold_buy:
+                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
+
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
             last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
@@ -951,7 +975,8 @@ class SygnifStrategy(IStrategy):
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
                 final_score = last_score + sentiment
 
-                if final_score <= self.sentiment_threshold_sell:
+                # Require non-zero sentiment — if Claude has nothing to say, skip
+                if sentiment != 0 and final_score <= self.sentiment_threshold_sell:
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_short_s{sentiment:.0f}"
 
