@@ -54,68 +54,6 @@ body::before {
   z-index: 0;
 }
 
-/* Login Overlay */
-#login-overlay {
-  position: fixed; inset: 0;
-  background: var(--bg);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 24px;
-}
-#login-overlay.hidden { display: none; }
-.login-box {
-  background: var(--s1);
-  border: 1px solid var(--bd);
-  border-radius: 16px;
-  padding: 40px;
-  width: 360px;
-  max-width: 90vw;
-}
-.login-box h2 {
-  font-family: var(--sans);
-  font-size: 24px;
-  font-weight: 900;
-  letter-spacing: -0.5px;
-  margin-bottom: 6px;
-}
-.login-box h2 span { color: var(--ac); }
-.login-box p { color: var(--t2); font-size: 13px; margin-bottom: 24px; }
-.login-input {
-  display: block;
-  width: 100%;
-  padding: 12px 14px;
-  background: var(--s2);
-  border: 1px solid var(--bd);
-  border-radius: 10px;
-  color: var(--t1);
-  font-family: var(--mono);
-  font-size: 13px;
-  margin-bottom: 12px;
-  outline: none;
-  transition: border-color .2s;
-}
-.login-input:focus { border-color: var(--ac); }
-.login-btn {
-  width: 100%;
-  padding: 12px;
-  background: var(--ac);
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-family: var(--sans);
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  margin-top: 8px;
-  transition: background .2s, transform .1s;
-}
-.login-btn:hover { background: var(--ac2); }
-.login-btn:active { transform: scale(0.98); }
-.login-err { color: var(--r); font-size: 12px; margin-top: 10px; display: none; }
-
 /* Layout */
 .wrap { max-width: 1440px; margin: 0 auto; padding: 16px 20px; position: relative; z-index: 1; }
 
@@ -549,19 +487,8 @@ tr:hover td { background: #ffffff04; }
 </head>
 <body>
 
-<!-- Login Overlay -->
-<div id="login-overlay">
-  <div class="login-box">
-    <h2><span>SYGNIF</span> SPOT</h2>
-    <p>Authenticate to access the trading dashboard</p>
-    <input class="login-input" id="l-pass" type="password" placeholder="Password" autocomplete="current-password">
-    <button class="login-btn" id="l-btn" onclick="doLogin()">Connect</button>
-    <div class="login-err" id="l-err">Authentication failed</div>
-  </div>
-</div>
-
 <!-- Dashboard -->
-<div class="wrap" id="dashboard" style="display:none">
+<div class="wrap" id="dashboard">
   <div id="err"></div>
 
   <div class="head">
@@ -636,70 +563,33 @@ tr:hover td { background: #ffffff04; }
 <script>
 const API = window.location.origin;
 let tk = '';
-let currentPass = '';
 
 /* ── Auth ── */
-async function doLogin() {
-  const p = document.getElementById('l-pass').value.trim();
-  if (!p) return;
-
-  document.getElementById('l-btn').textContent = 'Connecting...';
-  document.getElementById('l-err').style.display = 'none';
-
-  try {
-    const r = await fetch(`${API}/api/v1/token/login`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Basic ' + btoa('Sygnif:' + p) }
-    });
-    if (!r.ok) throw new Error('auth');
-    const d = await r.json();
-    tk = d.access_token;
-    currentPass = p;
-    sessionStorage.setItem('sygnif_p', p);
-    document.getElementById('login-overlay').classList.add('hidden');
-    document.getElementById('dashboard').style.display = 'block';
-    tick();
-  } catch (e) {
-    document.getElementById('l-err').style.display = 'block';
-    document.getElementById('l-btn').textContent = 'Connect';
-  }
+async function autoLogin() {
+  const r = await fetch(`${API}/api/v1/token/login`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+  });
+  if (!r.ok) throw new Error('auth');
+  const d = await r.json();
+  tk = d.access_token;
 }
 
-// Auto-login from session
-(async () => {
-  const p = sessionStorage.getItem('sygnif_p');
-  if (p) {
-    document.getElementById('l-pass').value = p;
-    await doLogin();
-  }
-})();
-
-// Enter key support
-document.getElementById('l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-
 async function reAuth() {
-  try {
-    const r = await fetch(`${API}/api/v1/token/login`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Basic ' + btoa('Sygnif:' + currentPass) }
-    });
-    if (!r.ok) throw new Error('reauth');
-    const d = await r.json();
-    tk = d.access_token;
-  } catch (e) {
-    tk = '';
-    sessionStorage.clear();
-    document.getElementById('login-overlay').classList.remove('hidden');
-    document.getElementById('dashboard').style.display = 'none';
-    throw e;
-  }
+  const r = await fetch(`${API}/api/v1/token/login`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+  });
+  if (!r.ok) throw new Error('reauth');
+  const d = await r.json();
+  tk = d.access_token;
 }
 
 async function api(ep) {
   const r = await fetch(`${API}/api/v1/${ep}`, {
     headers: { 'Authorization': `Bearer ${tk}` }
   });
-  if (r.status === 401) { await reAuth(); return api(ep); }
+  if (r.status === 401) { await autoLogin(); return api(ep); }
   if (!r.ok) return [];
   return r.json();
 }
@@ -760,7 +650,7 @@ function getLevels(t) {
 /* ── Main Refresh ── */
 async function refresh() {
   try {
-    if (!tk) return;
+    if (!tk) await autoLogin();
 
     const [trades, profit, cfg, wl, perf, closed] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50')
@@ -983,6 +873,7 @@ async function tick() {
   finally { _refreshing = false; }
 }
 
+tick();
 setInterval(tick, 5000);
 </script>
 </body>
