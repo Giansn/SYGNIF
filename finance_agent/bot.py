@@ -1311,11 +1311,12 @@ def cmd_evaluate() -> str:
     if not trades:
         return "*Evaluate* | No open trades."
 
-    # 2. Get full TA for each traded symbol
+    # 2. Get TA for each traded symbol
     trade_syms = list({
         t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
         for t in trades
     })
+    ta_map = {}
     ta_context = []
     for sym in trade_syms:
         df = bybit_kline(f"{sym}USDT", "60", 200)
@@ -1325,6 +1326,7 @@ def cmd_evaluate() -> str:
         if not ind:
             continue
         sig = detect_signals(ind, sym)
+        ta_map[sym] = {"ind": ind, "sig": sig}
         entry = sig["entries"][0] if sig["entries"] else "none"
         exit_s = sig["exits"][0] if sig["exits"] else "none"
         ta_context.append(
@@ -1335,48 +1337,98 @@ def cmd_evaluate() -> str:
             f"signal:{entry} exit:{exit_s}"
         )
 
-    # 3. Build trade lines
+    # 3. Build trade lines for Claude
     trade_lines = []
-    for t in sorted(trades, key=lambda x: abs(x["profit_pct"]), reverse=True):
+    for t in sorted(trades, key=lambda x: x["profit_pct"]):
         pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
-        inst = t["instance"][0]  # s or f
-        dur_s = t.get("trade_duration", 0) or 0
-        dur = f"{dur_s // 3600}h{(dur_s % 3600) // 60:02d}m" if dur_s >= 3600 else f"{dur_s // 60}m"
+        inst = t["instance"][0]
         tag = t.get("enter_tag", "") or "?"
         trade_lines.append(
-            f"{pair}[{inst}] {t['profit_pct']:+.2f}% ${t['current_rate']:.4g} {dur} {tag}"
+            f"{pair}[{inst}] {t['profit_pct']:+.2f}% ${t['current_rate']:.4g} {tag}"
         )
 
-    # 4. Claude evaluation
+    # 4. Claude: get action per trade (compact JSON)
     ta_block = "\n".join(ta_context) if ta_context else "No TA data"
     trades_block = "\n".join(trade_lines)
 
-    prompt = f"""Crypto trade monitor. Classify each trade as CUT, TRAIL, or HOLD.
+    prompt = f"""Classify each trade. TA data then trades.
 
-TA:
 {ta_block}
 
-TRADES:
 {trades_block}
 
-Output exactly this format — group by action, use short reasons (max 8 words each):
+Reply ONLY with one line per trade, format: PAIR ACTION reason
+ACTION is HOLD, TRAIL, or CUT. Reason max 6 words. Example:
+ETH HOLD RSI:50 uptrend intact
+FHE CUT RSI:26 broke support"""
 
-CUT:
-PAIR[x] -X.X% — short reason
-PAIR[x] -X.X% — short reason
+    raw = claude_analyze(prompt, max_tokens=400)
 
-TRAIL:
-PAIR[x] +X.X% — short reason
+    # 5. Parse actions into lookup
+    actions = {}
+    for line in raw.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 2)
+        if len(parts) >= 2:
+            sym = parts[0].replace("[s]", "").replace("[f]", "")
+            act = parts[1].upper()
+            reason = parts[2] if len(parts) > 2 else ""
+            if act in ("HOLD", "TRAIL", "CUT"):
+                actions[sym] = {"action": act, "reason": reason}
 
-HOLD:
-PAIR[x] -X.X% — short reason
-
-Rules: omit empty groups. Keep reasons to key metric (e.g. "RSI:26 broke support" not long explanations). Sort worst first in CUT, best first in TRAIL."""
-
-    analysis = claude_analyze(prompt, max_tokens=500)
-
+    # 6. Build Freqtrade-style table
     now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
-    return f"*Evaluate* | {now_str}\n\n{analysis}"
+    sorted_trades = sorted(trades, key=lambda x: x["profit_pct"], reverse=True)
+
+    # P/L totals
+    total_pnl = sum(t["profit_abs"] for t in trades)
+    spot_trades = [t for t in trades if t["instance"] == "spot"]
+    fut_trades = [t for t in trades if t["instance"] == "futures"]
+
+    lines = [f"*Evaluate* | {now_str}\n"]
+
+    # Header
+    lines.append("`  # Pair         P/L%   Action  Reason`")
+    lines.append("`" + "-" * 50 + "`")
+
+    for t in sorted_trades:
+        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        inst = t["instance"][0]
+        tid = t.get("trade_id", "?")
+        pct = t["profit_pct"]
+
+        display = f"{pair}" if inst == "s" else f"{pair}(f)"
+        act_info = actions.get(pair, {"action": "HOLD", "reason": ""})
+        act = act_info["action"]
+        reason = act_info["reason"][:20]
+
+        # Action icon
+        if act == "CUT":
+            icon = "\u2716"
+        elif act == "TRAIL":
+            icon = "\u2795"
+        else:
+            icon = "\u2022"
+
+        lines.append(
+            f"`{tid:>3} {display:<12} {pct:>+6.1f}%` {icon}`{act:<5}` _{reason}_"
+        )
+
+    lines.append("`" + "-" * 50 + "`")
+    lines.append(f"`    TOTAL      {total_pnl:>+8.4f} USDT  ({len(trades)} trades)`")
+
+    # Summary counts
+    cuts = sum(1 for a in actions.values() if a["action"] == "CUT")
+    trails = sum(1 for a in actions.values() if a["action"] == "TRAIL")
+    holds = len(trades) - cuts - trails
+    if cuts:
+        lines.append(f"\n\u2716 *{cuts} CUT* | \u2795 {trails} TRAIL | \u2022 {holds} HOLD")
+    else:
+        lines.append(f"\n\u2795 {trails} TRAIL | \u2022 {holds} HOLD")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
