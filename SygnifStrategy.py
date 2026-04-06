@@ -2,7 +2,7 @@
 SygnifStrategy - NFI-Enhanced Trading Bot with AI Sentiment Layer
 
 Architecture (inspired by NostalgiaForInfinityX7):
-- Multi-timeframe analysis: 5m base + 15m/1h/4h/1d informative
+- Multi-timeframe analysis: 5m base + 5m/15m/1h/4h/1d informative
 - BTC correlation: BTC/USDT indicators merged into all pairs
 - NFI-style indicators: RSI_3/14, Aroon, StochRSI, CMF, CCI, ROC, BB, EMA, Williams %R
 - Global protections: Multi-TF cascade prevents buying during crashes
@@ -221,12 +221,12 @@ class SygnifStrategy(IStrategy):
     can_short = False  # Overridden to True in __init__ when futures mode
 
     # --- Core settings (NFI-style) ---
-    stoploss = -0.99  # Disabled — managed internally
+    stoploss = -0.20  # Base SL (overridden per-trade by custom_stoploss)
     trailing_stop = False
-    use_custom_stoploss = False
+    use_custom_stoploss = True
 
     timeframe = "5m"
-    info_timeframes = ["15m", "1h", "4h", "1d"]
+    info_timeframes = ["5m", "15m", "1h", "4h", "1d"]
 
     process_only_new_candles = True
     use_exit_signal = True
@@ -238,6 +238,13 @@ class SygnifStrategy(IStrategy):
     # Minimal ROI — let custom_exit handle exits
     minimal_roi = {"0": 100}
 
+    # Protections — lock pair after repeated stoploss hits
+    protections = [
+        {"method": "StoplossGuard", "lookback_period_candles": 12,
+         "trade_limit": 2, "stop_duration_candles": 48, "only_per_pair": True},
+        {"method": "CooldownPeriod", "stop_duration_candles": 5},
+    ]
+
     # --- Thresholds ---
     stop_threshold_doom_spot = 0.20     # -20% doom stoploss (spot)
     stop_threshold_doom_futures = 0.20  # -20% doom stoploss (futures, divided by leverage)
@@ -247,7 +254,6 @@ class SygnifStrategy(IStrategy):
 
     # --- Leverage ---
     futures_mode_leverage = 3.0
-    futures_mode_leverage_mover = 2.0   # lower for higher-risk movers
     futures_mode_leverage_majors = 5.0  # BTC, ETH, SOL, XRP — slow movers, higher leverage ok
 
     # Major pairs eligible for 5x
@@ -255,27 +261,15 @@ class SygnifStrategy(IStrategy):
 
     # Sentiment thresholds
     sentiment_threshold_buy = 55.0
-    sentiment_threshold_sell = 40.0
 
-    # Movers refresh
+    # Movers tracking — top gainers/losers refreshed every 4h
     _movers_pairs: list[str] = []
-    _movers_gainers: list[str] = []
-    _movers_losers: list[str] = []
     _movers_last_update: float = 0.0
     _movers_refresh_secs: int = 14400  # 4h
 
-    # Mover slot management (NFI-style tag-based routing)
-    mover_max_slots_gainer = 1
-    mover_max_slots_loser = 1
-    mover_stake_multiplier = 0.5  # Half stake for higher-risk mover trades
-    mover_tags_gainer = ["mover_gainer"]
-    mover_tags_loser = ["mover_loser"]
-
-    # Mover exit thresholds
-    mover_gainer_tp_min = 0.015      # +1.5% minimum before considering exit
-    mover_gainer_sl = 0.07           # -7% stoploss (tighter — momentum can reverse fast)
-    mover_loser_tp_min = 0.01        # +1% quick scalp
-    mover_loser_sl = 0.05            # -5% stoploss (tight — losers can keep losing)
+    # Doom cooldown — per-pair lockout after stoploss hit
+    _doom_cooldown: dict[str, float] = {}
+    doom_cooldown_secs = 14400  # 4h
 
     # Claude layer
     claude = SygnifSentiment()
@@ -286,16 +280,52 @@ class SygnifStrategy(IStrategy):
     def bot_start(self, **kwargs) -> None:
         if self.config.get("trading_mode", "") == "futures":
             self.can_short = True
+        self._load_doom_cooldown()
+        self._refresh_movers()
+
+    def bot_loop_start(self, current_time=None, **kwargs) -> None:
+        """Inject movers into active whitelist each loop iteration."""
+        self._refresh_movers()
+        if self._movers_pairs and self.dp:
+            current_wl = self.dp.current_whitelist()
+            for pair in self._movers_pairs:
+                if pair not in current_wl:
+                    current_wl.append(pair)
+                    logger.info(f"Mover {pair} added to whitelist")
 
     # -------------------------------------------------------------------------
-    # Fetch top gainers/losers from Bybit API (refreshed every 4h)
+    # Doom cooldown persistence — survive restarts
+    # -------------------------------------------------------------------------
+    _doom_cooldown_path = "user_data/doom_cooldown.json"
+
+    def _load_doom_cooldown(self):
+        try:
+            with open(self._doom_cooldown_path) as f:
+                data = json.load(f)
+            now = time.time()
+            self._doom_cooldown = {
+                k: v for k, v in data.items()
+                if now - v < self.doom_cooldown_secs
+            }
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._doom_cooldown = {}
+
+    def _save_doom_cooldown(self):
+        try:
+            with open(self._doom_cooldown_path, "w") as f:
+                json.dump(self._doom_cooldown, f)
+        except OSError as e:
+            logger.warning(f"Failed to save doom cooldown: {e}")
+
+    # -------------------------------------------------------------------------
+    # Fetch top gainers/losers from movers file (refreshed every 4h)
     # -------------------------------------------------------------------------
     def _refresh_movers(self):
         now = time.time()
         if now - self._movers_last_update < self._movers_refresh_secs and self._movers_pairs:
             return
         try:
-            movers_file = Path(__file__).resolve().parent.parent / "movers_pairlist.json"
+            movers_file = Path(__file__).resolve().parent.parent.parent / "movers_pairlist.json"
             if not movers_file.exists():
                 logger.warning(f"Movers file not found: {movers_file}")
                 return
@@ -303,11 +333,12 @@ class SygnifStrategy(IStrategy):
             pairs = data.get("exchange", {}).get("pair_whitelist", [])
             if pairs:
                 self._movers_pairs = pairs
-                meta = data.get("_meta", {})
-                self._movers_gainers = meta.get("gainers", [])
-                self._movers_losers = meta.get("losers", [])
                 self._movers_last_update = now
-                logger.info(f"Movers loaded from file: gainers={self._movers_gainers}, losers={self._movers_losers}")
+                meta = data.get("_meta", {})
+                logger.info(
+                    f"Movers loaded: gainers={meta.get('gainers', [])}, "
+                    f"losers={meta.get('losers', [])}"
+                )
         except Exception as e:
             logger.warning(f"Movers refresh failed: {e}")
 
@@ -319,7 +350,6 @@ class SygnifStrategy(IStrategy):
         pairs = []
         for tf in self.info_timeframes:
             pairs.append(("BTC/USDT", tf))
-        # Add movers as informative so Freqtrade downloads their data
         for mover in self._movers_pairs:
             for tf in [self.timeframe] + self.info_timeframes:
                 pairs.append((mover, tf))
@@ -331,7 +361,8 @@ class SygnifStrategy(IStrategy):
     def btc_informative_indicators(self, btc_df: DataFrame, timeframe: str) -> DataFrame:
         btc_df["btc_RSI_3"] = pta.rsi(btc_df["close"], length=3)
         btc_df["btc_RSI_14"] = pta.rsi(btc_df["close"], length=14)
-        btc_df["btc_EMA_200"] = pta.ema(btc_df["close"], length=200, fillna=False)
+        _r = pta.ema(btc_df["close"], length=200)
+        btc_df["btc_EMA_200"] = _r if _r is not None else np.nan
         btc_df["btc_change_pct"] = (btc_df["close"] - btc_df["open"]) / btc_df["open"] * 100.0
         # Rename to avoid collision
         ignore_columns = ["date", "btc_RSI_3", "btc_RSI_14", "btc_EMA_200", "btc_change_pct"]
@@ -350,7 +381,7 @@ class SygnifStrategy(IStrategy):
         df["RSI_3_change_pct"] = df["RSI_3"].pct_change() * 100.0
         # EMA
         df["EMA_12"] = pta.ema(df["close"], length=12)
-        df["EMA_200"] = pta.ema(df["close"], length=200, fillna=False)
+        df["EMA_200"] = pta.ema(df["close"], length=200, )
         # BB
         if len(df) >= 20:
             bbands = pta.bbands(df["close"], length=20)
@@ -389,8 +420,15 @@ class SygnifStrategy(IStrategy):
     # Populate indicators
     # -------------------------------------------------------------------------
     def populate_indicators(self, df: DataFrame, metadata: dict) -> DataFrame:
-        if len(df) < 20:
+        if len(df) < self.startup_candle_count:
             return df
+        try:
+            return self._populate_indicators_inner(df, metadata)
+        except (ValueError, KeyError) as e:
+            logger.warning(f"[{metadata.get('pair')}] Skipping indicators: {e}")
+            return df
+
+    def _populate_indicators_inner(self, df: DataFrame, metadata: dict) -> DataFrame:
         tik = time.perf_counter()
 
         # --- BTC informative (all timeframes) ---
@@ -431,8 +469,10 @@ class SygnifStrategy(IStrategy):
         df["EMA_20"] = pta.ema(df["close"], length=20)
         df["EMA_26"] = pta.ema(df["close"], length=26)
         df["EMA_50"] = pta.ema(df["close"], length=50)
-        df["EMA_100"] = pta.ema(df["close"], length=100, fillna=False)
-        df["EMA_200"] = pta.ema(df["close"], length=200, fillna=False)
+        _r = pta.ema(df["close"], length=100)
+        df["EMA_100"] = _r if _r is not None else np.nan
+        _r = pta.ema(df["close"], length=200)
+        df["EMA_200"] = _r if _r is not None else np.nan
         # SMA
         df["SMA_9"] = pta.sma(df["close"], length=9)
         df["SMA_16"] = pta.sma(df["close"], length=16)
@@ -501,12 +541,43 @@ class SygnifStrategy(IStrategy):
         df["close_min_12"] = df["close"].rolling(12).min()
         df["close_min_48"] = df["close"].rolling(48).min()
         df["volume_sma_20"] = pta.sma(df["volume"], length=20)
+        df["ATR_14"] = pta.atr(df["high"], df["low"], df["close"], length=14)
         df["num_empty_288"] = (df["volume"] <= 0).rolling(window=288, min_periods=288).sum()
 
         # --- Handle NaN for merged columns ---
         for col in ["RSI_14_1h", "RSI_14_4h", "RSI_14_1d"]:
             if col in df.columns:
                 df[col] = df[col].astype(np.float64).replace(to_replace=[np.nan, None], value=50.0)
+
+        # --- Failure Swing (Stop Hunt) indicators ---
+        # 84-bar S/R levels (shifted: use closed bars only)
+        df["fs_resistance"] = df["high"].shift(1).rolling(84).max()
+        df["fs_support"] = df["low"].shift(1).rolling(84).min()
+        # Stable level check: S/R unchanged for 2 bars (level is established)
+        df["fs_resistance_stable"] = df["fs_resistance"] == df["fs_resistance"].shift(1)
+        df["fs_support_stable"] = df["fs_support"] == df["fs_support"].shift(1)
+        # EMA 120 for TP target
+        df["EMA_120"] = pta.ema(df["close"], length=120)
+        # Volatility filter: distance from EMA as % (must exceed 5%)
+        df["fs_volatility"] = ((df["close"] - df["EMA_120"]).abs() / df["EMA_120"])
+        df["fs_vol_filter"] = df["fs_volatility"] > 0.05
+        # Long signal: wick below support but close back above + stable level
+        df["fs_long"] = (
+            (df["low"] <= df["fs_support"])
+            & (df["close"] > df["fs_support"])
+            & df["fs_support_stable"]
+            & df["fs_vol_filter"]
+        )
+        # Short signal: wick above resistance but close back below + stable level
+        df["fs_short"] = (
+            (df["high"] >= df["fs_resistance"])
+            & (df["close"] < df["fs_resistance"])
+            & df["fs_resistance_stable"]
+            & df["fs_vol_filter"]
+        )
+        # Dynamic SL/TP coefficients (Heavy91)
+        df["fs_sl_pct"] = 0.02 + df["fs_volatility"] * 0.02  # base 2% + vol adjustment
+        df["fs_tp_ema"] = df["EMA_120"] * (1 + df["fs_volatility"] * 0.05 * np.sign(df["close"] - df["EMA_120"]))
 
         # --- Global protections (NFI-style) ---
         df["protections_long_global"] = self._calc_global_protections(df)
@@ -670,16 +741,41 @@ class SygnifStrategy(IStrategy):
         proposed_leverage: float, max_leverage: float,
         entry_tag: Optional[str], side: str, **kwargs
     ) -> float:
-        enter_tag = entry_tag or ""
-        # 2x for movers (higher risk)
-        if enter_tag in (self.mover_tags_gainer + self.mover_tags_loser):
-            return min(self.futures_mode_leverage_mover, max_leverage)
         # 5x for majors (BTC, ETH, SOL, XRP)
-        base_pair = pair.split(":")[0] if ":" in pair else pair
-        if base_pair in self.major_pairs:
-            return min(self.futures_mode_leverage_majors, max_leverage)
-        # 3x default
-        return min(self.futures_mode_leverage, max_leverage)
+        if (pair.split(":")[0] if ":" in pair else pair) in self.major_pairs:
+            tier_lev = self.futures_mode_leverage_majors
+        else:
+            # 3x default
+            tier_lev = self.futures_mode_leverage
+
+        # Volatility cap: high ATR% → lower leverage
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            if len(df) >= 14 and "ATR_14" in df.columns:
+                atr_pct = (df["ATR_14"].iloc[-1] / df["close"].iloc[-1]) * 100
+                if atr_pct > 3.0:
+                    tier_lev = min(tier_lev, 2.0)
+                elif atr_pct > 2.0:
+                    tier_lev = min(tier_lev, 3.0)
+        except Exception:
+            pass
+
+        return min(tier_lev, max_leverage)
+
+    # -------------------------------------------------------------------------
+    # Custom stoploss — leverage-aware, placed on exchange
+    # -------------------------------------------------------------------------
+    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
+                        current_rate: float, current_profit: float,
+                        after_fill: bool, **kwargs) -> float:
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        leverage = trade.leverage or 1.0
+        sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot  # 0.20
+
+        # For futures: SL is price-based, divide by leverage
+        if is_futures:
+            return -(sl / leverage)
+        return -sl
 
     # -------------------------------------------------------------------------
     # Calculate vectorized TA score (enhanced with NFI indicators)
@@ -742,6 +838,9 @@ class SygnifStrategy(IStrategy):
     def populate_entry_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
         df.loc[:, "enter_long"] = 0
         df.loc[:, "enter_tag"] = ""
+        if "RSI_14" not in df.columns:
+            df.loc[:, "enter_short"] = 0
+            return df
 
         # Global protections
         prot = df.get("protections_long_global", pd.Series(True, index=df.index))
@@ -774,28 +873,23 @@ class SygnifStrategy(IStrategy):
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
 
-        # --- Mover entries (last candle only, live efficiency) ---
+        # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
-            pair = metadata.get("pair", "")
-            self._refresh_movers()
-            last = df.iloc[-1]
-            prev = df.iloc[-2] if len(df) > 1 else last
+            last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
+            last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
+            fs_long = df.iloc[-1].get("fs_long", False)
 
-            # Gainer: momentum pullback entry
-            if pair in self._movers_gainers:
-                if self._count_open_mover_trades(self.mover_tags_gainer) < self.mover_max_slots_gainer:
-                    if self._check_gainer_entry(last, prev):
-                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                        df.iloc[-1, df.columns.get_loc("enter_tag")] = "mover_gainer"
-                        logger.info(f"Mover gainer entry signal: {pair}")
+            if last_prot and last_empty and fs_long:
+                last_score = ta_score.iloc[-1]
+                if last_score >= 50:
+                    # claude_swing: failure swing + TA confluence
+                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing"
+                else:
+                    # swing_failure: standalone, TA not confirming but pattern is clear
+                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "swing_failure"
 
-            # Loser: mean-reversion bounce entry
-            if pair in self._movers_losers and not df.iloc[-1].get("enter_long", 0):
-                if self._count_open_mover_trades(self.mover_tags_loser) < self.mover_max_slots_loser:
-                    if self._check_loser_entry(last, prev):
-                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                        df.iloc[-1, df.columns.get_loc("enter_tag")] = "mover_loser"
-                        logger.info(f"Mover loser entry signal: {pair}")
 
         # =====================================================================
         # SHORT ENTRIES (futures only — guarded by can_short in config)
@@ -804,87 +898,24 @@ class SygnifStrategy(IStrategy):
 
         prot_short = df.get("protections_short_global", pd.Series(True, index=df.index))
 
-        # Invert TA score: low score = bearish = short opportunity
-        # Short when TA score <= 25 (strong bearish) with short protections passing
-        short_strong = prot_short & empty_ok & (ta_score <= 25)
-        df.loc[short_strong, "enter_short"] = 1
-        df.loc[short_strong, "enter_tag"] = "strong_ta_short"
-
-        # Ambiguous zone — Claude sentiment for shorts on LAST candle only
+        # --- Failure Swing short entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_short", 0):
-            last_score = ta_score.iloc[-1]
             last_prot_s = prot_short.iloc[-1] if hasattr(prot_short, 'iloc') else True
             last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
+            fs_short = df.iloc[-1].get("fs_short", False)
 
-            if last_prot_s and last_empty and 30 <= last_score <= 60:
-                pair = metadata.get("pair", "XRP/USDT")
-                token = pair.split("/")[0]
-                price = df.iloc[-1]["close"]
-
-                headlines = self.claude.fetch_news(token)
-                sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
-                final_score = last_score + sentiment
-
-                if final_score <= self.sentiment_threshold_sell:
+            if last_prot_s and last_empty and fs_short:
+                last_score = ta_score.iloc[-1]
+                if last_score <= 50:
+                    # claude_swing short: failure swing + bearish TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_short_s{sentiment:.0f}"
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing_short"
+                else:
+                    # swing_failure_short: standalone pattern
+                    df.iloc[-1, df.columns.get_loc("enter_short")] = 1
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "swing_failure_short"
 
         return df
-
-    # -------------------------------------------------------------------------
-    # Gainer entry: buy the dip in a strong uptrend (NFI quick_mode pattern)
-    # -------------------------------------------------------------------------
-    def _check_gainer_entry(self, last, prev) -> bool:
-        rsi3 = last.get("RSI_3", 50)
-        rsi14 = last.get("RSI_14", 50)
-        rsi14_1h = last.get("RSI_14_1h", 50)
-        close = last.get("close", 0)
-        ema20 = last.get("EMA_20", 0)
-        bbl = last.get("BBL_20_2.0", 0)
-
-        # Pullback on 5m (RSI_3 dip) while higher TFs still bullish
-        pullback = rsi3 < 35
-        # 1h trend still intact
-        trend_ok = rsi14_1h > 50
-        # Not already overbought on 5m
-        not_ob = rsi14 < 65
-        # Price above EMA20 (uptrend structure)
-        above_ema = close > ema20 if ema20 else False
-        # Volume confirmation
-        vol_ok = last.get("volume", 0) > last.get("volume_sma_20", 0) * 0.8
-
-        # NFI-style multi-condition AND
-        return pullback and trend_ok and not_ob and above_ema and vol_ok
-
-    # -------------------------------------------------------------------------
-    # Loser entry: mean-reversion at oversold extremes (NFI grind_mode pattern)
-    # -------------------------------------------------------------------------
-    def _check_loser_entry(self, last, prev) -> bool:
-        rsi3 = last.get("RSI_3", 50)
-        rsi14 = last.get("RSI_14", 50)
-        rsi3_prev = prev.get("RSI_3", 50)
-        close = last.get("close", 0)
-        bbl = last.get("BBL_20_2.0", 0)
-        cmf = last.get("CMF_20", 0)
-        stochrsi = last.get("STOCHRSIk_14_14_3_3", 50)
-        willr = last.get("WILLR_14", -50)
-
-        # Deep oversold on RSI_14
-        oversold = rsi14 < 30
-        # RSI_3 turning up (bounce starting)
-        rsi3_turning = rsi3 > rsi3_prev and rsi3 < 40
-        # Near or below Bollinger lower band
-        near_bbl = close < bbl * 1.01 if bbl else False
-        # StochRSI in oversold zone
-        stoch_os = stochrsi < 20
-        # Williams %R extreme
-        willr_os = willr < -85
-        # CMF not deeply negative (some buying pressure returning)
-        cmf_ok = cmf > -0.25
-
-        # Need at least: oversold + bounce signal + 2 confirmations
-        confirmations = sum([near_bbl, stoch_os, willr_os, cmf_ok])
-        return oversold and rsi3_turning and confirmations >= 2
 
     # -------------------------------------------------------------------------
     # Populate exit trend (basic — main exits via custom_exit)
@@ -895,27 +926,23 @@ class SygnifStrategy(IStrategy):
         return df
 
     # -------------------------------------------------------------------------
-    # Custom stake — reduced size for mover trades (NFI rebuy_mode pattern)
+    # Doom cooldown — block re-entry after stoploss hit
     # -------------------------------------------------------------------------
-    def custom_stake_amount(
-        self, pair: str, current_time: datetime, current_rate: float,
-        proposed_stake: float, min_stake: float | None, max_stake: float,
-        leverage: float, entry_tag: str | None, side: str, **kwargs
-    ) -> float:
-        if entry_tag and entry_tag in (self.mover_tags_gainer + self.mover_tags_loser):
-            reduced = proposed_stake * self.mover_stake_multiplier
-            if min_stake and reduced < min_stake:
-                return min_stake
-            logger.info(f"Mover stake for {pair}: {reduced:.2f} ({self.mover_stake_multiplier}x)")
-            return reduced
-        return proposed_stake
+    def confirm_trade_entry(self, pair, order_type, amount, rate,
+                            time_in_force, current_time, entry_tag, side, **kwargs):
+        cooldown_since = self._doom_cooldown.get(pair, 0)
+        if time.time() - cooldown_since < self.doom_cooldown_secs:
+            logger.info(f"Doom cooldown active for {pair}, skipping entry")
+            return False
+        return True
 
-    # -------------------------------------------------------------------------
-    # Count open mover trades by tag
-    # -------------------------------------------------------------------------
-    def _count_open_mover_trades(self, tags: list[str]) -> int:
-        trades = Trade.get_trades_proxy(is_open=True)
-        return sum(1 for t in trades if t.enter_tag in tags)
+    def confirm_trade_exit(self, pair, trade, order_type, amount, rate,
+                           time_in_force, exit_reason, current_time, **kwargs):
+        if "stoploss" in exit_reason.lower():
+            self._doom_cooldown[pair] = time.time()
+            self._save_doom_cooldown()
+            logger.info(f"Doom cooldown set for {pair} after {exit_reason}")
+        return True
 
     # -------------------------------------------------------------------------
     # Custom exit — NFI-style profit-tiered exits
@@ -938,15 +965,6 @@ class SygnifStrategy(IStrategy):
         is_short = trade.is_short
         leverage = trade.leverage or 1.0
 
-        # --- Mover-specific exits (tag-based routing, NFI pattern) ---
-        enter_tag = trade.enter_tag or ""
-
-        if not is_short:
-            if enter_tag == "mover_gainer":
-                return self._exit_mover_gainer(last, prev, current_profit)
-            if enter_tag == "mover_loser":
-                return self._exit_mover_loser(last, prev, current_profit)
-
         # ==================================================================
         # SHORT EXITS
         # ==================================================================
@@ -957,24 +975,25 @@ class SygnifStrategy(IStrategy):
             )
 
         # ==================================================================
-        # LONG EXITS (unchanged)
+        # FAILURE SWING EXITS (tag-based routing)
+        # ==================================================================
+        enter_tag = trade.enter_tag or ""
+
+        if enter_tag == "swing_failure":
+            return self._exit_swing_failure(last, current_rate, trade, current_profit)
+
+        if enter_tag == "claude_swing":
+            # Hybrid: check both EMA-TP and Williams %R, first one wins
+            fs_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
+            if fs_exit:
+                return fs_exit
+            # Fall through to Williams %R below
+
+        # ==================================================================
+        # LONG EXITS
         # ==================================================================
         rsi14 = last.get("RSI_14", 50)
-        bbu = last.get("BBU_20_2.0", 0)
-        if rsi14 > 84 and last["close"] > bbu and prev["close"] > prev.get("BBU_20_2.0", 0):
-            if current_profit > 0.01:
-                return "exit_overbought_bb_rsi"
-
-        if rsi14 > 88 and current_profit > 0.01:
-            return "exit_extreme_rsi"
-
         rsi14_1h = last.get("RSI_14_1h", 50)
-        if rsi14 > 80 and rsi14_1h > 75 and current_profit > 0.01:
-            return "exit_multi_tf_overbought"
-
-        bbu_1h = last.get("BBU_20_2.0_1h", 0)
-        if bbu_1h and last["close"] > bbu_1h * 1.10 and current_profit > 0.01:
-            return "exit_1h_bb_stretch"
 
         if current_profit > 0.0:
             above_ema200 = last["close"] > last.get("EMA_200", 0)
@@ -986,23 +1005,43 @@ class SygnifStrategy(IStrategy):
         if willr is not None and willr > -5 and current_profit > 0.02:
             return "exit_willr_overbought"
 
-        # --- Doom stoploss (leverage-aware, NFI pattern) ---
-        entry_cost = filled_entries[0].cost
-        profit_stake = trade.calc_profit(rate=current_rate) if hasattr(trade, 'calc_profit') else (current_rate - trade.open_rate) / trade.open_rate * entry_cost
-        is_futures = self.config.get("trading_mode", "") == "futures"
-        doom_threshold = (self.stop_threshold_doom_futures / leverage) if is_futures else self.stop_threshold_doom_spot
-        if isinstance(profit_stake, (int, float)) and profit_stake < -(entry_cost * doom_threshold):
-            return "exit_stoploss_doom"
+        # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
-        # --- Normal stoploss with conditions (NFI stoploss_u_e pattern) ---
-        if (
-            current_profit < -self.stop_threshold_normal
-            and last["close"] < last.get("EMA_200", float("inf"))
-            and last.get("CMF_20", 0) < 0
-            and rsi14 > prev.get("RSI_14", 50)
-            and rsi14 > (rsi14_1h + 20)
-        ):
-            return "exit_stoploss_conditional"
+        # --- Soft stoploss — fires before exchange SL, needs fewer conditions ---
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        soft_sl = -(self.stop_threshold_doom_futures * 0.6 / leverage) if is_futures else -0.12
+        if current_profit < soft_sl:
+            if last["close"] < last.get("EMA_200", float("inf")) or rsi14 > prev.get("RSI_14", 50):
+                return "exit_stoploss_conditional"
+
+        return None
+
+    # -------------------------------------------------------------------------
+    # Failure Swing exit — Heavy91 EMA-TP + volatility-adjusted SL
+    # -------------------------------------------------------------------------
+    def _exit_swing_failure(self, last, current_rate, trade, current_profit):
+        ema_tp = last.get("fs_tp_ema", 0)
+        sl_pct = last.get("fs_sl_pct", 0.02)
+        is_short = trade.is_short
+
+        if not is_short:
+            # Long TP: price reaches volatility-adjusted EMA
+            if ema_tp and current_rate >= ema_tp and current_profit > 0.005:
+                return "exit_sf_ema_tp"
+            # Long SL: dynamic volatility-adjusted stop
+            entry = trade.open_rate
+            sl_price = entry * (1 - sl_pct)
+            if current_rate <= sl_price:
+                return "exit_sf_vol_sl"
+        else:
+            # Short TP: price falls to volatility-adjusted EMA
+            if ema_tp and current_rate <= ema_tp and current_profit > 0.005:
+                return "exit_sf_short_ema_tp"
+            # Short SL: dynamic volatility-adjusted stop
+            entry = trade.open_rate
+            sl_price = entry * (1 + sl_pct)
+            if current_rate >= sl_price:
+                return "exit_sf_short_vol_sl"
 
         return None
 
@@ -1011,28 +1050,20 @@ class SygnifStrategy(IStrategy):
     # -------------------------------------------------------------------------
     def _custom_exit_short(self, last, prev, current_profit, current_rate,
                            trade, filled_entries, leverage):
+        enter_tag = trade.enter_tag or ""
+
+        # --- Failure Swing short exits ---
+        if enter_tag == "swing_failure_short":
+            return self._exit_swing_failure(last, current_rate, trade, current_profit)
+
+        if enter_tag == "claude_swing_short":
+            fs_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
+            if fs_exit:
+                return fs_exit
+            # Fall through to Williams %R below
+
         rsi14 = last.get("RSI_14", 50)
         rsi14_1h = last.get("RSI_14_1h", 50)
-
-        # --- Exit Signal 1: Extreme oversold (cover short) ---
-        bbl = last.get("BBL_20_2.0", 0)
-        if (rsi14 < 16 and bbl and last["close"] < bbl
-                and prev["close"] < prev.get("BBL_20_2.0", float("inf"))):
-            if current_profit > 0.01:
-                return "exit_short_oversold_bb_rsi"
-
-        # --- Exit Signal 2: RSI < 12 ---
-        if rsi14 < 12 and current_profit > 0.01:
-            return "exit_short_extreme_rsi"
-
-        # --- Exit Signal 3: RSI_14 + RSI_14_1h both oversold ---
-        if rsi14 < 20 and rsi14_1h < 25 and current_profit > 0.01:
-            return "exit_short_multi_tf_oversold"
-
-        # --- Exit Signal 4: Price below 1h BB lower * 0.90 ---
-        bbl_1h = last.get("BBL_20_2.0_1h", 0)
-        if bbl_1h and last["close"] < bbl_1h * 0.90 and current_profit > 0.01:
-            return "exit_short_1h_bb_stretch"
 
         # --- Profit-tiered RSI exit for shorts (inverted) ---
         if current_profit > 0.0:
@@ -1046,23 +1077,14 @@ class SygnifStrategy(IStrategy):
         if willr is not None and willr < -95 and current_profit > 0.02:
             return "exit_short_willr_oversold"
 
-        # --- Doom stoploss (leverage-aware) ---
-        entry_cost = filled_entries[0].cost
-        profit_stake = trade.calc_profit(rate=current_rate) if hasattr(trade, 'calc_profit') else (trade.open_rate - current_rate) / trade.open_rate * entry_cost
-        is_futures = self.config.get("trading_mode", "") == "futures"
-        doom_threshold = (self.stop_threshold_doom_futures / leverage) if is_futures else self.stop_threshold_doom_spot
-        if isinstance(profit_stake, (int, float)) and profit_stake < -(entry_cost * doom_threshold):
-            return "exit_short_stoploss_doom"
+        # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
-        # --- Normal stoploss with conditions for shorts (inverted u_e) ---
-        if (
-            current_profit < -self.stop_threshold_normal
-            and last["close"] > last.get("EMA_200", 0)
-            and last.get("CMF_20", 0) > 0
-            and rsi14 < prev.get("RSI_14", 50)
-            and rsi14 < (rsi14_1h - 20)
-        ):
-            return "exit_short_stoploss_conditional"
+        # --- Soft stoploss for shorts — fires before exchange SL ---
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        soft_sl = -(self.stop_threshold_doom_futures * 0.6 / leverage) if is_futures else -0.12
+        if current_profit < soft_sl:
+            if last["close"] > last.get("EMA_200", 0) or rsi14 < prev.get("RSI_14", 50):
+                return "exit_short_stoploss_conditional"
 
         return None
 
@@ -1127,68 +1149,3 @@ class SygnifStrategy(IStrategy):
         else:
             return 58.0 + offset
 
-    # -------------------------------------------------------------------------
-    # Mover gainer exit — ride momentum, exit on exhaustion
-    # -------------------------------------------------------------------------
-    def _exit_mover_gainer(self, last, prev, current_profit: float):
-        rsi14 = last.get("RSI_14", 50)
-        rsi3 = last.get("RSI_3", 50)
-        rsi14_1h = last.get("RSI_14_1h", 50)
-
-        # Hard stoploss
-        if current_profit < -self.mover_gainer_sl:
-            return "exit_mover_gainer_sl"
-
-        # Momentum exhaustion: RSI was high, now dropping while in profit
-        if current_profit > self.mover_gainer_tp_min:
-            # RSI_14 declining from overbought
-            if rsi14 < 60 and prev.get("RSI_14", 50) > 65:
-                return "exit_mover_gainer_momentum_fade"
-            # Extreme overbought — take profit
-            if rsi14 > 80:
-                return "exit_mover_gainer_overbought"
-            # Multi-TF overbought
-            if rsi14 > 70 and rsi14_1h > 70:
-                return "exit_mover_gainer_multi_tf_ob"
-
-        # Bigger profit — wider trailing via RSI
-        if current_profit > 0.05:
-            if rsi3 < 20:
-                return "exit_mover_gainer_trail_5pct"
-        if current_profit > 0.10:
-            if rsi14 < 50:
-                return "exit_mover_gainer_trail_10pct"
-
-        return None
-
-    # -------------------------------------------------------------------------
-    # Mover loser exit — quick scalp on bounce, tight stoploss
-    # -------------------------------------------------------------------------
-    def _exit_mover_loser(self, last, prev, current_profit: float):
-        rsi14 = last.get("RSI_14", 50)
-        rsi3 = last.get("RSI_3", 50)
-
-        # Hard stoploss — tight, losers can keep losing
-        if current_profit < -self.mover_loser_sl:
-            return "exit_mover_loser_sl"
-
-        # Quick profit-take on bounce — don't get greedy with losers
-        if current_profit > self.mover_loser_tp_min:
-            # RSI recovering from oversold to neutral — take the bounce
-            if rsi14 > 45:
-                return "exit_mover_loser_bounce"
-            # RSI_3 spike — short-term momentum exhaustion
-            if rsi3 > 80:
-                return "exit_mover_loser_rsi3_spike"
-
-        # Moderate profit — secure it
-        if current_profit > 0.02:
-            if rsi14 > 55:
-                return "exit_mover_loser_secure"
-
-        # Larger bounce — wider target
-        if current_profit > 0.05:
-            if rsi3 < 30:
-                return "exit_mover_loser_trail_5pct"
-
-        return None

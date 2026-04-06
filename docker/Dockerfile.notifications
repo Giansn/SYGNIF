@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir requests
+
+COPY notification_handler.py /app/notification_handler.py
+
+WORKDIR /app
+EXPOSE 8089
