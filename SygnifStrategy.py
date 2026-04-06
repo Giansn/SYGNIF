@@ -225,14 +225,14 @@ class SygnifStrategy(IStrategy):
     use_custom_stoploss = True
 
     timeframe = "5m"
-    info_timeframes = ["5m", "15m", "1h", "4h", "1d"]
+    info_timeframes = ["15m", "1h", "4h", "1d"]
 
     process_only_new_candles = True
     use_exit_signal = True
     exit_profit_only = False
     ignore_roi_if_entry_signal = True
 
-    startup_candle_count: int = 200
+    startup_candle_count: int = 400
 
     # Minimal ROI — let custom_exit handle exits
     minimal_roi = {"0": 100}
@@ -367,12 +367,25 @@ class SygnifStrategy(IStrategy):
     # -------------------------------------------------------------------------
     def informative_pairs(self):
         self._refresh_movers()
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        btc_pair = "BTC/USDT:USDT" if is_futures else "BTC/USDT"
+
         pairs = []
+        # BTC correlation data
         for tf in self.info_timeframes:
-            pairs.append(("BTC/USDT", tf))
+            pairs.append((btc_pair, tf))
+
+        # All whitelist pairs need higher TF data for exits + crash protection
+        whitelist = self.dp.current_whitelist() if self.dp else []
+        for pair in whitelist:
+            for tf in self.info_timeframes:
+                pairs.append((pair, tf))
+
+        # Movers (may not be in whitelist yet)
         for mover in self._movers_pairs:
             for tf in [self.timeframe] + self.info_timeframes:
                 pairs.append((mover, tf))
+
         return pairs
 
     # -------------------------------------------------------------------------
@@ -452,7 +465,8 @@ class SygnifStrategy(IStrategy):
         tik = time.perf_counter()
 
         # --- BTC informative (all timeframes) ---
-        btc_pair = "BTC/USDT"
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        btc_pair = "BTC/USDT:USDT" if is_futures else "BTC/USDT"
         if metadata["pair"] != btc_pair:
             for tf in self.info_timeframes:
                 btc_df = self.dp.get_pair_dataframe(btc_pair, tf)

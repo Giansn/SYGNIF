@@ -1318,6 +1318,33 @@ def cmd_overview() -> str:
             icon = "\u26aa"
         lines.append(f"  {icon} {sym_name} {pf} TA:`{ta['score']}` {trend}")
 
+    # 5. Bybit API health — check rate limits
+    try:
+        resp = requests.get(
+            f"{BYBIT}/market/tickers",
+            params={"category": "spot", "symbol": "BTCUSDT"},
+            timeout=5,
+        )
+        rl_remaining = resp.headers.get("X-Bapi-Limit-Status", "?")
+        rl_limit = resp.headers.get("X-Bapi-Limit", "?")
+        rl_reset = resp.headers.get("X-Bapi-Limit-Reset-Timestamp", "")
+        status_code = resp.status_code
+
+        if status_code == 200:
+            lines.append(f"\n*API:* `{rl_remaining}/{rl_limit}` calls left")
+            # Warn if low
+            try:
+                remaining = int(rl_remaining)
+                limit = int(rl_limit)
+                if remaining < limit * 0.2:
+                    lines.append(f"  \u26a0\ufe0f Rate limit low!")
+            except (ValueError, TypeError):
+                pass
+        else:
+            lines.append(f"\n*API:* \u26a0\ufe0f Status {status_code}")
+    except Exception:
+        lines.append(f"\n*API:* \u26a0\ufe0f Bybit unreachable")
+
     return "\n".join(lines)
 
 

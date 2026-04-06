@@ -65,7 +65,7 @@ def strategy():
     # Set class-level defaults manually (IStrategy.__init__ not available)
     s.config = {"trading_mode": "spot", "dry_run": True}
     s.timeframe = "5m"
-    s.info_timeframes = ["5m", "15m", "1h", "4h", "1d"]
+    s.info_timeframes = ["15m", "1h", "4h", "1d"]
     s.stoploss = -0.20
     s.stop_threshold_doom_spot = 0.20
     s.stop_threshold_doom_futures = 0.20

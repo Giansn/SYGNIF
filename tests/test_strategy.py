@@ -485,9 +485,10 @@ class TestSlotCaps:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestConfig:
-    def test_5m_in_info_timeframes(self, strategy):
-        assert "5m" in strategy.info_timeframes
+    def test_5m_not_in_info_timeframes(self, strategy):
+        """5m is the base timeframe — not needed as informative."""
+        assert "5m" not in strategy.info_timeframes
 
     def test_all_timeframes_present(self, strategy):
-        for tf in ["5m", "15m", "1h", "4h", "1d"]:
+        for tf in ["15m", "1h", "4h", "1d"]:
             assert tf in strategy.info_timeframes
