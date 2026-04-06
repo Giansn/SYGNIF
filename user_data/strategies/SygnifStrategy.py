@@ -588,33 +588,33 @@ class SygnifStrategy(IStrategy):
 
         # --- Failure Swing (Stop Hunt) indicators ---
         # 48-bar S/R levels (4h on 5m TF, shifted: use closed bars only)
-        df["fs_resistance"] = df["high"].shift(1).rolling(48).max()
-        df["fs_support"] = df["low"].shift(1).rolling(48).min()
+        df["sf_resistance"] = df["high"].shift(1).rolling(48).max()
+        df["sf_support"] = df["low"].shift(1).rolling(48).min()
         # Stable level check: S/R unchanged for 2 bars (level is established)
-        df["fs_resistance_stable"] = df["fs_resistance"] == df["fs_resistance"].shift(1)
-        df["fs_support_stable"] = df["fs_support"] == df["fs_support"].shift(1)
+        df["sf_resistance_stable"] = df["sf_resistance"] == df["sf_resistance"].shift(1)
+        df["sf_support_stable"] = df["sf_support"] == df["sf_support"].shift(1)
         # EMA 120 for TP target
         df["EMA_120"] = pta.ema(df["close"], length=120)
         # Volatility filter: distance from EMA as % (must exceed 5%)
-        df["fs_volatility"] = ((df["close"] - df["EMA_120"]).abs() / df["EMA_120"])
-        df["fs_vol_filter"] = df["fs_volatility"] > 0.03
+        df["sf_volatility"] = ((df["close"] - df["EMA_120"]).abs() / df["EMA_120"])
+        df["sf_vol_filter"] = df["sf_volatility"] > 0.03
         # Long signal: wick below support but close back above + stable level
-        df["fs_long"] = (
-            (df["low"] <= df["fs_support"])
-            & (df["close"] > df["fs_support"])
-            & df["fs_support_stable"]
-            & df["fs_vol_filter"]
+        df["sf_long"] = (
+            (df["low"] <= df["sf_support"])
+            & (df["close"] > df["sf_support"])
+            & df["sf_support_stable"]
+            & df["sf_vol_filter"]
         )
         # Short signal: wick above resistance but close back below + stable level
-        df["fs_short"] = (
-            (df["high"] >= df["fs_resistance"])
-            & (df["close"] < df["fs_resistance"])
-            & df["fs_resistance_stable"]
-            & df["fs_vol_filter"]
+        df["sf_short"] = (
+            (df["high"] >= df["sf_resistance"])
+            & (df["close"] < df["sf_resistance"])
+            & df["sf_resistance_stable"]
+            & df["sf_vol_filter"]
         )
         # Dynamic SL/TP coefficients (Heavy91)
-        df["fs_sl_pct"] = 0.02 + df["fs_volatility"] * 0.02  # base 2% + vol adjustment
-        df["fs_tp_ema"] = df["EMA_120"] * (1 + df["fs_volatility"] * 0.05 * np.sign(df["close"] - df["EMA_120"]))
+        df["sf_sl_pct"] = 0.02 + df["sf_volatility"] * 0.02  # base 2% + vol adjustment
+        df["sf_tp_ema"] = df["EMA_120"] * (1 + df["sf_volatility"] * 0.05 * np.sign(df["close"] - df["EMA_120"]))
 
         # --- Global protections (NFI-style) ---
         df["protections_long_global"] = self._calc_global_protections(df)
@@ -811,6 +811,25 @@ class SygnifStrategy(IStrategy):
                         after_fill: bool, **kwargs) -> float:
         is_futures = self.config.get("trading_mode", "") == "futures"
         leverage = trade.leverage or 1.0
+        enter_tag = trade.enter_tag or ""
+
+        # --- Swing failure trades: use their own dynamic SL (on-exchange) ---
+        if enter_tag in ("swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"):
+            try:
+                df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                if len(df) > 0 and "sf_sl_pct" in df.columns:
+                    sf_sl = df.iloc[-1].get("sf_sl_pct", 0.02)
+                    # Still apply ratcheting if trade is well in profit
+                    if current_profit >= 0.05:
+                        return -0.02
+                    elif current_profit >= 0.02:
+                        return -0.03
+                    # Otherwise use the sf-specific dynamic SL (placed on exchange)
+                    return -sf_sl
+            except Exception:
+                pass
+            # Fallback: 3% if dataframe unavailable
+            return -0.03
 
         # --- Ratcheting trail: tighten SL as profit grows ---
         if current_profit >= 0.10:
@@ -934,9 +953,9 @@ class SygnifStrategy(IStrategy):
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
             last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
             last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
-            fs_long = df.iloc[-1].get("fs_long", False)
+            sf_long = df.iloc[-1].get("sf_long", False)
 
-            if last_prot and last_empty and fs_long:
+            if last_prot and last_empty and sf_long:
                 last_score = ta_score.iloc[-1]
                 if last_score >= 50:
                     # claude_swing: failure swing + TA confluence
@@ -984,9 +1003,9 @@ class SygnifStrategy(IStrategy):
         if len(df) > 0 and not df.iloc[-1].get("enter_short", 0):
             last_prot_s = prot_short.iloc[-1] if hasattr(prot_short, 'iloc') else True
             last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
-            fs_short = df.iloc[-1].get("fs_short", False)
+            sf_short = df.iloc[-1].get("sf_short", False)
 
-            if last_prot_s and last_empty and fs_short:
+            if last_prot_s and last_empty and sf_short:
                 last_score = ta_score.iloc[-1]
                 if last_score <= 50:
                     # claude_swing short: failure swing + bearish TA confluence
@@ -1111,9 +1130,9 @@ class SygnifStrategy(IStrategy):
 
         if enter_tag == "claude_swing":
             # Hybrid: check both EMA-TP and Williams %R, first one wins
-            fs_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
-            if fs_exit:
-                return fs_exit
+            sf_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
+            if sf_exit:
+                return sf_exit
             # Fall through to Williams %R below
 
         # ==================================================================
@@ -1150,8 +1169,8 @@ class SygnifStrategy(IStrategy):
     # Failure Swing exit — Heavy91 EMA-TP + volatility-adjusted SL
     # -------------------------------------------------------------------------
     def _exit_swing_failure(self, last, current_rate, trade, current_profit):
-        ema_tp = last.get("fs_tp_ema", 0)
-        sl_pct = last.get("fs_sl_pct", 0.02)
+        ema_tp = last.get("sf_tp_ema", 0)
+        sl_pct = last.get("sf_sl_pct", 0.02)
         is_short = trade.is_short
 
         if not is_short:
@@ -1187,9 +1206,9 @@ class SygnifStrategy(IStrategy):
             return self._exit_swing_failure(last, current_rate, trade, current_profit)
 
         if enter_tag == "claude_swing_short":
-            fs_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
-            if fs_exit:
-                return fs_exit
+            sf_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
+            if sf_exit:
+                return sf_exit
             # Fall through to Williams %R below
 
         rsi14 = last.get("RSI_14", 50)

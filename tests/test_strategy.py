@@ -131,7 +131,7 @@ class TestEntryPaths:
     def test_failure_swing_long_entry(self, strategy, make_df):
         df = make_df()
         # Set last candle as failure swing signal
-        df.loc[df.index[-1], "fs_long"] = True
+        df.loc[df.index[-1], "sf_long"] = True
         df.loc[df.index[-1], "RSI_14"] = 55.0  # ta_score will be ~50+
 
         result = strategy.populate_entry_trend(df, {"pair": "SOL/USDT"})
@@ -142,7 +142,7 @@ class TestEntryPaths:
     def test_failure_swing_short_entry(self, strategy, make_df):
         strategy.can_short = True
         df = make_df()
-        df.loc[df.index[-1], "fs_short"] = True
+        df.loc[df.index[-1], "sf_short"] = True
         # Low TA score for short confluence
         df.loc[df.index[-1], "RSI_14"] = 75.0
         df.loc[df.index[-1], "RSI_3"] = 92.0
@@ -218,28 +218,28 @@ class TestExitPaths:
 
     def test_swing_failure_tp(self, strategy, make_df, mock_trade):
         trade = mock_trade(enter_tag="swing_failure", open_rate=100.0)
-        last = pd.Series({"fs_tp_ema": 102.0, "fs_sl_pct": 0.03})
+        last = pd.Series({"sf_tp_ema": 102.0, "sf_sl_pct": 0.03})
 
         result = strategy._exit_swing_failure(last, 103.0, trade, 0.03)
         assert result == "exit_sf_ema_tp"
 
     def test_swing_failure_sl(self, strategy, make_df, mock_trade):
         trade = mock_trade(enter_tag="swing_failure", open_rate=100.0)
-        last = pd.Series({"fs_tp_ema": 102.0, "fs_sl_pct": 0.03})
+        last = pd.Series({"sf_tp_ema": 102.0, "sf_sl_pct": 0.03})
 
         result = strategy._exit_swing_failure(last, 96.0, trade, -0.04)
         assert result == "exit_sf_vol_sl"
 
     def test_swing_failure_short_tp(self, strategy, mock_trade):
         trade = mock_trade(enter_tag="swing_failure_short", open_rate=100.0, is_short=True)
-        last = pd.Series({"fs_tp_ema": 98.0, "fs_sl_pct": 0.03})
+        last = pd.Series({"sf_tp_ema": 98.0, "sf_sl_pct": 0.03})
 
         result = strategy._exit_swing_failure(last, 97.0, trade, 0.03)
         assert result == "exit_sf_short_ema_tp"
 
     def test_swing_failure_short_sl(self, strategy, mock_trade):
         trade = mock_trade(enter_tag="swing_failure_short", open_rate=100.0, is_short=True)
-        last = pd.Series({"fs_tp_ema": 98.0, "fs_sl_pct": 0.03})
+        last = pd.Series({"sf_tp_ema": 98.0, "sf_sl_pct": 0.03})
 
         result = strategy._exit_swing_failure(last, 104.0, trade, -0.04)
         assert result == "exit_sf_short_vol_sl"
