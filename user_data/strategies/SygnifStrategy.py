@@ -184,7 +184,13 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
             if resp.ok:
                 data = resp.json()
                 text = data["content"][0]["text"]
-                result = json.loads(text)
+                # Extract JSON object from text (Claude sometimes wraps in markdown/extra text)
+                import re
+                match = re.search(r'\{[^{}]*"score"[^{}]*\}', text, re.DOTALL)
+                if not match:
+                    logger.error(f"Claude sentiment: no JSON object found in response: {text[:200]}")
+                    return None  # API error → caller decides fallback
+                result = json.loads(match.group(0))
                 score = max(-20, min(20, float(result["score"])))
                 reason = result.get("reason", "")
                 logger.info(f"Claude sentiment for {token}: {score} — {reason}")
@@ -193,11 +199,11 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
                 return score
             else:
                 logger.error(f"Claude API error: {resp.status_code} {resp.text}")
-                return 0.0
+                return None  # API error → caller decides fallback
 
         except Exception as e:
             logger.error(f"Claude sentiment error: {e}")
-            return 0.0
+            return None  # API error → caller decides fallback
 
 
 # ---------------------------------------------------------------------------
@@ -942,12 +948,15 @@ class SygnifStrategy(IStrategy):
 
                 headlines = self.claude.fetch_news(token)
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
-                final_score = last_score + sentiment
 
-                # Require non-zero sentiment — if Claude has nothing to say, skip
-                if sentiment != 0 and final_score >= self.sentiment_threshold_buy:
-                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
+                # sentiment=None → API broken, skip claude entry (don't enter blind)
+                # sentiment=0 → Claude said neutral, also skip (no edge)
+                # sentiment != 0 → real signal, combine with TA
+                if sentiment is not None and sentiment != 0:
+                    final_score = last_score + sentiment
+                    if final_score >= self.sentiment_threshold_buy:
+                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
 
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
@@ -992,12 +1001,13 @@ class SygnifStrategy(IStrategy):
 
                 headlines = self.claude.fetch_news(token)
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
-                final_score = last_score + sentiment
 
-                # Require non-zero sentiment — if Claude has nothing to say, skip
-                if sentiment != 0 and final_score <= self.sentiment_threshold_sell:
-                    df.iloc[-1, df.columns.get_loc("enter_short")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_short_s{sentiment:.0f}"
+                # sentiment=None → API broken, skip; sentiment=0 → neutral, skip
+                if sentiment is not None and sentiment != 0:
+                    final_score = last_score + sentiment
+                    if final_score <= self.sentiment_threshold_sell:
+                        df.iloc[-1, df.columns.get_loc("enter_short")] = 1
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_short_s{sentiment:.0f}"
 
         # --- Failure Swing short entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_short", 0):
@@ -1065,8 +1075,8 @@ class SygnifStrategy(IStrategy):
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(df) > 0 and "volume_sma_25" in df.columns:
                 vol_avg = df.iloc[-1].get("volume_sma_25", 0)
-                if vol_avg < 50000:
-                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 50k, skipping")
+                if vol_avg < 5000:
+                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 5k, skipping")
                     return False
 
         return True
@@ -1149,9 +1159,15 @@ class SygnifStrategy(IStrategy):
             if rsi14 < rsi_threshold:
                 return f"exit_profit_rsi_{current_profit:.1%}"
 
+        # --- Williams %R reversal exit: was at peak, now falling ---
+        # Leverage-normalized profit gate matches RSI exit pattern
+        min_profit_for_willr = 0.02 if leverage <= 1.0 else 0.02 * leverage
         willr = last.get("WILLR_14", -50)
-        if willr is not None and willr > -5 and current_profit > 0.02:
-            return "exit_willr_overbought"
+        willr_prev = prev.get("WILLR_14", -50)
+        if willr is not None and willr_prev is not None:
+            willr_topped = willr_prev > -10 and willr < willr_prev
+            if willr_topped and current_profit > min_profit_for_willr:
+                return "exit_willr_reversal"
 
         # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
@@ -1222,10 +1238,15 @@ class SygnifStrategy(IStrategy):
             if rsi14 > rsi_threshold:
                 return f"exit_short_profit_rsi_{current_profit:.1%}"
 
-        # --- Williams %R exit for shorts ---
+        # --- Williams %R reversal exit for shorts: was at bottom, now rising ---
+        # Leverage-normalized profit gate matches RSI exit pattern
+        min_profit_for_willr = 0.02 if leverage <= 1.0 else 0.02 * leverage
         willr = last.get("WILLR_14", -50)
-        if willr is not None and willr < -95 and current_profit > 0.02:
-            return "exit_short_willr_oversold"
+        willr_prev = prev.get("WILLR_14", -50)
+        if willr is not None and willr_prev is not None:
+            willr_bottomed = willr_prev < -90 and willr > willr_prev
+            if willr_bottomed and current_profit > min_profit_for_willr:
+                return "exit_short_willr_reversal"
 
         # --- Doom stoploss now handled by custom_stoploss + stoploss_on_exchange ---
 
