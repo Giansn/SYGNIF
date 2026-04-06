@@ -1293,8 +1293,28 @@ COMMANDS = {
 }
 
 
-def handle_command(text: str) -> str | None:
-    """Route command to handler. Returns response text or None."""
+# Commands that take a while — send a loading message first
+_SLOW_COMMANDS = {"/overview", "/tendency", "/signals", "/research", "/plays", "/evaluate"}
+
+# Loading messages per command
+_LOADING_MSG = {
+    "/overview":  "\U0001f50d Contacting overseer + scanning TA...",
+    "/tendency":  "\U0001f4ca Scanning market tendency...",
+    "/signals":   "\U0001f4e1 Scanning signals across top pairs...",
+    "/research":  "\U0001f9e0 Researching — TA + news + AI analysis...",
+    "/plays":     "\U0001f3af Scanning opportunities — TA + AI...",
+    "/evaluate":  "\U0001f916 Evaluating positions via Plutus-3B...",
+}
+
+
+def handle_command(text: str) -> str | tuple | None:
+    """Route command to handler.
+
+    Returns:
+        str — immediate response (fast commands)
+        tuple(loading_msg, handler, args) — for slow commands (dispatcher sends loading first)
+        None — unknown command
+    """
     if not text.strip().startswith("/"):
         return None
 
@@ -1307,6 +1327,10 @@ def handle_command(text: str) -> str | None:
         return None
 
     try:
+        if cmd in _SLOW_COMMANDS:
+            loading = _LOADING_MSG.get(cmd, "\u23f3 Working...")
+            # Return loading msg + handler callable — dispatcher sends loading first
+            return (loading, handler, args)
         return handler(args)
     except Exception as e:
         logger.error(f"Command {cmd} error: {traceback.format_exc()}")
@@ -1427,7 +1451,19 @@ def main():
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 if text and str(chat_id) == str(TG_CHAT):
                     reply = handle_command(text)
-                    if reply:
+                    if reply is None:
+                        continue
+                    if isinstance(reply, tuple):
+                        # Slow command: (loading_msg, handler, args)
+                        loading, handler_fn, handler_args = reply
+                        tg_send(loading)
+                        try:
+                            result = handler_fn(handler_args)
+                            tg_send(result, reply_markup=KEYBOARD)
+                        except Exception as e:
+                            logger.error(f"Slow command error: {traceback.format_exc()}")
+                            tg_send(f"Error: {e}", reply_markup=KEYBOARD)
+                    else:
                         tg_send(reply, reply_markup=KEYBOARD)
         except KeyboardInterrupt:
             logger.info("Shutting down.")
