@@ -808,14 +808,17 @@ class SygnifStrategy(IStrategy):
         is_futures = self.config.get("trading_mode", "") == "futures"
         leverage = trade.leverage or 1.0
 
-        # --- Ratcheting trail: tighten SL as profit grows (activate at +2%) ---
-        if current_profit >= 0.02:
-            if current_profit >= 0.10:
-                return -0.015  # -1.5% from current profit
-            elif current_profit >= 0.05:
-                return -0.02   # -2% from current profit
-            else:
-                return -0.03   # -3% from current profit
+        # --- Ratcheting trail: tighten SL as profit grows ---
+        if current_profit >= 0.10:
+            return -0.015  # -1.5% price trail at 10%+ P&L
+        elif current_profit >= 0.05:
+            return -0.02   # -2% price trail at 5%+ P&L
+        elif current_profit >= 0.02:
+            return -0.03   # -3% price trail at 2%+ P&L
+        elif current_profit >= 0.01:
+            # Breakeven guard: trade was profitable, don't let it become a doom loss.
+            # -1% price trail → at 5x worst case ~-4% P&L, at 3x ~-2% P&L, at 1x ~0% P&L
+            return -0.01
 
         # --- Base SL: fixed doom stoploss ---
         sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot  # 0.20
