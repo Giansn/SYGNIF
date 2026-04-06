@@ -684,7 +684,7 @@ def cmd_tendency() -> str:
     bear_count = 0
     total = 0
     lines = ["*Market Tendency*\n"]
-    coin_data = []  # collect for agent analysis
+    coin_data = []  # collect for Claude prompt
 
     for sym in scan_syms:
         df = bybit_kline(sym, interval="60", limit=200)
@@ -716,10 +716,10 @@ def cmd_tendency() -> str:
             icon = "\u26aa"
 
         lines.append(f"{icon} `{name:>5}` {pf} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
-        coin_data.append({
-            "name": name, "score": score, "rsi": rsi, "willr": willr,
-            "trend": trend, "macd": macd, "entry": entry,
-        })
+        coin_data.append(
+            f"{name}: ${ind['price']:.4g} {trend} TA:{score} RSI:{rsi:.0f} "
+            f"WR:{willr:.0f} MACD:{macd} signal:{entry}"
+        )
 
     lines.append("")
 
@@ -738,60 +738,29 @@ def cmd_tendency() -> str:
         verdict = "\u26aa *NEUTRAL* — no clear direction"
     lines.append(verdict)
 
-    # --- Finance Agent insight (from own TA data) ---
-    insights = []
+    # --- Claude AI insight ---
+    headlines = fetch_news("", max_items=5)
+    news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent news."
+    data_block = "\n".join(coin_data)
 
-    # BTC leadership check
-    btc = next((c for c in coin_data if c["name"] == "BTC"), None)
-    if btc:
-        if btc["score"] >= 65:
-            insights.append(f"BTC leading at TA:{btc['score']} — risk-on for alts")
-        elif btc["score"] <= 35:
-            insights.append(f"BTC weak at TA:{btc['score']} — expect alt pressure")
-        elif btc["rsi"] > 70:
-            insights.append(f"BTC RSI:{btc['rsi']:.0f} overbought — pullback risk")
-        elif btc["rsi"] < 30:
-            insights.append(f"BTC RSI:{btc['rsi']:.0f} oversold — bounce zone")
+    prompt = f"""You are Sygnif's market analyst. Give a 3-4 sentence market tendency reading.
 
-    # Divergence check: BTC vs alts
-    alt_scores = [c["score"] for c in coin_data if c["name"] != "BTC"]
-    if btc and alt_scores:
-        avg_alt = sum(alt_scores) / len(alt_scores)
-        if btc["score"] >= 60 and avg_alt <= 40:
-            insights.append("Divergence: BTC bullish but alts lagging")
-        elif btc["score"] <= 40 and avg_alt >= 60:
-            insights.append("Divergence: alts rallying despite weak BTC")
+MARKET DATA:
+{data_block}
 
-    # Overbought/oversold warnings
-    overbought = [c["name"] for c in coin_data if c["rsi"] > 70]
-    oversold = [c["name"] for c in coin_data if c["rsi"] < 30]
-    if overbought:
-        insights.append(f"Overbought: {', '.join(overbought)} — watch for exits")
-    if oversold:
-        insights.append(f"Oversold: {', '.join(oversold)} — potential entries")
+Bull/Bear count: {bull_count} bullish, {bear_count} bearish, {total - bull_count - bear_count} neutral
 
-    # Active signals
-    long_sigs = [c["name"] for c in coin_data if "strong_ta_long" in c.get("entry", "")]
-    short_sigs = [c["name"] for c in coin_data if "strong_ta_short" in c.get("entry", "")]
-    if long_sigs:
-        insights.append(f"Strong long signals: {', '.join(long_sigs)}")
-    if short_sigs:
-        insights.append(f"Strong short signals: {', '.join(short_sigs)}")
+RECENT NEWS:
+{news_text}
 
-    # Williams %R extremes
-    willr_high = [c["name"] for c in coin_data if c["willr"] > -5]
-    willr_low = [c["name"] for c in coin_data if c["willr"] < -95]
-    if willr_high:
-        insights.append(f"WR exit zone: {', '.join(willr_high)} (>-5)")
-    if willr_low:
-        insights.append(f"WR bounce zone: {', '.join(willr_low)} (<-95)")
+Rules:
+- State the overall tendency clearly (bullish/bearish/neutral)
+- Mention the key driver (BTC leading? alts diverging? news catalyst?)
+- Flag any risks or watch-outs (overbought RSI, divergence, etc.)
+- 3-4 sentences max, no disclaimers, be direct"""
 
-    if insights:
-        lines.append(f"\n\U0001f4e1 *Agent Analysis:*")
-        for i in insights:
-            lines.append(f"  \u2022 {i}")
-    else:
-        lines.append(f"\n\U0001f4e1 *Agent:* No notable signals — market ranging")
+    insight = claude_analyze(prompt, max_tokens=200)
+    lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
     return "\n".join(lines)
