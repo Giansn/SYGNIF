@@ -8,22 +8,14 @@ from config import OLLAMA_URL, OLLAMA_MODEL, EVAL_HISTORY_SIZE
 
 logger = logging.getLogger("overseer.llm")
 
-SYSTEM_PROMPT = """You are a crypto trade analyst monitoring a live Freqtrade bot (spot + futures on Bybit).
+SYSTEM_PROMPT = """Freqtrade bot monitor (spot [s] + futures [f], Bybit).
+Input: TA data (trend/RSI/MACD/support/resistance) then trade lines with P&L delta.
+Output format — one line per flagged (*) trade:
 
-You receive open positions with P&L data and must give brief, actionable calls.
-
-Rules:
-- For each flagged (*) trade: state P&L, call HOLD/TRAIL/CUT, one reason
-- Reference previous evaluations when relevant ("was -1.5%, now -2.2% — deteriorating")
-- If a trade matches an active play, note proximity to TP/SL
-- Be direct, use numbers, no filler
-
-Example output:
-EDGE[f] +3.4%: HOLD — strong momentum, trail stop to entry.
-NIGHT[s] -2.2%: CUT — was -1.5% last eval, deteriorating. No recovery signal.
-ADA[s] -2.1%: HOLD — oversold on daily, near support $0.24.
-BTC[s] +0.05%: HOLD — near Play TP $67,800 ($67,530 now). Wait for breakout.
-FARTCOIN[f] -2.4%: CUT — meme coin, no thesis, bleeding."""
+EDGE[f] +3.4% (was +1.8%): TRAIL — RSI 78 overbought, lock +2%.
+NIGHT[s] -2.2% (was -1.5%): CUT — downtrend, broke support $0.42.
+ADA[s] +0.3% (new): HOLD — uptrend, RSI 55, room to run.
+FART[f] -2.4% (was -2.1%): CUT — RSI 38 weak, no support nearby."""
 
 # Rolling conversation history: list of (user_prompt, assistant_response)
 _history: deque[tuple[str, str]] = deque(maxlen=EVAL_HISTORY_SIZE)
@@ -34,14 +26,11 @@ def evaluate(prompt: str, timeout: int = 180) -> str | None:
 
     Returns None if Ollama is unavailable — caller should fall back to rules-only.
     """
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    # Add previous evaluations as context
-    for prev_prompt, prev_response in _history:
-        messages.append({"role": "user", "content": prev_prompt})
-        messages.append({"role": "assistant", "content": prev_response})
-
-    messages.append({"role": "user", "content": prompt})
+    # No history — TA data + deltas are more valuable than old evals for 3B model
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
 
     try:
         resp = requests.post(
@@ -51,9 +40,9 @@ def evaluate(prompt: str, timeout: int = 180) -> str | None:
                 "messages": messages,
                 "stream": False,
                 "options": {
-                    "num_predict": 150,
+                    "num_predict": 200,
                     "temperature": 0.4,
-                    "num_ctx": 1024,
+                    "num_ctx": 2048,
                 },
             },
             timeout=timeout,

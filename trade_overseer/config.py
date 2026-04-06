@@ -22,8 +22,8 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "plutus-3b"
 
 # Polling
-POLL_INTERVAL_SEC = 300       # 5 minutes
-EVAL_COOLDOWN_SEC = 600       # Don't re-evaluate same trade within 10 min
+POLL_INTERVAL_SEC = 1800      # 30 minutes
+EVAL_COOLDOWN_SEC = 1800      # Don't re-evaluate same trade within 30 min
 
 # Thresholds for alerts
 PROFIT_ALERT_HIGH = 3.0       # % — approaching TP territory

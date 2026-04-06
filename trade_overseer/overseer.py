@@ -153,14 +153,28 @@ def check_events(trades: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Finance Agent briefing
+# ---------------------------------------------------------------------------
+FA_BRIEFING_URL = "http://127.0.0.1:8091/briefing"
+
+
+def _fetch_briefing(symbols: list[str]) -> str:
+    """Fetch TA briefing from finance agent."""
+    try:
+        import requests as _req
+        resp = _req.get(FA_BRIEFING_URL, params={"symbols": ",".join(symbols)}, timeout=15)
+        if resp.status_code == 200 and resp.text.strip():
+            return resp.text.strip()
+    except Exception as e:
+        logger.debug(f"Briefing fetch failed: {e}")
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Build LLM prompt
 # ---------------------------------------------------------------------------
 def build_prompt(trades: list[dict], events: list[dict]) -> str:
-    """Build compact prompt for Plutus-3B.
-
-    Format matches the few-shot example in system prompt.
-    Only flagged trades + top movers, max 8 lines.
-    """
+    """Build compact prompt for Plutus-3B with TA context from finance agent."""
     plays = plays_store.load_plays()
     event_ids = {ev["trade"]["trade_id"] for ev in events}
 
@@ -172,17 +186,32 @@ def build_prompt(trades: list[dict], events: list[dict]) -> str:
         reverse=True,
     )[:max(0, 6 - len(flagged))]
 
+    # Collect traded symbols for briefing
+    all_shown = flagged + others
+    symbols = list({t["pair"].replace("/USDT:USDT", "").replace("/USDT", "") for t in all_shown})
+
+    # TA briefing from finance agent
+    briefing = _fetch_briefing(symbols)
+
     lines = []
-    for t in flagged + others:
+    if briefing:
+        lines.append(briefing)
+        lines.append("")
+
+    for t in all_shown:
         pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
         inst = t["instance"][0]  # s or f
         dur = duration_str(t["trade_duration"])
         flag = " *" if t["trade_id"] in event_ids else ""
-        lines.append(f"{pair}[{inst}] {t['profit_pct']:+.2f}% {dur} ${t['current_rate']:.4g}{flag}")
+        # Include delta from last eval
+        prev = trade_state.get(t["trade_id"], {})
+        prev_pct = prev.get("last_profit_pct")
+        delta = f" (was {prev_pct:+.1f}%)" if prev_pct is not None else " (new)"
+        lines.append(f"{pair}[{inst}] {t['profit_pct']:+.2f}%{delta} {dur} ${t['current_rate']:.4g}{flag}")
 
     prompt = "\n".join(lines)
-    if len(trades) > len(flagged) + len(others):
-        prompt += f"\n(+{len(trades) - len(flagged) - len(others)} more, mostly flat)"
+    if len(trades) > len(all_shown):
+        prompt += f"\n(+{len(trades) - len(all_shown)} more, mostly flat)"
 
     # Append play levels if available
     if plays and not plays.get("stale"):
@@ -206,7 +235,7 @@ def build_prompt(trades: list[dict], events: list[dict]) -> str:
             alerts.append(f"{pair}: {', '.join(ev['reasons'])}")
         prompt += "\nAlerts: " + "; ".join(alerts)
 
-    prompt += "\n\nCall each flagged (*) trade: HOLD/TRAIL/CUT + reason."
+    prompt += "\n\nCall each flagged (*) trade: HOLD/TRAIL/CUT + reason. Use the TA data above."
     return prompt
 
 

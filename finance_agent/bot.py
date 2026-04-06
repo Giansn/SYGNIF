@@ -695,6 +695,78 @@ def handle_message(text: str, chat_id: str):
             tg_send(f"Error: {e}")
 
 
+# ---------------------------------------------------------------------------
+# HTTP server for overseer integration (:8091)
+# ---------------------------------------------------------------------------
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+import json as _json
+
+
+def _briefing(symbols: list[str] | None = None) -> str:
+    """Return compact market briefing for Plutus-3B consumption."""
+    lines = []
+    # Always include BTC + ETH
+    core = ["BTCUSDT", "ETHUSDT"]
+    extra = [f"{s}USDT" for s in (symbols or []) if f"{s}USDT" not in core]
+    for sym in core + extra[:4]:  # max 6 total
+        df = bybit_kline(sym, interval="60", limit=200)
+        if df.empty:
+            continue
+        ta = calc_indicators(df)
+        if not ta:
+            continue
+        name = sym.replace("USDT", "")
+        rsi = ta.get("rsi", 0)
+        trend = ta.get("trend", "?")
+        macd = ta.get("macd_signal_text", "?")
+        price = ta.get("price", 0)
+        sup = ta.get("support", 0)
+        res = ta.get("resistance", 0)
+        if price >= 100:
+            pf = f"${price:,.0f}"
+        elif price >= 1:
+            pf = f"${price:.2f}"
+        else:
+            pf = f"${price:.5f}"
+        lines.append(f"{name} {pf} {trend} RSI:{rsi:.0f} {macd}")
+    return "\n".join(lines) if lines else "No data"
+
+
+class _BriefingHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        if self.path.startswith("/briefing"):
+            # Parse ?symbols=BTC,ETH,SOL from query
+            syms = None
+            if "?" in self.path:
+                qs = self.path.split("?", 1)[1]
+                for part in qs.split("&"):
+                    if part.startswith("symbols="):
+                        syms = part.split("=", 1)[1].split(",")
+            body = _briefing(syms)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(body.encode())
+        elif self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+def _start_http():
+    server = HTTPServer(("127.0.0.1", 8091), _BriefingHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Briefing HTTP server on :8091")
+
+
 def main():
     if not TG_TOKEN:
         print("Set FINANCE_BOT_TOKEN env var")
@@ -702,6 +774,8 @@ def main():
     if not TG_CHAT:
         print("Set TELEGRAM_CHAT_ID env var")
         sys.exit(1)
+
+    _start_http()
 
     logger.info("Finance Agent started. Polling for commands...")
     tg_send("Finance Agent online. Send `/fa_help` for commands.")
