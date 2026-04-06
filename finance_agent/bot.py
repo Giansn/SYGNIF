@@ -52,24 +52,41 @@ LEVERAGE_DEFAULT = 3.0
 # ---------------------------------------------------------------------------
 # Telegram helpers
 # ---------------------------------------------------------------------------
-def tg_send(text: str, parse_mode: str = "Markdown"):
+def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None = None):
     """Send a Telegram message, auto-split if too long."""
     MAX = 4000
     chunks = [text[i : i + MAX] for i in range(0, len(text), MAX)]
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        payload = {
+            "chat_id": TG_CHAT,
+            "text": chunk,
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True,
+        }
+        # Attach keyboard only to last chunk
+        if reply_markup and i == len(chunks) - 1:
+            payload["reply_markup"] = reply_markup
         try:
             requests.post(
                 f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                json={
-                    "chat_id": TG_CHAT,
-                    "text": chunk,
-                    "parse_mode": parse_mode,
-                    "disable_web_page_preview": True,
-                },
+                json=payload,
                 timeout=15,
             )
         except Exception as e:
             logger.error(f"tg_send error: {e}")
+
+
+# Persistent reply keyboard — shown at bottom of chat
+KEYBOARD = {
+    "keyboard": [
+        ["/tendency", "/signals", "/market"],
+        ["/ta BTC", "/ta ETH", "/ta SOL"],
+        ["/plays", "/news", "/movers"],
+        ["/overseer", "/evaluate", "/fa_help"],
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": False,
+}
 
 
 def tg_poll(offset: int) -> tuple[list, int]:
@@ -648,6 +665,75 @@ def _fmt_price(price: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Command: /tendency — Market tendency (bull/bear)
+# ---------------------------------------------------------------------------
+def cmd_tendency() -> str:
+    """Quick bull/bear market gauge from BTC + ETH + top alts."""
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch data."
+
+    # BTC + ETH + top 3 alts by volume
+    core_syms = ["BTCUSDT", "ETHUSDT"]
+    pairs = _filter_pairs(tickers, min_turnover=5_000_000)
+    top_alts = [p for p in sorted(pairs, key=lambda x: x["vol"], reverse=True)
+                if p["sym"] not in ("BTC", "ETH")][:3]
+    scan_syms = core_syms + [f"{p['sym']}USDT" for p in top_alts]
+
+    bull_count = 0
+    bear_count = 0
+    total = 0
+    lines = ["*Market Tendency*\n"]
+
+    for sym in scan_syms:
+        df = bybit_kline(sym, interval="60", limit=200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        ta = calc_ta_score(ind)
+        score = ta["score"]
+        total += 1
+
+        name = sym.replace("USDT", "")
+        trend = ind.get("trend", "?")
+        rsi = ind.get("rsi", 50)
+        pf = _fmt_price(ind["price"])
+
+        if score >= 55:
+            bull_count += 1
+            icon = "\U0001f7e2"
+        elif score <= 45:
+            bear_count += 1
+            icon = "\U0001f534"
+        else:
+            icon = "\u26aa"
+
+        lines.append(f"{icon} `{name:>5}` {pf} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
+
+    lines.append("")
+
+    # Overall verdict
+    if total == 0:
+        verdict = "\u2753 No data"
+    elif bull_count > bear_count and bull_count >= total * 0.6:
+        verdict = "\U0001f7e2 *BULLISH* — majority of market leaning up"
+    elif bear_count > bull_count and bear_count >= total * 0.6:
+        verdict = "\U0001f534 *BEARISH* — majority of market leaning down"
+    elif bull_count > bear_count:
+        verdict = "\U0001f7e1 *LEAN BULLISH* — mixed but tilting up"
+    elif bear_count > bull_count:
+        verdict = "\U0001f7e1 *LEAN BEARISH* — mixed but tilting down"
+    else:
+        verdict = "\u26aa *NEUTRAL* — no clear direction"
+
+    lines.append(verdict)
+    lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Command: /market — Top crypto overview
 # ---------------------------------------------------------------------------
 def cmd_market() -> str:
@@ -1029,14 +1115,14 @@ def cmd_news(ticker: str = "") -> str:
 def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
+        "`/tendency` — Market tendency (bull/bear)\n"
+        "`/signals` — Active entry signals (top pairs)\n"
         "`/market` — Top 15 crypto overview\n"
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
-        "`/signals` — Quick signal scan (top pairs)\n"
         "`/research ETH` — Full AI research report\n"
-        "`/plays` — AI investment plays (strategy-aware)\n"
+        "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
-        "`/news SOL` — News for specific coin\n"
         "`/overseer` — Trade overseer status\n"
         "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
@@ -1074,6 +1160,7 @@ def cmd_evaluate() -> str:
 # Command dispatch — returns response string (matches sygnif_bot.py pattern)
 # ---------------------------------------------------------------------------
 COMMANDS = {
+    "/tendency": lambda args: cmd_tendency(),
     "/market":   lambda args: cmd_market(),
     "/movers":   lambda args: cmd_movers(),
     "/ta":       lambda args: cmd_ta(args),
@@ -1209,7 +1296,7 @@ def main():
     _start_http()
 
     logger.info("Finance Agent started. Polling for commands...")
-    tg_send("Finance Agent online. Send `/fa_help` for commands.")
+    tg_send("Finance Agent online.", reply_markup=KEYBOARD)
 
     offset = 0
     while True:
@@ -1222,7 +1309,7 @@ def main():
                 if text and str(chat_id) == str(TG_CHAT):
                     reply = handle_command(text)
                     if reply:
-                        tg_send(reply)
+                        tg_send(reply, reply_markup=KEYBOARD)
         except KeyboardInterrupt:
             logger.info("Shutting down.")
             break
