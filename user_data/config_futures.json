@@ -115,7 +115,7 @@
         "listen_port": 8081,
         "verbosity": "error",
         "enable_openapi": true,
-        "jwt_secret_key": "CHANGE_ME_TO_RANDOM_STRING",
+        "jwt_secret_key": "095abf180fab3909a67b5d831c81bea48b57b89851ef574b6f3c45125c05ff5e",
         "CORS_origins": ["http://localhost:8081", "http://3.122.252.186:8081", "http://3.122.252.186:8889"],
         "username": "freqtrader",
         "password": "CHANGE_ME"
@@ -124,7 +124,7 @@
     "bot_name": "Sygnif-Futures",
     "initial_state": "running",
     "force_entry_enable": true,
-    "internals": { "process_throttle_secs": 5 },
+    "internals": { "process_throttle_secs": 3 },
 
     "dataformat_ohlcv": "feather",
     "dataformat_trades": "feather",

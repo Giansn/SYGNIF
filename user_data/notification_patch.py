@@ -66,6 +66,14 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             reason = f"AI bearish sentiment ({tag.replace('claude_short_s', '+')})"
         elif tag.startswith("claude_s"):
             reason = f"AI bullish sentiment ({tag.replace('claude_s', '+')})"
+        elif tag == "claude_swing":
+            reason = "Failure Swing \u2014 TA confluence"
+        elif tag == "swing_failure":
+            reason = "Failure Swing \u2014 standalone"
+        elif tag == "claude_swing_short":
+            reason = "Bearish Swing \u2014 TA confluence"
+        elif tag == "swing_failure_short":
+            reason = "Bearish Swing \u2014 standalone"
         else:
             reason = tag if tag else "Standard signal"
         # ── ORDER PLACED ──
@@ -80,6 +88,12 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             else:
                 lines.append(f"*Amount:* `{fmt_coin(stake, qc)}`")
             lines.append(f"*Reason:* {reason}")
+            if tag in ("swing_failure", "swing_failure_short"):
+                lines.append(f"*Exit plan:* Swing TP/SL")
+            elif tag in ("claude_swing", "claude_swing_short"):
+                lines.append(f"*Exit plan:* Swing \u2192 General")
+            else:
+                lines.append(f"*Exit plan:* RSI/WillR/SL")
             return "\n".join(lines)
         # ── ORDER FILLED ──
         if tag == "mover_gainer":
@@ -178,6 +192,8 @@ content = content.replace(exit_re.group(0), r'''    def _format_exit_msg(self, m
             elif "bb_stretch" in er: desc = "Bollinger stretch"
             elif "willr" in er: desc = "Williams %R signal"
             elif "profit_rsi" in er or "rsi_profit" in er: desc = "RSI profit lock"
+            elif "sf_ema_tp" in er: desc = "Swing TP \u2014 EMA target"
+            elif "sf_vol_sl" in er: desc = "Swing SL \u2014 volatility stop"
             elif "doom" in er: desc = "Max loss threshold"
             elif "conditional" in er: desc = "Conditional stoploss"
             elif "_sl" in er: desc = "Hard stoploss"
