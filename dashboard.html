@@ -812,13 +812,17 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [_status, profit, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
+    // /status returns open trades as a JSON array (Freqtrade REST). /trades wraps { trades: [...] }.
+    const [statusOpen, profit, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=200'), api('balance'), api('daily?timescale=30')
     ]);
     const allTrades = Array.isArray(tradesResp?.trades)
       ? tradesResp.trades
       : (Array.isArray(tradesResp) ? tradesResp : []);
-    const trades = allTrades.filter(t => t.is_open);
+    let trades = Array.isArray(statusOpen) ? statusOpen : [];
+    if (!trades.length) {
+      trades = allTrades.filter(t => t.is_open === true || t.is_open === 1);
+    }
     const perf = Array.isArray(_perf) ? _perf : [];
 
     // State badges
@@ -876,8 +880,7 @@ async function refresh() {
 
     drawPortfolioChart(daily);
 
-    // Sort trades by P/L
-    const sorted = trades.sort((a, b) => (b.profit_ratio || 0) - (a.profit_ratio || 0));
+    const sorted = trades.slice().sort((a, b) => (b.profit_ratio || 0) - (a.profit_ratio || 0));
 
     // Desktop table
     const tb = document.getElementById('tbody');
