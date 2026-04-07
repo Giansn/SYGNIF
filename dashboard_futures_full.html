@@ -794,11 +794,10 @@ function drawPortfolioChart(daily) {
   }
 }
 
-/* ── Build SL/TP levels from trade data (futures: long/short aware) ── */
+/* ── SL/TP levels — same logic as spot dashboard (stable with /status payloads) ── */
 function getLevels(t) {
   const e = t.open_rate;
   const p = prec(e);
-  const isShort = t.is_short || false;
   const levels = [];
 
   const sl = t.stop_loss_abs || t.stoploss || null;
@@ -816,9 +815,7 @@ function getLevels(t) {
   }
 
   if (levels.filter(l => l.cls === 'lvl-tp').length === 0) {
-    const dir = isShort ? -1 : 1;
-    const tp1 = e * (1 + dir * 0.02);
-    const tp2 = e * (1 + dir * 0.05);
+    const tp1 = e * 1.02, tp2 = e * 1.05;
     levels.push({ cls: 'lvl-tp', label: '+2%', val: tp1.toFixed(p) });
     levels.push({ cls: 'lvl-tp', label: '+5%', val: tp2.toFixed(p) });
   }
@@ -831,8 +828,7 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    // Same as spot: open positions from /status (array); /trades for closed + fallback if is_open missing.
-    const [statusOpen, profit, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
+    const [statusOpen, profitRaw, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=200'), api('balance'), api('daily?timescale=30')
     ]);
     const allTrades = Array.isArray(tradesResp?.trades)
@@ -844,6 +840,18 @@ async function refresh() {
     }
     const perf = Array.isArray(_perf) ? _perf : [];
 
+    let profit = profitRaw;
+    if (profit && typeof profit === 'object' && profit.all) {
+      profit = profit.all;
+    }
+    trades = trades.map(t => {
+      if (!t || typeof t !== 'object') return t;
+      const o = { ...t };
+      if (o.profit_ratio == null && o.total_profit_ratio != null) o.profit_ratio = o.total_profit_ratio;
+      if (o.profit_abs == null && o.total_profit_abs != null) o.profit_abs = o.total_profit_abs;
+      return o;
+    });
+
     // State badges
     const state = cfg.state || 'stopped';
     const badgeEl = document.getElementById('badge');
@@ -854,11 +862,8 @@ async function refresh() {
     document.getElementById('pair-count').textContent = `${(wl.whitelist || []).length} pairs`;
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
-    // Balance: prefer /balance (correct for dry_run + live); then config wallet
-    let walletBalance = Number(balData.total) || Number(balData.value) || 0;
-    if ((!walletBalance || !Number.isFinite(walletBalance)) && cfg.dry_run) {
-      walletBalance = Number(cfg.dry_run_wallet) || 240;
-    }
+    // Balance — same as spot dashboard
+    const walletBalance = balData.total || balData.value || 0;
 
     const totalPnl = profit.profit_all_coin || 0;
     document.getElementById('bal').textContent = '$' + walletBalance.toFixed(2);
@@ -884,7 +889,7 @@ async function refresh() {
     document.getElementById('wr').className = `stat-val ${tot ? (w / tot >= 0.5 ? 'up' : 'dn') : ''}`;
     document.getElementById('wr-s').textContent = `${w}W / ${l}L`;
 
-    // Best pair
+    // Today's P&L (from /daily — same as spot)
     const tRow = findTodayDailyRow(daily);
     const tAbs = tRow ? Number(tRow.abs_profit) || 0 : 0;
     const tRel = tRow ? (Number(tRow.rel_profit) || 0) * 100 : 0;
@@ -901,16 +906,15 @@ async function refresh() {
     }
     drawPortfolioChart(daily);
 
-    // Sort trades by P/L (slice so /status array is not mutated in place)
     const sorted = trades.slice().sort((a, b) => (b.profit_ratio || 0) - (a.profit_ratio || 0));
 
-    // Desktop table
+    // Desktop table — same field access as spot (open_rate / current_rate); extra cols for futures
     const tb = document.getElementById('tbody');
     if (!sorted.length) {
       tb.innerHTML = '<tr><td colspan="12" class="empty">No open trades</td></tr>';
     } else {
       tb.innerHTML = sorted.map(t => {
-        const e = Number(t.open_rate) || 0, c = Number(t.current_rate) || e;
+        const e = t.open_rate, c = t.current_rate || e;
         const pct = (t.profit_ratio || 0) * 100, pnl = t.profit_abs || 0;
         const barW = Math.min(Math.abs(pct) * 5, 100);
         const isShort = t.is_short || false;
@@ -943,7 +947,7 @@ async function refresh() {
       mc.innerHTML = '<div class="card"><div class="empty">No open trades</div></div>';
     } else {
       mc.innerHTML = sorted.map(t => {
-        const e = Number(t.open_rate) || 0, c = Number(t.current_rate) || e;
+        const e = t.open_rate, c = t.current_rate || e;
         const pct = (t.profit_ratio || 0) * 100, pnl = t.profit_abs || 0;
         const barW = Math.min(Math.abs(pct) * 5, 100);
         const isShort = t.is_short || false;

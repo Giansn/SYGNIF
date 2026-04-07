@@ -812,7 +812,7 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [statusOpen, profit, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
+    const [statusOpen, profitRaw, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=200'), api('balance'), api('daily?timescale=30')
     ]);
     const allTrades = Array.isArray(tradesResp?.trades)
@@ -823,6 +823,18 @@ async function refresh() {
       trades = allTrades.filter(t => t.is_open === true || t.is_open === 1);
     }
     const perf = Array.isArray(_perf) ? _perf : [];
+
+    let profit = profitRaw;
+    if (profit && typeof profit === 'object' && profit.all) {
+      profit = profit.all;
+    }
+    trades = trades.map(t => {
+      if (!t || typeof t !== 'object') return t;
+      const o = { ...t };
+      if (o.profit_ratio == null && o.total_profit_ratio != null) o.profit_ratio = o.total_profit_ratio;
+      if (o.profit_abs == null && o.total_profit_abs != null) o.profit_abs = o.total_profit_abs;
+      return o;
+    });
 
     // State badges
     const state = cfg.state || 'stopped';
