@@ -831,10 +831,13 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [_trades, profit, cfg, wl, _perf, closed, balData, daily] = await Promise.all([
+    const [_status, profit, cfg, wl, _perf, tradesResp, balData, daily] = await Promise.all([
       api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=200'), api('balance'), api('daily?timescale=30')
     ]);
-    const trades = Array.isArray(_trades) ? _trades : [];
+    const allTrades = Array.isArray(tradesResp?.trades)
+      ? tradesResp.trades
+      : (Array.isArray(tradesResp) ? tradesResp : []);
+    const trades = allTrades.filter(t => t.is_open);
     const perf = Array.isArray(_perf) ? _perf : [];
 
     // State badges
@@ -994,7 +997,7 @@ async function refresh() {
     }
 
     // Recent Closed (10 by default; "Show all" for full API slice)
-    closedTradesAll = (closed.trades || []).filter(t => !t.is_open).slice(-200).reverse();
+    closedTradesAll = allTrades.filter(t => !t.is_open).slice(-200).reverse();
     renderClosedSection();
 
     // Performance
