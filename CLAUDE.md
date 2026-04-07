@@ -84,9 +84,28 @@ Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment ana
 These fixes were deployed 2026-04-06. The strategy proves itself when:
 
 1. **No more +profit-to-doom reversals** — Trades that reached +1% P&L should NOT appear in logs with `exit_reason: stoploss_on_exchange`. The breakeven guard should catch them as ratcheted trail exits instead.
-2. **Soft SL fires at correct levels** — `exit_stoploss_conditional` exits should show `current_profit` near -12%, NOT at -3% to -5% (the old broken range at 3-5x leverage).
+2. **Soft SL fires at correct levels** — `exit_stoploss_conditional` exits should show `current_profit` near -12%, NOT at -3% to -5% (the old broken range at 3-5x leverage). **Known limitation 2026-04-07:** the entire `custom_exit` indicator-exit path (`exit_profit_rsi_*`, `exit_willr_reversal`, `exit_stoploss_conditional`, `exit_sf_*`) fires very rarely because the ratchet trail's tier thresholds (1%/2%/5%/10% P&L) usually trigger before custom_exit's leverage-multiplied profit gates (`0.02 × leverage`). First proven fire post-fix: AVAX `exit_short_willr_reversal` +4.04% on 2026-04-07. When indicator exits do fire, they capture 3-5x more upside than ratchet exits.
 3. **Win/loss ratio improves on futures** — The old double-division bug was cutting winners short while letting losers run full doom distance. Futures P&L should trend toward symmetry.
 4. **Fewer doom exits overall** — With breakeven guard + correct soft SL, fewer trades should reach the -20% hard stop.
+
+### Tuning State (2026-04-07)
+
+| Parameter | Value | Notes |
+|---|---|---|
+| `CooldownPeriod` (line 372) | **2 candles (10 min)** | 5→1 caused SIREN whipsaw (50s re-entry); 1→2 blocks same-pair churn while preserving cross-pair rotation |
+| `max_open_trades` (futures) | **12** | 10 normal + 2 reserved for premium tags |
+| `dry_run_wallet` (futures) | **$240** | $192 tradable / 12 slots = **$16/trade** (was $8) |
+| `PREMIUM_TAGS` (line 416) | `{claude_s-5, claude_swing_short}` | Slots 11-12 reserved; non-premium hard-capped at 10 via `confirm_trade_entry` |
+| `premium_nonreserved_max` | 10 | Non-premium cap inside the 12-slot book |
+
+### Touch-Rate Tracker
+
+`trade_overseer/touch_rate_tracker.py` reports per-entry-family hit-rate of the +1% breakeven-arming threshold, plus avg peak vs realized (slippage). Collapses `claude_s{N}` / `claude_short_s{N}` to families and lists never-fired strategy paths so dead code is visible. Ghosts `force_exit`/`emergency_exit`/`liquidation` from entry stats. Logs JSONL to `user_data/logs/touch_rate_tracker.jsonl` for trend tracking.
+
+```bash
+ssh ubuntu@3.122.252.186 "cd ~/xrp_claude_bot && python3 trade_overseer/touch_rate_tracker.py"
+# variants: --days 7  --side long  --threshold 0.02  --no-print
+```
 
 ### How to Check
 
@@ -154,7 +173,7 @@ python -m pytest tests/ -v
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **sygnif** (540 symbols, 1337 relationships, 42 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **sygnif** (564 symbols, 1365 relationships, 44 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
