@@ -369,7 +369,7 @@ class SygnifStrategy(IStrategy):
     protections = [
         {"method": "StoplossGuard", "lookback_period_candles": 12,
          "trade_limit": 2, "stop_duration_candles": 48, "only_per_pair": True},
-        {"method": "CooldownPeriod", "stop_duration_candles": 5},
+        {"method": "CooldownPeriod", "stop_duration_candles": 1},
     ]
 
     # --- Thresholds ---
