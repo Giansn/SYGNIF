@@ -157,7 +157,7 @@ function prec(v){return v<0.01?8:v<1?6:v<100?4:2;}
 async function refresh(){
   try{
     if(!tk)await login();
-    const[trades,profit,cfg,wl,perf]=await Promise.all([api('status'),api('profit'),api('show_config'),api('whitelist'),api('performance')]);
+    const[trades,profit,cfg,wl,perf,bal]=await Promise.all([api('status'),api('profit'),api('show_config'),api('whitelist'),api('performance'),api('balance')]);
 
     const state=cfg.state||'stopped';
     document.getElementById('badge').textContent=state.toUpperCase();
@@ -167,11 +167,14 @@ async function refresh(){
     document.getElementById('pair-count').textContent=`${(wl.whitelist||[]).length} pairs`;
     document.getElementById('pos-count').textContent=`${trades.length} open`;
 
-    const wallet=cfg.dry_run?(cfg.dry_run_wallet||100):0;
+    // Pull live wallet from /balance (Freqtrade's /show_config returns
+    // dry_run_wallet=None even in dry mode, so reading the real balance
+    // keeps the dashboard in sync with any config-side wallet changes).
+    const walletTotal=bal.total||bal.value||0;
     const totalPnl=profit.profit_all_coin||0;
-    document.getElementById('bal').textContent='$'+(wallet+totalPnl).toFixed(2);
+    document.getElementById('bal').textContent='$'+walletTotal.toFixed(2);
     document.getElementById('bal').className=`stat-val ${pc(totalPnl)}`;
-    document.getElementById('bal-s').textContent=`$${wallet} base ${fmt(totalPnl)}`;
+    document.getElementById('bal-s').textContent=`${fmt(totalPnl)} total P/L`;
 
     const openPnl=trades.reduce((s,t)=>s+(t.profit_abs||0),0);
     document.getElementById('pnl').textContent='$'+fmt(openPnl);

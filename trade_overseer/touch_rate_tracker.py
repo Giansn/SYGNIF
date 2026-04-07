@@ -173,22 +173,33 @@ def fetch_trades(db_path: Path, days: int):
     return rows
 
 
+#: Trades that closed via these reasons are GHOSTED — they're operator-driven
+#: or framework-driven, not strategy-driven, so they should not pollute the
+#: per-tag hit-rate / slippage / realized-P&L statistics. They still appear
+#: in the exit-family report so you can see they happened.
+GHOSTED_EXIT_REASONS = {"force_exit", "emergency_exit", "liquidation"}
+
+
 def aggregate(rows, threshold: float, side_filter: str):
     entries = {fid: EntryStats(family=fid, side=side) for fid, side, _, _ in ENTRY_FAMILIES}
     exits = {fid: ExitStats(family=fid, kind=kind) for fid, _, kind, _ in EXIT_FAMILIES}
     unknown_entries: dict[str, int] = {}
     unknown_exits: dict[str, int] = {}
+    ghosted_count = 0
 
     for tag, reason, is_open, is_short, lev, open_rate, max_rate, min_rate, close_profit in rows:
+        ghosted = (not is_open) and (reason in GHOSTED_EXIT_REASONS)
+        if ghosted:
+            ghosted_count += 1
         side = "short" if is_short else "long"
         if side_filter != "both" and side != side_filter:
             continue
 
-        # Entry classification
+        # Entry classification — ghosted trades skip entry stats entirely
         ef = classify_entry(tag)
         if ef is None:
             unknown_entries[tag or "<null>"] = unknown_entries.get(tag or "<null>", 0) + 1
-        else:
+        elif not ghosted:
             es = entries[ef]
             es.n += 1
             es.raw_tags.add(tag)
@@ -226,7 +237,7 @@ def aggregate(rows, threshold: float, side_filter: str):
                     xs.best = max(xs.best, pct)
                     xs.worst = min(xs.worst, pct)
 
-    return entries, exits, unknown_entries, unknown_exits
+    return entries, exits, unknown_entries, unknown_exits, ghosted_count
 
 
 # --------------------------------------------------------------------------
@@ -290,7 +301,7 @@ def report_unknown(unknown_entries, unknown_exits):
             print(f"  {reason}: {n}")
 
 
-def build_log_record(db_path: Path, args, total_rows, entries, exits, ue, ux) -> dict:
+def build_log_record(db_path: Path, args, total_rows, entries, exits, ue, ux, ghosted) -> dict:
     return {
         "ts": datetime.now(timezone.utc).isoformat(),
         "db": db_path.name,
@@ -298,6 +309,7 @@ def build_log_record(db_path: Path, args, total_rows, entries, exits, ue, ux) ->
         "side": args.side,
         "threshold": args.threshold,
         "total_rows": total_rows,
+        "ghosted": ghosted,
         "entries": {
             fid: {
                 "side": s.side,
@@ -354,19 +366,19 @@ def main():
         print("No trades found.")
         return
 
-    entries, exits, ue, ux = aggregate(rows, args.threshold, args.side)
+    entries, exits, ue, ux, ghosted = aggregate(rows, args.threshold, args.side)
 
     if not args.no_print:
         scope = f"last {args.days}d" if args.days else "all-time"
         print(f"\nSygnif touch-rate tracker — {db_path.name} — {scope} — side={args.side}")
-        print(f"Total trades scanned: {len(rows)}")
+        print(f"Total trades scanned: {len(rows)}  (ghosted: {ghosted} — force/emergency/liquidation excluded from entry stats)")
         report_entries(entries, args.threshold)
         report_exits(exits)
         report_unknown(ue, ux)
         print()
 
     if args.log:
-        record = build_log_record(db_path, args, len(rows), entries, exits, ue, ux)
+        record = build_log_record(db_path, args, len(rows), entries, exits, ue, ux, ghosted)
         log_path = Path(args.log)
         append_log(record, log_path)
         if not args.no_print:

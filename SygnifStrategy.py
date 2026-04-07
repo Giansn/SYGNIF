@@ -369,7 +369,7 @@ class SygnifStrategy(IStrategy):
     protections = [
         {"method": "StoplossGuard", "lookback_period_candles": 12,
          "trade_limit": 2, "stop_duration_candles": 48, "only_per_pair": True},
-        {"method": "CooldownPeriod", "stop_duration_candles": 1},
+        {"method": "CooldownPeriod", "stop_duration_candles": 2},
     ]
 
     # --- Thresholds ---
@@ -409,6 +409,12 @@ class SygnifStrategy(IStrategy):
     max_slots_strong = 6      # strong_ta entries (TA >= 65)
     max_slots_swing = 4       # swing_failure, claude_swing, etc.
     _swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
+
+    # Premium tag reservation: non-premium entries are capped at
+    # premium_nonreserved_max open trades. Remaining slots (max_open_trades -
+    # premium_nonreserved_max) are reserved for tags in PREMIUM_TAGS only.
+    PREMIUM_TAGS = frozenset({"claude_s-5", "claude_swing_short"})
+    premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
     # Claude layer
     claude = SygnifSentiment()
@@ -1276,6 +1282,19 @@ class SygnifStrategy(IStrategy):
             count = sum(1 for t in open_trades if (t.enter_tag or "") in self._swing_tags)
             if count >= self.max_slots_swing:
                 logger.info(f"Swing slot cap: {count}/{self.max_slots_swing}, skipping {pair} ({tag})")
+                return False
+
+        # Premium-tag slot reservation
+        # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
+        # leaving the top slots available only for high-edge tags (claude_s-5).
+        # Premium tags bypass this cap and may fill up to max_open_trades.
+        if tag not in self.PREMIUM_TAGS:
+            total_open = len(open_trades)
+            if total_open >= self.premium_nonreserved_max:
+                logger.info(
+                    f"Premium reserve: {total_open}/{self.premium_nonreserved_max} non-premium "
+                    f"slots full, blocking {tag} on {pair} (reserved for {self.PREMIUM_TAGS})"
+                )
                 return False
 
         # Futures: minimum average volume gate (filter micro caps, swing bypasses)
