@@ -14,12 +14,22 @@ _PLACEHOLDER = b"__SYGNIF_FT_BASIC_B64__"
 
 
 def _api_password() -> str:
-    p = os.environ.get("FREQTRADE_API_PASSWORD", "CHANGE_ME")
+    # Match server .env: FT_FUTURES_PASS or shared API_PASSWORD / FREQTRADE_API_PASSWORD.
+    p = (
+        os.environ.get("FREQTRADE_API_PASSWORD")
+        or os.environ.get("FT_FUTURES_PASS")
+        or os.environ.get("API_PASSWORD")
+        or "CHANGE_ME"
+    )
     return p.replace("$$", "$")
 
 
 def _basic_b64() -> bytes:
-    u = os.environ.get("FREQTRADE_API_USERNAME", "freqtrader")
+    u = (
+        os.environ.get("FREQTRADE_API_USERNAME")
+        or os.environ.get("FT_FUTURES_USER")
+        or "freqtrader"
+    )
     p = _api_password()
     return base64.b64encode(f"{u}:{p}".encode())
 
