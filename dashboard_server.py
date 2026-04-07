@@ -11,6 +11,14 @@ os.chdir(DIR)
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        # Disable browser caching for the dashboard HTML/JS so deploys are
+        # picked up on a normal refresh instead of requiring Ctrl+Shift+R.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_GET(self):
         if self.path.startswith("/api/"):
             return self._proxy()

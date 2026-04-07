@@ -8,6 +8,7 @@ Runs as a daemon with a 5-minute poll loop + HTTP server on :8090.
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -269,6 +270,87 @@ def build_rules_summary(trades: list[dict], events: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 # Core evaluation
 # ---------------------------------------------------------------------------
+REC_LOG_PATH = os.path.join(config.DATA_DIR, "overseer_recommendations.jsonl")
+
+# Match LLM commentary lines like:
+#   "SIRENf -2.71% (was -2.7%, NEW): CUT — Fresh entry immediately underwater..."
+#   "BTCs +1.34%: HOLD — momentum intact"
+#   "ETHf +4.20% (was +3.1%): TRAIL — let it run with tight stop"
+# Captures: shortname, instance letter, profit, recommendation, reason
+_REC_RE = re.compile(
+    r"\b([A-Z0-9]+)([sf])\s+([+-]?\d+(?:\.\d+)?)%[^:]*:\s*(HOLD|TRAIL|CUT)\b\s*[—\-:]?\s*(.*)",
+    re.IGNORECASE,
+)
+
+
+def parse_recommendations(commentary: str, trades: list[dict]) -> list[dict]:
+    """Parse HOLD/TRAIL/CUT calls from LLM commentary and resolve to trade_ids.
+
+    `trades` is the list passed to build_prompt, used to map (pair shortname,
+    instance) → trade_id. Returns one record per parsed recommendation.
+    Unmatched lines are silently dropped.
+    """
+    if not commentary:
+        return []
+
+    # Build (shortname, instance_letter) → trade dict for resolution
+    lookup: dict[tuple[str, str], dict] = {}
+    for t in trades:
+        short = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "").upper()
+        inst = (t.get("instance") or "")[:1].lower()
+        lookup[(short, inst)] = t
+
+    records: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for line in commentary.splitlines():
+        m = _REC_RE.search(line)
+        if not m:
+            continue
+        short, inst, profit_str, rec, reason = m.groups()
+        key = (short.upper(), inst.lower())
+        if key in seen:
+            continue  # one recommendation per trade per eval
+        seen.add(key)
+        trade = lookup.get(key)
+        if not trade:
+            continue  # LLM hallucinated a pair we don't actually hold
+        records.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "trade_id": trade.get("trade_id"),
+            "pair": trade["pair"],
+            "instance": trade.get("instance", ""),
+            "enter_tag": trade.get("enter_tag"),
+            "is_short": bool(trade.get("is_short")),
+            "leverage": trade.get("leverage"),
+            "open_date": trade.get("open_date"),
+            "profit_at_eval_pct": float(profit_str),
+            "current_rate": trade.get("current_rate"),
+            "open_rate": trade.get("open_rate"),
+            "recommendation": rec.upper(),
+            "reason": reason.strip()[:240],
+            "trade_duration": trade.get("trade_duration"),
+        })
+    return records
+
+
+def log_recommendations(commentary: str, trades: list[dict]) -> int:
+    """Parse commentary, append one JSONL line per recommendation. Returns count."""
+    if not commentary:
+        return 0
+    try:
+        recs = parse_recommendations(commentary, trades)
+        if not recs:
+            return 0
+        os.makedirs(os.path.dirname(REC_LOG_PATH), exist_ok=True)
+        with open(REC_LOG_PATH, "a", encoding="utf-8") as f:
+            for r in recs:
+                f.write(json.dumps(r, separators=(",", ":"), default=str) + "\n")
+        return len(recs)
+    except Exception as e:
+        logger.warning(f"Failed to log overseer recommendations: {e}")
+        return 0
+
+
 def run_evaluation(force: bool = False) -> str:
     """Run one evaluation cycle. Returns the commentary text."""
     global last_commentary, last_eval_time
@@ -290,6 +372,10 @@ def run_evaluation(force: bool = False) -> str:
 
     if commentary:
         msg = f"*Overseer* | {datetime.now(timezone.utc).strftime('%H:%M UTC')}\n\n{commentary}"
+        # Persist parsed HOLD/TRAIL/CUT calls so accuracy can be measured later
+        n_logged = log_recommendations(commentary, trades)
+        if n_logged:
+            logger.info(f"Logged {n_logged} overseer recommendations")
     else:
         msg = build_rules_summary(trades, events)
 

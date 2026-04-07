@@ -1164,9 +1164,11 @@ class SygnifStrategy(IStrategy):
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
 
                 # sentiment=None → API broken, skip claude entry (don't enter blind)
-                # sentiment=0 → Claude said neutral, also skip (no edge)
-                # sentiment != 0 → real signal, combine with TA
-                if sentiment is not None and sentiment != 0:
+                # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07
+                # from "any non-zero" because tier-1 sentiment trades were
+                # over-represented in losers without compensating wins)
+                # |sentiment| >= 2 → real signal, combine with TA
+                if sentiment is not None and abs(sentiment) >= 2:
                     final_score = last_score + sentiment
                     if final_score >= self.sentiment_threshold_buy:
                         df.iloc[-1, df.columns.get_loc("enter_long")] = 1
@@ -1216,8 +1218,10 @@ class SygnifStrategy(IStrategy):
                 headlines = self.claude.fetch_news(token)
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
 
-                # sentiment=None → API broken, skip; sentiment=0 → neutral, skip
-                if sentiment is not None and sentiment != 0:
+                # sentiment=None → API broken, skip
+                # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07)
+                # |sentiment| >= 2 → real signal, combine with TA
+                if sentiment is not None and abs(sentiment) >= 2:
                     final_score = last_score + sentiment
                     if final_score <= self.sentiment_threshold_sell:
                         df.iloc[-1, df.columns.get_loc("enter_short")] = 1
@@ -1302,8 +1306,8 @@ class SygnifStrategy(IStrategy):
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(df) > 0 and "volume_sma_25" in df.columns:
                 vol_avg = df.iloc[-1].get("volume_sma_25", 0)
-                if vol_avg < 5000:
-                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 5k, skipping")
+                if vol_avg < 25000:
+                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 25k, skipping")
                     return False
 
         return True

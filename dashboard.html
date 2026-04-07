@@ -585,13 +585,24 @@ async function reAuth() {
   tk = d.access_token;
 }
 
+// Per-fetch timeout via AbortController so a single hung request can't
+// stall the whole tick on slow internet. 10s is generous to absorb slow
+// connections — the /balance endpoint in particular returns a large
+// currencies array that can take several seconds on flaky links.
 async function api(ep, retried) {
-  const r = await fetch(`${API}/api/v1/${ep}`, {
-    headers: tk ? { 'Authorization': `Bearer ${tk}` } : {}
-  });
-  if (r.status === 401 && !retried) { await autoLogin(); return api(ep, true); }
-  if (!r.ok) return {};
-  return r.json();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(`${API}/api/v1/${ep}`, {
+      headers: tk ? { 'Authorization': `Bearer ${tk}` } : {},
+      signal: ctrl.signal
+    });
+    if (r.status === 401 && !retried) { await autoLogin(); return api(ep, true); }
+    if (!r.ok) return {};
+    return r.json();
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 /* ── Helpers ── */
@@ -647,14 +658,40 @@ function getLevels(t) {
   return levels;
 }
 
+// Last successfully fetched data per endpoint. When a fetch fails on a
+// given tick (slow internet, FT busy, transient 5xx), we keep showing the
+// last-known data for that panel instead of clearing it and showing a
+// global error like the old all-or-nothing Promise.all did.
+const lastGood = { _trades: [], profit: {}, cfg: {}, wl: {}, _perf: [], closed: { trades: [] }, balData: {} };
+
 /* ── Main Refresh ── */
 async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [_trades, profit, cfg, wl, _perf, closed, balData] = await Promise.all([
-      api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50'), api('balance')
+    // Promise.allSettled — partial failures don't kill the whole render
+    const results = await Promise.allSettled([
+      api('status'), api('profit'), api('show_config'),
+      api('whitelist'), api('performance'), api('trades?limit=50'), api('balance')
     ]);
+    const keys = ['_trades', 'profit', 'cfg', 'wl', '_perf', 'closed', 'balData'];
+    const failed = [];
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value != null) {
+        lastGood[keys[i]] = r.value;
+      } else {
+        failed.push(keys[i]);
+      }
+    });
+    const _trades = lastGood._trades;
+    const profit = lastGood.profit;
+    const cfg = lastGood.cfg;
+    const wl = lastGood.wl;
+    const _perf = lastGood._perf;
+    const closed = lastGood.closed;
+    const balData = lastGood.balData;
+    if (failed.length) console.warn('partial fetch failure:', failed.join(','));
+
     const trades = Array.isArray(_trades) ? _trades : [];
     const perf = Array.isArray(_perf) ? _perf : [];
 
@@ -668,11 +705,13 @@ async function refresh() {
     document.getElementById('pair-count').textContent = `${(wl.whitelist || []).length} pairs`;
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
-    // Balance
+    // Balance — show "—" when /balance hasn't returned yet so a fetch
+    // failure on slow internet doesn't read as $0 (which looks alarming).
+    const balReady = (balData.total != null || balData.value != null);
     const walletBalance = balData.total || balData.value || 0;
 
     const totalPnl = profit.profit_all_coin || 0;
-    document.getElementById('bal').textContent = '$' + walletBalance.toFixed(2);
+    document.getElementById('bal').textContent = balReady ? '$' + walletBalance.toFixed(2) : '—';
     document.getElementById('bal').className = `stat-val`;
     document.getElementById('bal-s').textContent = `${fmt(totalPnl)} total P/L`;
 
@@ -836,8 +875,13 @@ async function refresh() {
     // Performance
     const pf = document.getElementById('perf-container');
     if (perf && perf.length) {
-      const mx = Math.max(...perf.map(x => Math.abs(x.profit || 0)), 0.001);
-      pf.innerHTML = perf.slice(0, 10).map(p => {
+      // Show ALL closed pairs sorted by absolute impact so losers can never
+      // be hidden by a slice limit. The Freqtrade /performance API returns
+      // pairs sorted by profit descending, so a naive slice(0,N) silently
+      // drops the worst losers off the bottom of the list.
+      const sorted = perf.slice().sort((a, b) => Math.abs(b.profit || 0) - Math.abs(a.profit || 0));
+      const mx = Math.max(...sorted.map(x => Math.abs(x.profit || 0)), 0.001);
+      pf.innerHTML = sorted.map(p => {
         const v = p.profit || 0;
         return `<div class="perf-row">
           <div class="perf-pair">${p.pair?.replace('/USDT', '') || '?'}</div>
@@ -850,10 +894,17 @@ async function refresh() {
       pf.innerHTML = '<div class="empty">No closed trades yet</div>';
     }
 
-    document.getElementById('err').style.display = 'none';
+    // Only surface a hard error if EVERY fetch failed — partial failures
+    // are tolerated silently (panels keep their last-good values).
+    if (failed.length === 7) {
+      document.getElementById('err').textContent = 'All API calls failed';
+      document.getElementById('err').style.display = 'block';
+    } else {
+      document.getElementById('err').style.display = 'none';
+    }
 
   } catch (e) {
-    document.getElementById('err').textContent = `API Error: ${e.message}`;
+    document.getElementById('err').textContent = `Render error: ${e.message}`;
     document.getElementById('err').style.display = 'block';
   }
 }

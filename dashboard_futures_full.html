@@ -147,17 +147,56 @@ const U='freqtrader',P='CHANGE_ME';
 let tk='';
 
 async function login(){const r=await fetch(`${API}/api/v1/token/login`,{method:'POST',headers:{'Authorization':'Basic '+btoa(U+':'+P)}});const d=await r.json();tk=d.access_token;}
-async function api(ep){const r=await fetch(`${API}/api/v1/${ep}`,{headers:{'Authorization':`Bearer ${tk}`}});if(r.status===401){await login();return api(ep);}if(!r.ok)return[];return r.json();}
+// Per-fetch timeout via AbortController so a single hung request can't
+// stall the whole tick. 10s is generous to absorb slow connections — the
+// /balance endpoint in particular returns a large currencies array that
+// can take several seconds on flaky links.
+async function api(ep){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),10000);
+  try{
+    const r=await fetch(`${API}/api/v1/${ep}`,{headers:{'Authorization':`Bearer ${tk}`},signal:ctrl.signal});
+    if(r.status===401){await login();return api(ep);}
+    if(!r.ok)return[];
+    return r.json();
+  } finally { clearTimeout(t); }
+}
 
 const pc=v=>v>0?'up':v<0?'dn':'nt';
 const fmt=(v,d=4)=>(v>=0?'+':'')+v.toFixed(d);
 function calcDur(od){if(!od)return'--';try{const s=Math.floor((Date.now()-new Date(od+'Z').getTime())/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';return Math.floor(s/3600)+'h'+String(Math.floor(s%3600/60)).padStart(2,'0')+'m';}catch(e){return'--';}}
 function prec(v){return v<0.01?8:v<1?6:v<100?4:2;}
 
+// Last successfully fetched data per endpoint. When a fetch fails on a
+// given tick (slow internet, FT busy, transient 5xx), we keep showing the
+// last-known data for that panel instead of clearing it and showing a
+// global error like the old all-or-nothing Promise.all did.
+const lastGood={trades:[],profit:{},cfg:{},wl:{},perf:[],bal:{}};
+
 async function refresh(){
   try{
     if(!tk)await login();
-    const[trades,profit,cfg,wl,perf,bal]=await Promise.all([api('status'),api('profit'),api('show_config'),api('whitelist'),api('performance'),api('balance')]);
+    // Promise.allSettled — partial failures don't kill the whole render
+    const results=await Promise.allSettled([
+      api('status'),api('profit'),api('show_config'),
+      api('whitelist'),api('performance'),api('balance')
+    ]);
+    const keys=['trades','profit','cfg','wl','perf','bal'];
+    const failed=[];
+    results.forEach((r,i)=>{
+      if(r.status==='fulfilled' && r.value!=null){
+        lastGood[keys[i]]=r.value;
+      } else {
+        failed.push(keys[i]);
+      }
+    });
+    const trades=lastGood.trades;
+    const profit=lastGood.profit;
+    const cfg=lastGood.cfg;
+    const wl=lastGood.wl;
+    const perf=lastGood.perf;
+    const bal=lastGood.bal;
+    if(failed.length){console.warn('partial fetch failure:',failed.join(','));}
 
     const state=cfg.state||'stopped';
     document.getElementById('badge').textContent=state.toUpperCase();
@@ -170,9 +209,12 @@ async function refresh(){
     // Pull live wallet from /balance (Freqtrade's /show_config returns
     // dry_run_wallet=None even in dry mode, so reading the real balance
     // keeps the dashboard in sync with any config-side wallet changes).
+    // Show "—" when /balance hasn't returned yet so a fetch failure
+    // doesn't read as $0 (which looks alarming).
+    const balReady=(bal.total!=null||bal.value!=null);
     const walletTotal=bal.total||bal.value||0;
     const totalPnl=profit.profit_all_coin||0;
-    document.getElementById('bal').textContent='$'+walletTotal.toFixed(2);
+    document.getElementById('bal').textContent=balReady?'$'+walletTotal.toFixed(2):'—';
     document.getElementById('bal').className=`stat-val ${pc(totalPnl)}`;
     document.getElementById('bal-s').textContent=`${fmt(totalPnl)} total P/L`;
 
@@ -274,13 +316,27 @@ async function refresh(){
     // Movers
     try{const mr=await fetch('/movers_pairlist.json').catch(()=>null);if(mr&&mr.ok){const m=await mr.json();const gs=(m._meta?.gainers||[]).map(p=>`<span class="chip chip-g">${p.replace('/USDT','')}</span>`);const ls=(m._meta?.losers||[]).map(p=>`<span class="chip chip-r">${p.replace('/USDT','')}</span>`);document.getElementById('movers').innerHTML=[...gs,...ls].join('')||'--';}}catch(e){}
 
-    // Performance
+    // Performance — show ALL closed pairs sorted by absolute impact so
+    // losers can never be hidden by a slice limit. The Freqtrade /performance
+    // API returns pairs sorted by profit descending, so a naive slice(0,N)
+    // silently drops the worst losers.
     const pf=document.getElementById('perf-container');
-    if(perf&&perf.length){const mx=Math.max(...perf.map(x=>Math.abs(x.profit||0)),0.001);pf.innerHTML=perf.slice(0,10).map(p=>{const v=p.profit||0;return`<div class="perf-row"><div class="perf-pair">${p.pair?.replace('/USDT','')||'?'}</div><div class="perf-val ${v>=0?'up':'dn'}">${fmt(v)}</div><div class="perf-count">${p.count||0}x</div><div class="perf-bar"><div class="perf-bar-fill" style="width:${Math.abs(v)/mx*100}%;background:${v>=0?'var(--g)':'var(--r)'}"></div></div></div>`;}).join('');}
+    if(perf&&perf.length){
+      const sorted=perf.slice().sort((a,b)=>Math.abs(b.profit||0)-Math.abs(a.profit||0));
+      const mx=Math.max(...sorted.map(x=>Math.abs(x.profit||0)),0.001);
+      pf.innerHTML=sorted.map(p=>{const v=p.profit||0;return`<div class="perf-row"><div class="perf-pair">${p.pair?.replace('/USDT','')||'?'}</div><div class="perf-val ${v>=0?'up':'dn'}">${fmt(v)}</div><div class="perf-count">${p.count||0}x</div><div class="perf-bar"><div class="perf-bar-fill" style="width:${Math.abs(v)/mx*100}%;background:${v>=0?'var(--g)':'var(--r)'}"></div></div></div>`;}).join('');
+    }
     else{pf.innerHTML='<div class="empty">No closed trades yet</div>';}
 
-    document.getElementById('err').style.display='none';
-  }catch(e){document.getElementById('err').textContent=`API Error: ${e.message}`;document.getElementById('err').style.display='block';tk='';}
+    // Only surface a hard error if EVERY fetch failed — partial failures
+    // are tolerated silently (panels keep their last-good values).
+    if(failed.length===6){
+      document.getElementById('err').textContent=`All API calls failed`;
+      document.getElementById('err').style.display='block';
+    } else {
+      document.getElementById('err').style.display='none';
+    }
+  }catch(e){document.getElementById('err').textContent=`Render error: ${e.message}`;document.getElementById('err').style.display='block';}
 }
 let _refreshing=false;async function tick(){if(_refreshing)return;_refreshing=true;try{await refresh();}finally{_refreshing=false;}}tick();setInterval(tick,500);
 </script>
