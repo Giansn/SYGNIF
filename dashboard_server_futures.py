@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Sygnif Futures Dashboard server on port 8889 — proxies API requests to Freqtrade."""
+import base64
 import http.server
 import os
 import urllib.request
@@ -8,6 +9,23 @@ PORT = 8889
 API = "http://localhost:8081"
 DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(DIR)
+
+_PLACEHOLDER = b"__SYGNIF_FT_BASIC_B64__"
+
+
+def _api_password() -> str:
+    p = os.environ.get("FREQTRADE_API_PASSWORD", "CHANGE_ME")
+    return p.replace("$$", "$")
+
+
+def _basic_b64() -> bytes:
+    u = os.environ.get("FREQTRADE_API_USERNAME", "freqtrader")
+    p = _api_password()
+    return base64.b64encode(f"{u}:{p}".encode())
+
+
+def _inject_api_auth(html: bytes) -> bytes:
+    return html.replace(_PLACEHOLDER, _basic_b64())
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -24,6 +42,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._proxy()
         if self.path in ("/", "/dashboard"):
             self.path = "/dashboard_futures_full.html"
+        if self.path == "/dashboard_futures_full.html":
+            return self._serve_injected_html("dashboard_futures_full.html")
         return super().do_GET()
 
     def do_POST(self):
@@ -35,6 +55,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith("/api/"):
             return self._proxy()
         self.send_error(404)
+
+    def _serve_injected_html(self, name: str) -> None:
+        path = os.path.join(DIR, name)
+        try:
+            with open(path, "rb") as f:
+                body = _inject_api_auth(f.read())
+        except OSError:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _proxy(self):
         url = API + self.path

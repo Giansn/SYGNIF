@@ -6,6 +6,7 @@ After=docker.service
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/xrp_claude_bot
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
 ExecStart=/usr/bin/python3 /home/ubuntu/xrp_claude_bot/dashboard_server_futures.py
 Restart=always
 RestartSec=5

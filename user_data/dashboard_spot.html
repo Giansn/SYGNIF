@@ -650,7 +650,7 @@ let closedShowAll = false;
 async function autoLogin() {
   const r = await fetch(`${API}/api/v1/token/login`, {
     method: 'POST',
-    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+    headers: { 'Authorization': 'Basic ' + '__SYGNIF_FT_BASIC_B64__' }
   });
   if (!r.ok) throw new Error('auth');
   const d = await r.json();
@@ -660,7 +660,7 @@ async function autoLogin() {
 async function reAuth() {
   const r = await fetch(`${API}/api/v1/token/login`, {
     method: 'POST',
-    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+    headers: { 'Authorization': 'Basic ' + '__SYGNIF_FT_BASIC_B64__' }
   });
   if (!r.ok) throw new Error('reauth');
   const d = await r.json();

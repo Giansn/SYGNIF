@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SYGNIF Futures</title>
+<title>SygniFuture</title>
 <link rel="icon" type="image/png" href="assets/logo_sygnif_futures.png" />
 <link rel="apple-touch-icon" href="assets/logo_sygnif_futures.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -582,7 +582,7 @@ tr:hover td { background: #ffffff04; }
   <div class="head">
     <div class="logo">
       <img class="logo-mark-img" src="assets/logo_sygnif_futures.png" alt="SYGNIF Futures" width="40" height="40" decoding="async" />
-      <h1>SYGNIF<small>FUTURES TERMINAL</small></h1>
+      <h1>SygniFuture<small>FUTURES TERMINAL</small></h1>
     </div>
     <div class="head-right">
       <div class="badges">
@@ -657,7 +657,7 @@ tr:hover td { background: #ffffff04; }
     <div class="card" id="perf-container"><div class="empty">No closed trades yet</div></div>
   </div>
 
-  <div class="foot">SYGNIF &middot; Futures Terminal</div>
+  <div class="foot">SygniFuture &middot; Freqtrade Futures</div>
 </div>
 
 <script>
@@ -671,7 +671,7 @@ let closedShowAll = false;
 async function autoLogin() {
   const r = await fetch(`${API}/api/v1/token/login`, {
     method: 'POST',
-    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+    headers: { 'Authorization': 'Basic ' + '__SYGNIF_FT_BASIC_B64__' }
   });
   if (!r.ok) throw new Error('auth');
   const d = await r.json();
@@ -681,7 +681,7 @@ async function autoLogin() {
 async function reAuth() {
   const r = await fetch(`${API}/api/v1/token/login`, {
     method: 'POST',
-    headers: { 'Authorization': 'Basic ' + btoa('freqtrader:CHANGE_ME') }
+    headers: { 'Authorization': 'Basic ' + '__SYGNIF_FT_BASIC_B64__' }
   });
   if (!r.ok) throw new Error('reauth');
   const d = await r.json();
@@ -847,12 +847,10 @@ async function refresh() {
     document.getElementById('pair-count').textContent = `${(wl.whitelist || []).length} pairs`;
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
-    // Balance (dry_run uses wallet from config)
-    let walletBalance = 0;
-    if (cfg.dry_run) {
-      walletBalance = cfg.dry_run_wallet || 100;
-    } else {
-      walletBalance = balData.total || balData.value || 0;
+    // Balance: prefer /balance (correct for dry_run + live); then config wallet
+    let walletBalance = Number(balData.total) || Number(balData.value) || 0;
+    if ((!walletBalance || !Number.isFinite(walletBalance)) && cfg.dry_run) {
+      walletBalance = Number(cfg.dry_run_wallet) || 240;
     }
 
     const totalPnl = profit.profit_all_coin || 0;

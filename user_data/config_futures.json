@@ -94,8 +94,8 @@
 
     "telegram": {
         "enabled": true,
-        "token": "8016276540:AAFeBQfuJ0nYm68yGvNlBkEWuwaRtKVCtOQ",
-        "chat_id": "1134139785",
+        "token": "${TELEGRAM_FUTURES_BOT_TOKEN}",
+        "chat_id": "${TELEGRAM_CHAT_ID}",
         "notification_settings": {
             "status": "on",
             "warning": "on",
@@ -115,10 +115,10 @@
         "listen_port": 8081,
         "verbosity": "error",
         "enable_openapi": true,
-        "jwt_secret_key": "095abf180fab3909a67b5d831c81bea48b57b89851ef574b6f3c45125c05ff5e",
+        "jwt_secret_key": "${FT_FUTURES_JWT_SECRET}",
         "CORS_origins": ["http://localhost:8081", "http://3.122.252.186:8081", "http://3.122.252.186:8889"],
         "username": "freqtrader",
-        "password": "CHANGE_ME"
+        "password": "${FREQTRADE_API_PASSWORD:CHANGE_ME}"
     },
 
     "bot_name": "Sygnif-Futures",
@@ -132,6 +132,6 @@
     "_comment_1": "Futures config: Bybit USDT perpetuals, isolated margin, long-only",
     "_comment_2": "stoploss_on_exchange=true: critical for futures to prevent liquidation",
     "_comment_3": "Run on port 8081 so spot + futures can coexist. Use dedicated Bybit subaccount.",
-    "_comment_4": "Set BYBIT_API_KEY, BYBIT_API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID in .env",
+    "_comment_4": "Set .env: BYBIT_*, FREQTRADE_API_PASSWORD, TELEGRAM_CHAT_ID, TELEGRAM_FUTURES_BOT_TOKEN (bot + webhooks), FT_FUTURES_JWT_SECRET",
     "_comment_5": "Leverage controlled dynamically in strategy via leverage() callback (2-5x based on ATR)"
 }
