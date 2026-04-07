@@ -14,12 +14,12 @@ _PLACEHOLDER = b"__SYGNIF_FT_BASIC_B64__"
 
 
 def _api_password() -> str:
-    # Futures Freqtrade api_server uses FT_SPOT_PASS in config (same as working spot terminal).
+    # Must match user_data/config_futures.json api_server.password (${FT_FUTURES_PASS}).
     p = (
         os.environ.get("FREQTRADE_API_PASSWORD")
-        or os.environ.get("FT_SPOT_PASS")
         or os.environ.get("FT_FUTURES_PASS")
         or os.environ.get("API_PASSWORD")
+        or os.environ.get("FT_SPOT_PASS")
         or "CHANGE_ME"
     )
     return p.replace("$$", "$")
@@ -28,8 +28,8 @@ def _api_password() -> str:
 def _basic_b64() -> bytes:
     u = (
         os.environ.get("FREQTRADE_API_USERNAME")
-        or os.environ.get("FT_SPOT_USER")
         or os.environ.get("FT_FUTURES_USER")
+        or os.environ.get("FT_SPOT_USER")
         or "freqtrader"
     )
     p = _api_password()

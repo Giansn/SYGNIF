@@ -117,8 +117,8 @@
         "enable_openapi": true,
         "jwt_secret_key": "${JWT_SECRET_KEY}",
         "CORS_origins": ["http://localhost:8081", "http://3.122.252.186:8081", "http://3.122.252.186:8889"],
-        "username": "${FT_SPOT_USER:freqtrader}",
-        "password": "${FT_SPOT_PASS:CHANGE_ME}"
+        "username": "${FT_FUTURES_USER:freqtrader}",
+        "password": "${FT_FUTURES_PASS:CHANGE_ME}"
     },
 
     "bot_name": "Sygnif-Futures",
@@ -132,6 +132,6 @@
     "_comment_1": "Futures config: Bybit USDT perpetuals, isolated margin, long-only",
     "_comment_2": "stoploss_on_exchange=true: critical for futures to prevent liquidation",
     "_comment_3": "Run on port 8081 so spot + futures can coexist. Use dedicated Bybit subaccount.",
-    "_comment_4": "api_server uses FT_SPOT_USER/FT_SPOT_PASS (same as spot REST) so futures UI/auth stay in sync; set JWT_SECRET_KEY, TELEGRAM_*, BYBIT_*. Optional FT_FUTURES_* for other tools.",
+    "_comment_4": "api_server: FT_FUTURES_USER / FT_FUTURES_PASS in .env (dedicated futures REST password). Also JWT_SECRET_KEY, TELEGRAM_*, BYBIT_*.",
     "_comment_5": "Leverage controlled dynamically in strategy via leverage() callback (2-5x based on ATR)"
 }

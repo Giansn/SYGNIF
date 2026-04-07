@@ -12,9 +12,8 @@ FT_INSTANCES = [
     {
         "name": "futures",
         "url": "http://127.0.0.1:8081/api/v1",
-        # Match user_data/config_futures.json api_server (FT_SPOT_*); fallback FT_FUTURES_*.
-        "user": os.environ.get("FT_SPOT_USER") or os.environ.get("FT_FUTURES_USER", "freqtrader"),
-        "pass": os.environ.get("FT_SPOT_PASS") or os.environ.get("FT_FUTURES_PASS", "CHANGE_ME"),
+        "user": os.environ.get("FT_FUTURES_USER") or os.environ.get("FT_SPOT_USER", "freqtrader"),
+        "pass": os.environ.get("FT_FUTURES_PASS") or os.environ.get("FT_SPOT_PASS", "CHANGE_ME"),
     },
 ]
 
