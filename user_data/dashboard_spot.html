@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SYGNIF</title>
+<link rel="icon" type="image/png" href="assets/logo_sygnif_spot.png" />
+<link rel="apple-touch-icon" href="assets/logo_sygnif_spot.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
 <style>
@@ -69,18 +71,15 @@ body::before {
   align-items: center;
   gap: 12px;
 }
-.logo-mark {
-  width: 36px; height: 36px;
-  background: linear-gradient(135deg, var(--ac), var(--ac2));
+.logo-mark-img {
+  width: 40px;
+  height: 40px;
   border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--mono);
-  font-weight: 800;
-  font-size: 16px;
-  color: #fff;
-  box-shadow: 0 0 20px #3b9eff30;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+  box-shadow: 0 0 20px #3b9eff35;
+  background: var(--s1);
 }
 .logo h1 {
   font-size: 20px;
@@ -439,6 +438,75 @@ tr:hover td { background: #ffffff04; }
   font-size: 12px;
 }
 
+.closed-actions {
+  text-align: center;
+  padding: 12px 0 4px;
+}
+.btn-closed-toggle {
+  padding: 8px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--bd2);
+  background: var(--s2);
+  color: var(--ac);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background .2s, border-color .2s;
+}
+.btn-closed-toggle:hover {
+  background: var(--s3);
+  border-color: var(--ac);
+}
+
+/* Portfolio development chart */
+.portfolio-chart-wrap {
+  margin-bottom: 24px;
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  padding: 14px 16px 10px;
+  position: relative;
+  overflow: hidden;
+}
+.portfolio-chart-wrap .sec-head { margin-bottom: 6px; }
+.chart-svg-wrap {
+  width: 100%;
+  height: 140px;
+  min-height: 100px;
+}
+.portfolio-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.portfolio-svg .grid-line {
+  stroke: var(--bd);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
+.portfolio-svg .line-area {
+  opacity: 0.35;
+}
+.portfolio-svg .line-main {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t3);
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
 /* Footer */
 .foot {
   text-align: center;
@@ -462,7 +530,7 @@ tr:hover td { background: #ffffff04; }
   .bottom-grid { grid-template-columns: 1fr; }
   .tc-grid { grid-template-columns: 1fr 1fr; }
   .logo h1 { font-size: 16px; }
-  .logo-mark { width: 30px; height: 30px; font-size: 13px; }
+  .logo-mark-img { width: 32px; height: 32px; }
 }
 
 /* Scrollbar */
@@ -493,7 +561,7 @@ tr:hover td { background: #ffffff04; }
 
   <div class="head">
     <div class="logo">
-      <div class="logo-mark">S</div>
+      <img class="logo-mark-img" src="assets/logo_sygnif_spot.png" alt="SYGNIF" width="40" height="40" decoding="async" />
       <h1>SYGNIF<small>SPOT TERMINAL</small></h1>
     </div>
     <div class="head-right">
@@ -511,7 +579,16 @@ tr:hover td { background: #ffffff04; }
     <div class="stat fade-in"><div class="stat-lbl">Closed P/L</div><div class="stat-val" id="cpnl">--</div><div class="stat-sub" id="cpnl-s">realized</div></div>
     <div class="stat fade-in"><div class="stat-lbl">Trades</div><div class="stat-val" id="tcount">--</div><div class="stat-sub" id="tcount-s">open / max</div></div>
     <div class="stat fade-in"><div class="stat-lbl">Win Rate</div><div class="stat-val" id="wr">--</div><div class="stat-sub" id="wr-s">W / L</div></div>
-    <div class="stat fade-in"><div class="stat-lbl">Best Pair</div><div class="stat-val" id="bp" style="font-size:18px">--</div><div class="stat-sub" id="bp-s">--</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Today's P&amp;L</div><div class="stat-val" id="today-pnl" style="font-size:22px">--</div><div class="stat-sub" id="today-pnl-s">UTC day · closed trades</div></div>
+  </div>
+
+  <div class="portfolio-chart-wrap fade-in">
+    <div class="sec-head">
+      <div class="sec-t">Portfolio development</div>
+      <div class="sec-count" id="chart-range">30d · equity</div>
+    </div>
+    <div class="chart-svg-wrap" id="portfolio-chart"><div class="empty" style="padding:24px">Loading chart…</div></div>
+    <div class="chart-labels" id="chart-labels" style="display:none"><span id="chart-l">--</span><span id="chart-r">--</span></div>
   </div>
 
   <div class="sec">
@@ -550,6 +627,9 @@ tr:hover td { background: #ffffff04; }
       </table>
     </div>
     <div class="trade-cards" id="closed-cards"></div>
+    <div class="closed-actions" id="closed-actions" style="display:none">
+      <button type="button" class="btn-closed-toggle" id="closed-toggle">Show all</button>
+    </div>
   </div>
 
   <div class="sec">
@@ -563,6 +643,8 @@ tr:hover td { background: #ffffff04; }
 <script>
 const API = window.location.origin;
 let tk = '';
+let closedTradesAll = [];
+let closedShowAll = false;
 
 /* ── Auth ── */
 async function autoLogin() {
@@ -614,6 +696,84 @@ function calcDur(od) {
 
 function prec(v) { return v < 0.01 ? 8 : v < 1 ? 6 : v < 100 ? 4 : 2; }
 
+function utcTodayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function findTodayDailyRow(daily) {
+  const rows = daily?.data || [];
+  const t = utcTodayStr();
+  let hit = rows.find(r => String(r.date).slice(0, 10) === t);
+  if (!hit && rows.length) hit = rows[0];
+  return hit || null;
+}
+
+function equitySeriesFromDaily(daily) {
+  const rows = [...(daily?.data || [])].sort(
+    (a, b) => new Date(String(a.date)) - new Date(String(b.date))
+  );
+  return rows.map(r => {
+    const start = Number(r.starting_balance) || 0;
+    const abs = Number(r.abs_profit) || 0;
+    return start + abs;
+  });
+}
+
+function drawPortfolioChart(daily) {
+  const wrap = document.getElementById('portfolio-chart');
+  const lbl = document.getElementById('chart-labels');
+  const lEl = document.getElementById('chart-l');
+  const rEl = document.getElementById('chart-r');
+  if (!wrap) return;
+
+  let values = equitySeriesFromDaily(daily);
+  if (values.length === 0) {
+    wrap.innerHTML = '<div class="empty" style="padding:24px">No daily data yet</div>';
+    if (lbl) lbl.style.display = 'none';
+    return;
+  }
+  if (values.length === 1) values = [values[0], values[0]];
+
+  const W = 600;
+  const H = 120;
+  const padX = 12;
+  const padY = 10;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, 1e-8);
+  const n = values.length;
+
+  const pts = values.map((v, i) => {
+    const x = padX + (i / (n - 1)) * (W - 2 * padX);
+    const y = padY + (1 - (v - min) / span) * (H - 2 * padY);
+    return [x, y];
+  });
+
+  const linePts = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const baseY = H - padY;
+  const areaPts = `${padX},${baseY} ${linePts} ${W - padX},${baseY}`;
+
+  const stroke = 'var(--ac)';
+  wrap.innerHTML = `
+<svg class="portfolio-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="portGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" style="stop-color:var(--ac);stop-opacity:0.35"/>
+      <stop offset="100%" style="stop-color:var(--ac);stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+  <line class="grid-line" x1="${padX}" y1="${H / 2}" x2="${W - padX}" y2="${H / 2}"/>
+  <polygon class="line-area" fill="url(#portGrad)" points="${areaPts}"/>
+  <polyline class="line-main" stroke="${stroke}" points="${linePts}"/>
+</svg>`;
+  if (lbl && lEl && rEl) {
+    lbl.style.display = 'flex';
+    const fmtN = x => (x >= 100 ? x.toFixed(0) : x.toFixed(2));
+    lEl.textContent = fmtN(min) + ' USDT';
+    rEl.textContent = fmtN(max) + ' USDT';
+  }
+}
+
 /* ── Build SL/TP levels from trade data ── */
 function getLevels(t) {
   const e = t.open_rate;
@@ -652,8 +812,8 @@ async function refresh() {
   try {
     if (!tk) await autoLogin();
 
-    const [_trades, profit, cfg, wl, _perf, closed, balData] = await Promise.all([
-      api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=50'), api('balance')
+    const [_trades, profit, cfg, wl, _perf, closed, balData, daily] = await Promise.all([
+      api('status'), api('profit'), api('show_config'), api('whitelist'), api('performance'), api('trades?limit=200'), api('balance'), api('daily?timescale=30')
     ]);
     const trades = Array.isArray(_trades) ? _trades : [];
     const perf = Array.isArray(_perf) ? _perf : [];
@@ -695,11 +855,23 @@ async function refresh() {
     document.getElementById('wr').className = `stat-val ${tot ? (w / tot >= 0.5 ? 'up' : 'dn') : ''}`;
     document.getElementById('wr-s').textContent = `${w}W / ${l}L`;
 
-    // Best pair
-    if (profit.best_pair) {
-      document.getElementById('bp').textContent = profit.best_pair.replace('/USDT', '');
-      document.getElementById('bp-s').textContent = `${((profit.best_rate || 0) * 100).toFixed(2)}%`;
+    // Today's P&L (from /daily — closed trades today, UTC day)
+    const tRow = findTodayDailyRow(daily);
+    const tAbs = tRow ? Number(tRow.abs_profit) || 0 : 0;
+    const tRel = tRow ? (Number(tRow.rel_profit) || 0) * 100 : 0;
+    const tpEl = document.getElementById('today-pnl');
+    const tpSub = document.getElementById('today-pnl-s');
+    if (tpEl) {
+      const pctStr = (tRel >= 0 ? '+' : '') + tRel.toFixed(2) + '%';
+      tpEl.textContent = (tAbs >= 0 ? '+' : '') + tAbs.toFixed(2) + ' (' + pctStr + ')';
+      tpEl.className = `stat-val ${pc(tAbs)}`;
+      tpEl.style.fontSize = '22px';
     }
+    if (tpSub) {
+      tpSub.textContent = (tRow?.trade_count ?? 0) + ' closes · stake ' + (daily?.stake_currency || 'USDT');
+    }
+
+    drawPortfolioChart(daily);
 
     // Sort trades by P/L
     const sorted = trades.sort((a, b) => (b.profit_ratio || 0) - (a.profit_ratio || 0));
@@ -790,48 +962,9 @@ async function refresh() {
       document.getElementById('movers').innerHTML = '<span class="empty" style="padding:14px">Movers unavailable</span>';
     }
 
-    // Recent Closed
-    const recentClosed = (closed.trades || []).filter(t => !t.is_open).slice(-50).reverse();
-    const ctb = document.getElementById('closed-tbody');
-    const cc = document.getElementById('closed-cards');
-    document.getElementById('closed-count').textContent = `${recentClosed.length} recent`;
-    if (!recentClosed.length) {
-      ctb.innerHTML = '<tr><td colspan="6" class="empty">No closed trades yet</td></tr>';
-      cc.innerHTML = '<div class="card"><div class="empty">No closed trades yet</div></div>';
-    } else {
-      ctb.innerHTML = recentClosed.map(t => {
-        const pctVal = (t.profit_ratio || 0) * 100;
-        const pnl = t.profit_abs || 0;
-        const dur = t.close_date && t.open_date
-          ? calcDur(t.open_date)
-          : (t.trade_duration ? (t.trade_duration < 60 ? t.trade_duration + 'm' : (t.trade_duration/60).toFixed(1) + 'h') : '--');
-        return `<tr>
-          <td><span class="pair-name">${t.pair.replace('/USDT', '')}<span> /USDT</span></span></td>
-          <td><span class="${pc(pctVal)}" style="font-weight:700">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</span></td>
-          <td class="${pc(pnl)}">${fmt(pnl)}</td>
-          <td style="color:var(--t2)">${dur}</td>
-          <td><span class="tag">${t.enter_tag || '--'}</span></td>
-          <td><span class="tag">${t.exit_reason || '--'}</span></td>
-        </tr>`;
-      }).join('');
-      cc.innerHTML = recentClosed.map(t => {
-        const pctVal = (t.profit_ratio || 0) * 100;
-        const pnl = t.profit_abs || 0;
-        return `<div class="tc">
-          <div class="tc-top">
-            <div><div class="tc-pair">${t.pair.replace('/USDT', '')}<span> /USDT</span></div></div>
-            <div>
-              <div class="tc-pnl ${pc(pctVal)}">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</div>
-              <div class="tc-pnl-sub">${fmt(pnl)} USDT</div>
-            </div>
-          </div>
-          <div class="tc-grid">
-            <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val"><span class="tag">${t.enter_tag || '--'}</span></div></div>
-            <div class="tc-item"><div class="tc-item-lbl">Exit</div><div class="tc-item-val"><span class="tag">${t.exit_reason || '--'}</span></div></div>
-          </div>
-        </div>`;
-      }).join('');
-    }
+    // Recent Closed (10 by default; "Show all" for full history from API slice)
+    closedTradesAll = (closed.trades || []).filter(t => !t.is_open).slice(-200).reverse();
+    renderClosedSection();
 
     // Performance
     const pf = document.getElementById('perf-container');
@@ -872,6 +1005,70 @@ setInterval(() => {
   const el = document.getElementById('clock');
   if (el) el.textContent = new Date().toLocaleTimeString();
 }, 1000);
+
+function renderClosedSection() {
+  const ctb = document.getElementById('closed-tbody');
+  const cc = document.getElementById('closed-cards');
+  const actions = document.getElementById('closed-actions');
+  const btn = document.getElementById('closed-toggle');
+  if (!ctb || !cc) return;
+
+  if (!closedTradesAll.length) {
+    ctb.innerHTML = '<tr><td colspan="6" class="empty">No closed trades yet</td></tr>';
+    cc.innerHTML = '<div class="card"><div class="empty">No closed trades yet</div></div>';
+    document.getElementById('closed-count').textContent = '0 recent';
+    if (actions) actions.style.display = 'none';
+    return;
+  }
+
+  const list = closedShowAll ? closedTradesAll : closedTradesAll.slice(0, 10);
+  const total = closedTradesAll.length;
+  document.getElementById('closed-count').textContent = closedShowAll
+    ? `${total} closed`
+    : `${Math.min(10, total)} of ${total}`;
+
+  ctb.innerHTML = list.map(t => {
+    const pctVal = (t.profit_ratio || 0) * 100;
+    const pnl = t.profit_abs || 0;
+    const dur = t.close_date && t.open_date
+      ? calcDur(t.open_date)
+      : (t.trade_duration ? (t.trade_duration < 60 ? t.trade_duration + 'm' : (t.trade_duration/60).toFixed(1) + 'h') : '--');
+    return `<tr>
+      <td><span class="pair-name">${t.pair.replace('/USDT', '')}<span> /USDT</span></span></td>
+      <td><span class="${pc(pctVal)}" style="font-weight:700">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</span></td>
+      <td class="${pc(pnl)}">${fmt(pnl)}</td>
+      <td style="color:var(--t2)">${dur}</td>
+      <td><span class="tag">${t.enter_tag || '--'}</span></td>
+      <td><span class="tag">${t.exit_reason || '--'}</span></td>
+    </tr>`;
+  }).join('');
+
+  cc.innerHTML = list.map(t => {
+    const pctVal = (t.profit_ratio || 0) * 100;
+    const pnl = t.profit_abs || 0;
+    return `<div class="tc">
+      <div class="tc-top">
+        <div><div class="tc-pair">${t.pair.replace('/USDT', '')}<span> /USDT</span></div></div>
+        <div>
+          <div class="tc-pnl ${pc(pctVal)}">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</div>
+          <div class="tc-pnl-sub">${fmt(pnl)} USDT</div>
+        </div>
+      </div>
+      <div class="tc-grid">
+        <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val"><span class="tag">${t.enter_tag || '--'}</span></div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Exit</div><div class="tc-item-val"><span class="tag">${t.exit_reason || '--'}</span></div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (actions) actions.style.display = total > 10 ? 'block' : 'none';
+  if (btn) btn.textContent = closedShowAll ? 'Show less' : 'Show all';
+}
+
+document.getElementById('closed-toggle').addEventListener('click', () => {
+  closedShowAll = !closedShowAll;
+  renderClosedSection();
+});
 
 tick();
 setInterval(tick, 1000);
