@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "aws-docs": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-iac": {
+      "command": "uvx",
+      "args": [
+        "awslabs.iac-mcp-server@latest"
+      ],
+      "env": {
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "eu-central-1"
+      }
+    },
+    "aws-serverless": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-serverless-mcp-server@latest"
+      ],
+      "env": {
+        "AWS_PROFILE": "default",
+        "AWS_REGION": "eu-central-1"
+      }
+    }
+  }
+}
