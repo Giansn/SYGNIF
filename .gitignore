@@ -33,3 +33,11 @@ finance_agent/nfi_update.log
 
 # Skill bundles
 dist/
+
+# Local / machine-specific (never commit)
+outputs/
+.tracking_baseline.txt
+SYGNIF/
+
+# Root-level scratch scripts (not part of shipped tree)
+/scripts/
