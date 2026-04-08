@@ -19,9 +19,9 @@
   --t1: #e8ecf2;
   --t2: #6a7a92;
   --t3: #3a4a5e;
-  --ac: #e27b58;
-  --ac2: #c4603e;
-  --ac-glow: #e27b5818;
+  --ac: #4cb8e8;
+  --ac2: #3a9fd0;
+  --ac-glow: #4cb8e818;
   --g: #00e87b;
   --g2: #00c866;
   --g-bg: #00e87b08;
@@ -51,7 +51,7 @@ body::before {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 400px;
-  background: radial-gradient(ellipse 80% 50% at 50% -20%, #e27b5808 0%, transparent 70%);
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, #4cb8e810 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -72,14 +72,15 @@ body::before {
   gap: 12px;
 }
 .logo-mark-img {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
   object-fit: cover;
   display: block;
   flex-shrink: 0;
-  box-shadow: 0 0 20px #e27b5835;
+  box-shadow: 0 0 30px #4cb8e845, 0 0 10px #4cb8e820;
   background: var(--s1);
+  border: 1px solid #4cb8e825;
 }
 .logo h1 {
   font-size: 20px;
@@ -144,7 +145,7 @@ body::before {
   display: inline-block;
   padding: 3px 6px; border-radius: 5px;
   font-family: var(--mono); font-size: 10px; font-weight: 600;
-  background: var(--ac-glow); color: var(--ac); border: 1px solid #e27b5820;
+  background: var(--ac-glow); color: var(--ac); border: 1px solid #4cb8e820;
   margin-left: 4px;
 }
 .tc-meta { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
@@ -273,7 +274,7 @@ tr:hover td { background: #ffffff04; }
   background: var(--ac-glow);
   color: var(--ac);
   font-weight: 600;
-  border: 1px solid #e27b5815;
+  border: 1px solid #4cb8e815;
 }
 
 .bar-wrap {
@@ -297,7 +298,7 @@ tr:hover td { background: #ffffff04; }
   margin: 1px 2px;
 }
 .lvl-sl { background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd); }
-.lvl-entry { background: var(--ac-glow); color: var(--ac); border: 1px solid #e27b5820; }
+.lvl-entry { background: var(--ac-glow); color: var(--ac); border: 1px solid #4cb8e820; }
 .lvl-tp { background: var(--g-bg); color: var(--g); border: 1px solid var(--g-bd); }
 
 /* Mobile Trade Cards */
@@ -604,7 +605,7 @@ tr:hover td { background: #ffffff04; }
   .bottom-grid { grid-template-columns: 1fr; }
   .tc-grid { grid-template-columns: 1fr 1fr; }
   .logo h1 { font-size: 16px; }
-  .logo-mark-img { width: 32px; height: 32px; }
+  .logo-mark-img { width: 42px; height: 42px; }
 }
 
 /* Scrollbar */
@@ -635,7 +636,7 @@ tr:hover td { background: #ffffff04; }
 
   <div class="head">
     <div class="logo">
-      <img class="logo-mark-img" src="assets/logo_sygnif_futures.png" alt="SYGNIF Futures" width="40" height="40" decoding="async" />
+      <img class="logo-mark-img" src="assets/logo_sygnif_futures.png" alt="SYGNIF Futures" width="54" height="54" decoding="async" />
       <h1>SygniFuture<small>FUTURES TERMINAL</small></h1>
     </div>
     <div class="head-right">

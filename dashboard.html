@@ -19,9 +19,9 @@
   --t1: #e8ecf2;
   --t2: #6a7a92;
   --t3: #3a4a5e;
-  --ac: #3b9eff;
-  --ac2: #1a6fd4;
-  --ac-glow: #3b9eff18;
+  --ac: #5ae0b5;
+  --ac2: #42c89c;
+  --ac-glow: #5ae0b518;
   --g: #00e87b;
   --g2: #00c866;
   --g-bg: #00e87b08;
@@ -51,7 +51,7 @@ body::before {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 400px;
-  background: radial-gradient(ellipse 80% 50% at 50% -20%, #3b9eff08 0%, transparent 70%);
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, #5ae0b510 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -72,14 +72,15 @@ body::before {
   gap: 12px;
 }
 .logo-mark-img {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
   object-fit: cover;
   display: block;
   flex-shrink: 0;
-  box-shadow: 0 0 20px #3b9eff35;
+  box-shadow: 0 0 30px #5ae0b545, 0 0 10px #5ae0b520;
   background: var(--s1);
+  border: 1px solid #5ae0b525;
 }
 .logo h1 {
   font-size: 20px;
@@ -252,7 +253,7 @@ tr:hover td { background: #ffffff04; }
   background: var(--ac-glow);
   color: var(--ac);
   font-weight: 600;
-  border: 1px solid #3b9eff15;
+  border: 1px solid #5ae0b515;
 }
 
 .bar-wrap {
@@ -276,7 +277,7 @@ tr:hover td { background: #ffffff04; }
   margin: 1px 2px;
 }
 .lvl-sl { background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd); }
-.lvl-entry { background: var(--ac-glow); color: var(--ac); border: 1px solid #3b9eff20; }
+.lvl-entry { background: var(--ac-glow); color: var(--ac); border: 1px solid #5ae0b520; }
 .lvl-tp { background: var(--g-bg); color: var(--g); border: 1px solid var(--g-bd); }
 
 /* Mobile Trade Cards */
@@ -584,7 +585,7 @@ tr:hover td { background: #ffffff04; }
   .bottom-grid { grid-template-columns: 1fr; }
   .tc-grid { grid-template-columns: 1fr 1fr; }
   .logo h1 { font-size: 16px; }
-  .logo-mark-img { width: 32px; height: 32px; }
+  .logo-mark-img { width: 42px; height: 42px; }
 }
 
 /* Scrollbar */
@@ -615,7 +616,7 @@ tr:hover td { background: #ffffff04; }
 
   <div class="head">
     <div class="logo">
-      <img class="logo-mark-img" src="assets/logo_sygnif_spot.png" alt="SYGNIF" width="40" height="40" decoding="async" />
+      <img class="logo-mark-img" src="assets/logo_sygnif_spot.png" alt="SYGNIF" width="54" height="54" decoding="async" />
       <h1>SYGNIF<small>SPOT TERMINAL</small></h1>
     </div>
     <div class="head-right">
