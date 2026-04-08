@@ -1369,6 +1369,9 @@ def cmd_news(ticker: str = "") -> str:
 def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
+        "`/finance-agent` — Comprehensive research\n"
+        "`/finance-agent <cmd>` — Run specific module\n"
+        "`/finance-agent <TICKER>` — Research for ticker\n"
         "`/overview` — Trades + TA + market (full dashboard)\n"
         "`/tendency` — Market tendency (bull/bear)\n"
         "`/signals` — Active entry signals (top pairs)\n"
@@ -1382,6 +1385,93 @@ def cmd_help() -> str:
         "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
     )
+
+
+# ---------------------------------------------------------------------------
+# Command: /macro — BTC-led macro overlay
+# ---------------------------------------------------------------------------
+def cmd_macro() -> str:
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch market data."
+
+    btc_df = bybit_kline("BTCUSDT", "240", 200)
+    btc_ind = calc_indicators(btc_df) if not btc_df.empty else {}
+    btc_sig = detect_signals(btc_ind, "BTC") if btc_ind else {"ta_score": 50}
+
+    pairs = _filter_pairs(tickers, min_turnover=5_000_000)
+    top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:20]
+    up = sum(1 for p in top if p["change"] > 0)
+    breadth = f"{up}/{len(top)} up" if top else "n/a"
+
+    if not btc_ind:
+        return f"*Macro*\nBreadth: `{breadth}`\n_BTC data unavailable_"
+
+    ta = btc_sig.get("ta_score", 50)
+    regime = "Mixed / transition"
+    if ta >= 65:
+        regime = "Risk-on bias"
+    elif ta <= 35:
+        regime = "Risk-off bias"
+
+    return (
+        "*Macro-Crypto Context*\n"
+        f"BTC: `{_fmt_price(btc_ind['price'])}` | `{btc_ind['trend']}` | TA `{ta}`\n"
+        f"RSI `{btc_ind['rsi']:.0f}` | WR `{btc_ind['willr']:.0f}` | MACD `{btc_ind['macd_signal_text']}`\n"
+        f"Breadth (top vol alts): `{breadth}`\n"
+        f"Regime: *{regime}*\n"
+        f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Command: /finance-agent — umbrella router
+# ---------------------------------------------------------------------------
+def cmd_finance_agent(args: str) -> str:
+    raw = (args or "").strip()
+    if not raw:
+        sections = [
+            ("Tendency", cmd_tendency()),
+            ("Signals", cmd_signals()),
+            ("Macro", cmd_macro()),
+            ("Top Plays", cmd_plays()),
+        ]
+        lines = [f"*Finance Agent Comprehensive* | {datetime.now(timezone.utc).strftime('%H:%M UTC')}\n"]
+        for title, content in sections:
+            lines.append(f"*{title}*")
+            snippet = content.strip()
+            if len(snippet) > 1200:
+                snippet = snippet[:1200].rstrip() + "\n... (truncated)"
+            lines.append(snippet)
+            lines.append("")
+        lines.append("*Active Ops Modules:*")
+        lines.append("- BTC dependency gating for alts")
+        lines.append("- Strategy comparison baseline: `claude_s0`")
+        lines.append("- Futures shorts module with squeeze-risk filter")
+        return "\n".join(lines).strip()
+
+    parts = raw.split(maxsplit=1)
+    sub = parts[0].lower().strip()
+    tail = parts[1].strip() if len(parts) > 1 else ""
+    subcommands = {
+        "market": lambda: cmd_market(),
+        "movers": lambda: cmd_movers(),
+        "signals": lambda: cmd_signals(),
+        "scan": lambda: cmd_scan(),
+        "plays": lambda: cmd_plays(),
+        "tendency": lambda: cmd_tendency(),
+        "macro": lambda: cmd_macro(),
+        "overview": lambda: cmd_overview(),
+        "evaluate": lambda: cmd_evaluate(),
+        "help": lambda: cmd_help(),
+        "ta": lambda: cmd_ta(tail or "BTC"),
+        "research": lambda: cmd_research(tail or "BTC"),
+    }
+    if sub in subcommands:
+        return subcommands[sub]()
+    if sub.isalpha() and 2 <= len(sub) <= 10:
+        return cmd_research(sub.upper())
+    return "Unknown /finance-agent command. Use `market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro`"
 
 
 # ---------------------------------------------------------------------------
@@ -1539,6 +1629,7 @@ FHE CUT RSI:26 broke support"""
 # Command dispatch — returns response string (matches sygnif_bot.py pattern)
 # ---------------------------------------------------------------------------
 COMMANDS = {
+    "/finance-agent": lambda args: cmd_finance_agent(args),
     "/overview": lambda args: cmd_overview(),
     "/tendency": lambda args: cmd_tendency(),
     "/market":   lambda args: cmd_market(),
@@ -1556,16 +1647,18 @@ COMMANDS = {
 
 
 # Commands that take a while — send a loading message first
-_SLOW_COMMANDS = {"/overview", "/tendency", "/signals", "/scan", "/research", "/plays", "/evaluate"}
+_SLOW_COMMANDS = {"/finance-agent", "/overview", "/tendency", "/signals", "/scan", "/research", "/plays", "/evaluate", "/macro"}
 
 # Loading messages per command
 _LOADING_MSG = {
+    "/finance-agent": "Running finance-agent workflow...",
     "/overview":  "\U0001f50d Contacting overseer + scanning TA...",
     "/tendency":  "\U0001f4ca Scanning market tendency...",
     "/signals":   "\U0001f4e1 Scanning signals across top pairs...",
     "/research":  "\U0001f9e0 Researching — TA + news + AI analysis...",
     "/plays":     "\U0001f3af Scanning opportunities — TA + AI...",
     "/scan":      "\U0001f50e Scanning opportunities — TA + news + AI ranking...",
+    "/macro":     "\U0001f30d Building macro-crypto context...",
     "/evaluate":  "\U0001f916 Evaluating positions...",
 }
 

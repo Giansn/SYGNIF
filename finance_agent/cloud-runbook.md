@@ -11,9 +11,10 @@ Use strict JSON output only.
 Mandatory sequence:
 1) Session/regime identification
 2) Setup checks (ORB/IB/VWAP/RVOL/delta where available)
-3) BTC dependency gate for alt assets
-4) Strategy-tag comparison (swing_failure, claude_swing vs baseline claude_s0)
-5) Return LONG/SHORT/BUY/HOLD/NO_TRADE with risk plan and confidence
+3) Route task mode (`futures_long`, `futures_short`, `spot`) using labels first, then keywords
+4) BTC dependency gate for alt assets
+5) Strategy-tag comparison (swing_failure, claude_swing vs baseline claude_s0)
+6) Return LONG/SHORT/BUY/HOLD/NO_TRADE with risk plan and confidence
 
 If confirmations conflict or data is stale/missing => NO_TRADE or BLOCKED.
 ```
@@ -30,3 +31,11 @@ If confirmations conflict or data is stale/missing => NO_TRADE or BLOCKED.
 - `strategy_comparison`
 - `decision_summary`
 - `status`
+
+## Routing labels (recommended)
+
+- `futures-short` -> `futures_short`
+- `futures-long` -> `futures_long`
+- `spot` -> `spot`
+
+If no routing label is present, infer from title/description keywords.

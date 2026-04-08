@@ -8,6 +8,8 @@ This folder centralizes the Cursor Cloud finance-agent operating assets directly
 - `futures-agent-prompt.md`: Futures analysis prompt with BTC dependency and strategy-tag comparison
 - `spot-agent-prompt.md`: Spot analysis prompt with BTC dependency and strategy-tag comparison
 - `strategy-comparison-module.md`: CUR-6 strategy tag comparison policy (`swing_failure`, `claude_swing`, baseline `claude_s0`)
+- `futures-shorts-module.md`: Dedicated short-side futures decision and squeeze-risk framework
+- `mode_router.py`: Task router for `futures_long`, `futures_short`, and `spot` modes
 
 ## Intended use
 
@@ -15,3 +17,4 @@ This folder centralizes the Cursor Cloud finance-agent operating assets directly
 - Use strict JSON outputs for automation and auditability.
 - Route overseer commentary via `OVERSEER_AGENT_URL` (configured in `.env`).
 - Use `SYGNIF_HEDGE_BOT_TOKEN` for dedicated overseer Telegram delivery.
+- Use labels (`futures-short`, `futures-long`, `spot`) for deterministic mode routing.
