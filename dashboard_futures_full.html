@@ -493,8 +493,8 @@ tr:hover td { background: #ffffff04; }
 .portfolio-chart-wrap .sec-head { margin-bottom: 6px; }
 .chart-svg-wrap {
   width: 100%;
-  height: 140px;
-  min-height: 100px;
+  height: 180px;
+  min-height: 140px;
 }
 .portfolio-svg {
   width: 100%;
@@ -524,6 +524,60 @@ tr:hover td { background: #ffffff04; }
   font-size: 10px;
   color: var(--t3);
   margin-top: 6px;
+  padding: 0 2px;
+}
+.tf-btns {
+  display: flex;
+  gap: 2px;
+  background: var(--s2);
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid var(--bd);
+}
+.tf-btn {
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--t3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: all .2s;
+}
+.tf-btn:hover { color: var(--t1); }
+.tf-btn.active {
+  background: var(--ac);
+  color: var(--bg);
+  box-shadow: 0 0 8px var(--ac-glow);
+}
+.chart-tooltip {
+  position: absolute;
+  display: none;
+  background: var(--s2);
+  border: 1px solid var(--bd2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t1);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.chart-tooltip .tt-val { font-weight: 700; font-size: 13px; }
+.chart-tooltip .tt-date { color: var(--t2); font-size: 10px; margin-top: 2px; }
+.chart-tooltip .tt-pnl { font-size: 10px; margin-top: 2px; }
+.chart-dates {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--t3);
+  margin-top: 4px;
   padding: 0 2px;
 }
 
@@ -605,10 +659,19 @@ tr:hover td { background: #ffffff04; }
   <div class="portfolio-chart-wrap fade-in">
     <div class="sec-head">
       <div class="sec-t">Portfolio development</div>
-      <div class="sec-count" id="chart-range">30d · equity</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="tf-btns">
+          <button class="tf-btn" data-tf="1">1D</button>
+          <button class="tf-btn" data-tf="7">7D</button>
+          <button class="tf-btn active" data-tf="30">30D</button>
+        </div>
+        <div class="sec-count" id="chart-range">30d · equity</div>
+      </div>
     </div>
+    <div class="chart-tooltip" id="chart-tooltip"></div>
     <div class="chart-svg-wrap" id="portfolio-chart"><div class="empty" style="padding:24px">Loading chart…</div></div>
     <div class="chart-labels" id="chart-labels" style="display:none"><span id="chart-l">--</span><span id="chart-r">--</span></div>
+    <div class="chart-dates" id="chart-dates"></div>
   </div>
 
   <div class="sec">
@@ -666,6 +729,9 @@ const pairDisp = (p) => (p || '').replace('/USDT:USDT', '').replace('/USDT', '')
 let tk = '';
 let closedTradesAll = [];
 let closedShowAll = false;
+let chartTF = 30;
+let _dailyCache = null;
+let _tradesCache = [];
 
 /* ── Auth ── */
 async function autoLogin() {
@@ -729,68 +795,160 @@ function findTodayDailyRow(daily) {
   return hit || null;
 }
 
-function equitySeriesFromDaily(daily) {
-  const rows = [...(daily?.data || [])].sort(
-    (a, b) => new Date(String(a.date)) - new Date(String(b.date))
-  );
-  return rows.map(r => {
-    const start = Number(r.starting_balance) || 0;
-    const abs = Number(r.abs_profit) || 0;
-    return start + abs;
-  });
+function getChartData() {
+  if (chartTF === 1) return buildIntraDayData();
+  return buildDailyData(chartTF);
 }
 
-function drawPortfolioChart(daily) {
+function buildIntraDayData() {
+  const today = utcTodayStr();
+  const dailyRows = _dailyCache?.data || [];
+  const todayRow = dailyRows.find(r => String(r.date).slice(0, 10) === today);
+  const startBal = todayRow ? (Number(todayRow.starting_balance) || 0) : 0;
+
+  const todayTrades = _tradesCache
+    .filter(t => !t.is_open && t.close_date && String(t.close_date).slice(0, 10) === today)
+    .sort((a, b) => new Date(String(a.close_date)) - new Date(String(b.close_date)));
+
+  if (!todayTrades.length && !startBal) return { values: [], labels: [] };
+
+  const values = [startBal];
+  const labels = ['00:00'];
+  let running = startBal;
+
+  todayTrades.forEach(t => {
+    running += (t.profit_abs || 0);
+    values.push(running);
+    try {
+      const d = new Date(t.close_date + (String(t.close_date).includes('Z') ? '' : 'Z'));
+      labels.push(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+    } catch { labels.push(''); }
+  });
+
+  values.push(running);
+  labels.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+
+  return { values, labels };
+}
+
+function buildDailyData(days) {
+  const rows = [...(_dailyCache?.data || [])].sort(
+    (a, b) => new Date(String(a.date)) - new Date(String(b.date))
+  );
+  const sliced = rows.slice(-days);
+  const values = sliced.map(r => (Number(r.starting_balance) || 0) + (Number(r.abs_profit) || 0));
+  const labels = sliced.map(r => {
+    try { return new Date(String(r.date)).toLocaleDateString([], { month: 'short', day: 'numeric' }); }
+    catch { return ''; }
+  });
+  return { values, labels };
+}
+
+function updatePortfolioChart() {
   const wrap = document.getElementById('portfolio-chart');
-  const lbl = document.getElementById('chart-labels');
+  const lblWrap = document.getElementById('chart-labels');
   const lEl = document.getElementById('chart-l');
   const rEl = document.getElementById('chart-r');
+  const datesEl = document.getElementById('chart-dates');
+  const rangeEl = document.getElementById('chart-range');
+  const tooltip = document.getElementById('chart-tooltip');
   if (!wrap) return;
 
-  let values = equitySeriesFromDaily(daily);
-  if (values.length === 0) {
-    wrap.innerHTML = '<div class="empty" style="padding:24px">No daily data yet</div>';
-    if (lbl) lbl.style.display = 'none';
+  const { values, labels } = getChartData();
+  if (rangeEl) rangeEl.textContent = chartTF + 'd · equity';
+
+  if (!values.length) {
+    wrap.innerHTML = '<div class="empty" style="padding:24px">No data for this period</div>';
+    if (lblWrap) lblWrap.style.display = 'none';
+    if (datesEl) datesEl.innerHTML = '';
     return;
   }
-  if (values.length === 1) values = [values[0], values[0]];
 
-  const W = 600;
-  const H = 120;
-  const padX = 12;
-  const padY = 10;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  let vals = values.length === 1 ? [values[0], values[0]] : values;
+  let lbs = labels.length === 1 ? [labels[0], labels[0]] : labels;
+  const W = 600, H = 160, padX = 12, padY = 12;
+  const cW = W - 2 * padX, cH = H - 2 * padY;
+  const min = Math.min(...vals), max = Math.max(...vals);
   const span = Math.max(max - min, 1e-8);
-  const n = values.length;
+  const n = vals.length;
+  const trend = vals[n - 1] >= vals[0];
+  const lnColor = trend ? 'var(--g)' : 'var(--r)';
 
-  const pts = values.map((v, i) => {
-    const x = padX + (i / (n - 1)) * (W - 2 * padX);
-    const y = padY + (1 - (v - min) / span) * (H - 2 * padY);
+  const pts = vals.map((v, i) => {
+    const x = padX + (i / (n - 1)) * cW;
+    const y = padY + (1 - (v - min) / span) * cH;
     return [x, y];
   });
 
+  let grid = '';
+  for (let g = 0; g <= 3; g++) {
+    const gy = padY + (g / 3) * cH;
+    grid += `<line class="grid-line" x1="${padX}" y1="${gy.toFixed(1)}" x2="${W - padX}" y2="${gy.toFixed(1)}"/>`;
+  }
+
   const linePts = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const baseY = H - padY;
-  const areaPts = `${padX},${baseY} ${linePts} ${W - padX},${baseY}`;
-  const stroke = 'var(--ac)';
+  const areaPts = `${padX},${baseY} ${linePts} ${pts[n - 1][0].toFixed(1)},${baseY}`;
+
   wrap.innerHTML = `
 <svg class="portfolio-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="portGradFut" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" style="stop-color:var(--ac);stop-opacity:0.35"/>
-      <stop offset="100%" style="stop-color:var(--ac);stop-opacity:0"/>
+      <stop offset="0%" style="stop-color:${lnColor};stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:${lnColor};stop-opacity:0"/>
     </linearGradient>
   </defs>
-  <line class="grid-line" x1="${padX}" y1="${H / 2}" x2="${W - padX}" y2="${H / 2}"/>
+  ${grid}
   <polygon class="line-area" fill="url(#portGradFut)" points="${areaPts}"/>
-  <polyline class="line-main" stroke="${stroke}" points="${linePts}"/>
+  <polyline class="line-main" stroke="${lnColor}" points="${linePts}"/>
 </svg>`;
-  if (lbl && lEl && rEl) {
-    lbl.style.display = 'flex';
+
+  const svg = wrap.querySelector('svg');
+  if (svg && tooltip) {
+    svg.style.cursor = 'crosshair';
+    svg.addEventListener('mousemove', (e) => {
+      const rect = svg.getBoundingClientRect();
+      const sx = (e.clientX - rect.left) / rect.width * W;
+      let idx = 0, best = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const d = Math.abs(pts[i][0] - sx);
+        if (d < best) { best = d; idx = i; }
+      }
+      const v = vals[idx];
+      const chg = v - vals[0];
+      const pctChg = vals[0] ? (chg / vals[0] * 100) : 0;
+      const cls = chg >= 0 ? 'up' : 'dn';
+      const fmtV = v >= 100 ? v.toFixed(2) : v.toFixed(4);
+      tooltip.innerHTML = `<div class="tt-val">${fmtV} USDT</div><div class="tt-date">${lbs[idx] || ''}</div><div class="tt-pnl ${cls}">${chg >= 0 ? '+' : ''}${chg.toFixed(4)} (${pctChg >= 0 ? '+' : ''}${pctChg.toFixed(2)}%)</div>`;
+      tooltip.style.display = 'block';
+      const wr = wrap.parentElement.getBoundingClientRect();
+      let tx = e.clientX - wr.left + 14;
+      if (tx + 170 > wr.width) tx -= 190;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = Math.max(4, e.clientY - wr.top - 50) + 'px';
+    });
+    svg.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+  }
+
+  if (datesEl && lbs.length > 1) {
+    const cnt = Math.min(lbs.length, chartTF === 1 ? 8 : 6);
+    const step = Math.max(1, Math.floor((lbs.length - 1) / (cnt - 1)));
+    const shown = [];
+    for (let i = 0; i < lbs.length; i += step) shown.push(lbs[i]);
+    if ((lbs.length - 1) % step !== 0) shown.push(lbs[lbs.length - 1]);
+    datesEl.innerHTML = shown.map(s => `<span>${s}</span>`).join('');
+  } else if (datesEl) {
+    datesEl.innerHTML = '';
+  }
+
+  if (lblWrap && lEl && rEl) {
+    lblWrap.style.display = 'flex';
     const fmtN = x => (x >= 100 ? x.toFixed(0) : x.toFixed(2));
-    lEl.textContent = fmtN(min) + ' USDT';
-    rEl.textContent = fmtN(max) + ' USDT';
+    const chg = vals[n - 1] - vals[0];
+    const pctChg = vals[0] ? (chg / vals[0] * 100) : 0;
+    lEl.textContent = fmtN(vals[0]) + ' USDT';
+    rEl.textContent = fmtN(vals[n - 1]) + ' (' + (chg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%)';
+    rEl.style.color = trend ? 'var(--g)' : 'var(--r)';
   }
 }
 
@@ -904,7 +1062,9 @@ async function refresh() {
     if (tpSub) {
       tpSub.textContent = (tRow?.trade_count ?? 0) + ' closes · stake ' + (daily?.stake_currency || 'USDT');
     }
-    drawPortfolioChart(daily);
+    _dailyCache = daily;
+    _tradesCache = allTrades;
+    updatePortfolioChart();
 
     const sorted = trades.slice().sort((a, b) => (b.profit_ratio || 0) - (a.profit_ratio || 0));
 
@@ -1110,6 +1270,15 @@ function renderClosedSection() {
 document.getElementById('closed-toggle').addEventListener('click', () => {
   closedShowAll = !closedShowAll;
   renderClosedSection();
+});
+
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    chartTF = parseInt(btn.dataset.tf);
+    updatePortfolioChart();
+  });
 });
 
 tick();
