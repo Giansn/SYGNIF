@@ -1,9 +1,10 @@
 """Overseer commentary client.
 
 Priority:
-1) External agent webhook (Cursor Cloud/worker)
-2) Anthropic Claude API (legacy fallback)
-3) None (rules-only fallback in overseer)
+1) External agent webhook (OVERSEER_AGENT_URL)
+2) OpenVINO NPU (SYGNIF_LLM_BACKEND=npu)
+3) Anthropic Claude API
+4) None (rules-only fallback in overseer)
 """
 import logging
 import os
@@ -16,6 +17,13 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = "claude-haiku-4-5-20251001"
 AGENT_URL = os.environ.get("OVERSEER_AGENT_URL", "").strip()
 AGENT_TOKEN = os.environ.get("OVERSEER_AGENT_TOKEN", "").strip()
+
+_LLM_BACKENDS_NPU = frozenset({"npu", "openvino", "local_npu"})
+
+
+def _llm_backend() -> str:
+    return os.environ.get("SYGNIF_LLM_BACKEND", "anthropic").strip().lower()
+
 
 SYSTEM_PROMPT = """Freqtrade bot monitor (spot [s] + futures [f], Bybit).
 Input: TA briefing lines then trade lines with P&L delta.
@@ -34,11 +42,7 @@ FART[f] -2.4% (was -2.1%): CUT — TA:31 RSI 38 weak, no support."""
 
 
 def evaluate(prompt: str, timeout: int = 30) -> str | None:
-    """Send prompt to configured overseer model endpoint.
-
-    Returns None if API unavailable — caller falls back to rules-only.
-    """
-    # Preferred path: external agent endpoint.
+    """Send prompt to configured overseer backends in priority order."""
     if AGENT_URL:
         try:
             headers = {"content-type": "application/json"}
@@ -53,14 +57,31 @@ def evaluate(prompt: str, timeout: int = 30) -> str | None:
             if resp.ok:
                 data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
                 text = data.get("commentary") or data.get("text") or (resp.text or "").strip()
-                return text.strip() if text else None
-            logger.error(f"Agent endpoint error: {resp.status_code} {resp.text[:120]}")
+                if text:
+                    return text.strip()
+            logger.error("Agent endpoint error: %s %s", resp.status_code, resp.text[:120])
         except Exception as e:
-            logger.error(f"Agent endpoint failure: {e}")
+            logger.error("Agent endpoint failure: %s", e)
 
-    # Legacy fallback: Anthropic direct.
+    if _llm_backend() in _LLM_BACKENDS_NPU:
+        import npu_genai_client
+
+        npu_timeout = max(
+            timeout,
+            int(os.environ.get("SYGNIF_NPU_MIN_TIMEOUT", "120")),
+        )
+        full = f"{SYSTEM_PROMPT}\n\n---\n\n{prompt}"
+        try:
+            out = npu_genai_client.evaluate_combined_prompt(full, timeout=npu_timeout)
+            if out:
+                return out
+        except Exception as e:
+            logger.error("NPU GenAI evaluate error: %s", e)
+
     if not ANTHROPIC_KEY:
-        logger.warning("No OVERSEER_AGENT_URL or ANTHROPIC_API_KEY, skipping LLM eval")
+        logger.warning(
+            "No commentary backend: set OVERSEER_AGENT_URL, or SYGNIF_LLM_BACKEND=npu with model, or ANTHROPIC_API_KEY"
+        )
         return None
 
     try:
@@ -81,46 +102,56 @@ def evaluate(prompt: str, timeout: int = 30) -> str | None:
         )
         if resp.ok:
             return resp.json()["content"][0]["text"].strip()
-        logger.error(f"Claude API error: {resp.status_code} {resp.text[:100]}")
+        logger.error("Claude API error: %s %s", resp.status_code, resp.text[:100])
         return None
     except requests.exceptions.Timeout:
         logger.warning("Claude timeout, skipping LLM eval")
         return None
     except Exception as e:
-        logger.error(f"Claude error: {e}")
+        logger.error("Claude error: %s", e)
         return None
 
 
 def is_available() -> bool:
-    """Check whether preferred commentary backend is reachable."""
+    """True if any commentary backend is likely usable."""
     if AGENT_URL:
         try:
             headers = {}
             if AGENT_TOKEN:
                 headers["authorization"] = f"Bearer {AGENT_TOKEN}"
             resp = requests.get(AGENT_URL, headers=headers, timeout=5)
-            # Many webhook endpoints may not support GET but still be alive.
-            return resp.status_code < 500
+            if resp.status_code < 500:
+                return True
+        except Exception:
+            pass
+
+    if _llm_backend() in _LLM_BACKENDS_NPU:
+        try:
+            import npu_genai_client
+
+            if npu_genai_client.is_available():
+                return True
+        except Exception:
+            pass
+
+    if ANTHROPIC_KEY:
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": MODEL,
+                    "max_tokens": 5,
+                    "messages": [{"role": "user", "content": "ping"}],
+                },
+                timeout=10,
+            )
+            return resp.ok
         except Exception:
             return False
 
-    if not ANTHROPIC_KEY:
-        return False
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "max_tokens": 5,
-                "messages": [{"role": "user", "content": "ping"}],
-            },
-            timeout=10,
-        )
-        return resp.ok
-    except Exception:
-        return False
+    return False

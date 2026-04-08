@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Add project dir to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -430,6 +430,10 @@ class OverseerHandler(BaseHTTPRequestHandler):
                 "last_eval_time": last_eval_time,
                 "open_trades": len(trade_state),
                 "state": {str(k): v for k, v in trade_state.items()},
+                "ft_instances": [i["name"] for i in config.FT_INSTANCES],
+                "data_dir": config.DATA_DIR,
+                "http_host": config.HTTP_HOST,
+                "http_port": config.HTTP_PORT,
             })
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -453,8 +457,16 @@ class OverseerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/evaluate":
-            # Run evaluation in a thread to not block HTTP
-            result = run_evaluation(force=True)
+            try:
+                result = run_evaluation(force=True)
+            except Exception as e:
+                logger.exception("POST /evaluate failed")
+                err = json.dumps({"error": str(e), "commentary": ""})
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
             body = json.dumps({"commentary": result or "No trades to evaluate."})
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -474,8 +486,8 @@ class OverseerHandler(BaseHTTPRequestHandler):
 
 
 def start_http_server():
-    """Start HTTP server in background thread."""
-    server = HTTPServer((config.HTTP_HOST, config.HTTP_PORT), OverseerHandler)
+    """Start HTTP server in background thread (threading per request so /evaluate cannot block other clients)."""
+    server = ThreadingHTTPServer((config.HTTP_HOST, config.HTTP_PORT), OverseerHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info(f"HTTP server on {config.HTTP_HOST}:{config.HTTP_PORT}")
@@ -486,6 +498,13 @@ def start_http_server():
 # ---------------------------------------------------------------------------
 def main():
     logger.info("Trade Overseer starting...")
+    logger.info(
+        "Scope: Freqtrade instances=%s | DATA_DIR=%s | HTTP %s:%s (SYGNIF_OVERSEER_INSTANCE / OVERSEER_HTTP_PORT / OVERSEER_HTTP_HOST)",
+        [i["name"] for i in config.FT_INSTANCES],
+        config.DATA_DIR,
+        config.HTTP_HOST,
+        config.HTTP_PORT,
+    )
 
     # Load persisted state
     load_state()
@@ -495,7 +514,7 @@ def main():
 
     # Check dependencies
     claude_ok = llm_client.is_available()
-    logger.info(f"Claude Haiku: {'OK' if claude_ok else 'UNAVAILABLE (will use rules-only fallback)'}")
+    logger.info(f"LLM backend: {'OK' if claude_ok else 'UNAVAILABLE (will use rules-only fallback)'}")
 
     for inst in config.FT_INSTANCES:
         ok = ft_client.is_available(inst)
