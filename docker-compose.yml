@@ -53,3 +53,23 @@ services:
     ports:
       - "127.0.0.1:8089:8089"
     command: python3 /app/notification_handler.py --port 8089
+
+  trade-overseer:
+    build:
+      context: .
+      dockerfile: "./trade_overseer/Dockerfile"
+    restart: unless-stopped
+    container_name: trade-overseer
+    env_file:
+      - .env
+    environment:
+      FT_SPOT_URL: "http://freqtrade:8080/api/v1"
+      FT_FUTURES_URL: "http://freqtrade-futures:8081/api/v1"
+      OVERSEER_HTTP_HOST: "0.0.0.0"
+    volumes:
+      - "./trade_overseer/data:/app/trade_overseer/data"
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      - freqtrade
+      - freqtrade-futures

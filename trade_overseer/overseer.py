@@ -475,10 +475,10 @@ class OverseerHandler(BaseHTTPRequestHandler):
 
 def start_http_server():
     """Start HTTP server in background thread."""
-    server = HTTPServer(("127.0.0.1", config.HTTP_PORT), OverseerHandler)
+    server = HTTPServer((config.HTTP_HOST, config.HTTP_PORT), OverseerHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info(f"HTTP server on :{config.HTTP_PORT}")
+    logger.info(f"HTTP server on {config.HTTP_HOST}:{config.HTTP_PORT}")
 
 
 # ---------------------------------------------------------------------------

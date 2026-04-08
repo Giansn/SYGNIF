@@ -23,8 +23,22 @@ SygnifStrategy.py          Main strategy (shared by both containers)
 |-----------|------|------|--------|----------|----|
 | `freqtrade` | Spot | 8080 | `user_data/config.json` | `@sygnif_bot` | `tradesv3.sqlite` |
 | `freqtrade-futures` | Futures | 8081 | `user_data/config_futures.json` | `@sygnifuture_bot` | `tradesv3-futures.sqlite` |
+| `trade-overseer` | Monitor | 8090 | `trade_overseer/overseer.py` | `@Sygnif_hedge_bot` | `trade_overseer/data` |
 
 Both mount the same `./user_data` volume and share the strategy file. The compact `/status` patch is auto-applied on container start via the entrypoint.
+
+### Trade Overseer (agent endpoint first)
+
+`trade-overseer` is dockerized and can run without direct Claude API usage.
+
+- Preferred: set `OVERSEER_AGENT_URL` (plus optional `OVERSEER_AGENT_TOKEN`) to your agent endpoint.
+- Fallback: if no endpoint, it can still use `ANTHROPIC_API_KEY` (legacy path).
+- Final fallback: rules-only summary if no model backend is reachable.
+
+Overseer Telegram token priority:
+1. `SYGNIF_HEDGE_BOT_TOKEN` (recommended)
+2. `FINANCE_BOT_TOKEN`
+3. `TELEGRAM_BOT_TOKEN`
 
 ## Dashboards
 

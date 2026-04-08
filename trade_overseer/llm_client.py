@@ -1,4 +1,10 @@
-"""Claude Haiku client for trade commentary (replaces Plutus-3B/Ollama)."""
+"""Overseer commentary client.
+
+Priority:
+1) External agent webhook (Cursor Cloud/worker)
+2) Anthropic Claude API (legacy fallback)
+3) None (rules-only fallback in overseer)
+"""
 import logging
 import os
 
@@ -8,6 +14,8 @@ logger = logging.getLogger("overseer.llm")
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = "claude-haiku-4-5-20251001"
+AGENT_URL = os.environ.get("OVERSEER_AGENT_URL", "").strip()
+AGENT_TOKEN = os.environ.get("OVERSEER_AGENT_TOKEN", "").strip()
 
 SYSTEM_PROMPT = """Freqtrade bot monitor (spot [s] + futures [f], Bybit).
 Input: TA briefing lines then trade lines with P&L delta.
@@ -26,12 +34,33 @@ FART[f] -2.4% (was -2.1%): CUT — TA:31 RSI 38 weak, no support."""
 
 
 def evaluate(prompt: str, timeout: int = 30) -> str | None:
-    """Send prompt to Claude Haiku for trade evaluation.
+    """Send prompt to configured overseer model endpoint.
 
     Returns None if API unavailable — caller falls back to rules-only.
     """
+    # Preferred path: external agent endpoint.
+    if AGENT_URL:
+        try:
+            headers = {"content-type": "application/json"}
+            if AGENT_TOKEN:
+                headers["authorization"] = f"Bearer {AGENT_TOKEN}"
+            resp = requests.post(
+                AGENT_URL,
+                headers=headers,
+                json={"prompt": prompt, "source": "trade_overseer"},
+                timeout=timeout,
+            )
+            if resp.ok:
+                data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
+                text = data.get("commentary") or data.get("text") or (resp.text or "").strip()
+                return text.strip() if text else None
+            logger.error(f"Agent endpoint error: {resp.status_code} {resp.text[:120]}")
+        except Exception as e:
+            logger.error(f"Agent endpoint failure: {e}")
+
+    # Legacy fallback: Anthropic direct.
     if not ANTHROPIC_KEY:
-        logger.warning("ANTHROPIC_API_KEY not set, skipping LLM eval")
+        logger.warning("No OVERSEER_AGENT_URL or ANTHROPIC_API_KEY, skipping LLM eval")
         return None
 
     try:
@@ -63,7 +92,18 @@ def evaluate(prompt: str, timeout: int = 30) -> str | None:
 
 
 def is_available() -> bool:
-    """Check if Claude API is reachable."""
+    """Check whether preferred commentary backend is reachable."""
+    if AGENT_URL:
+        try:
+            headers = {}
+            if AGENT_TOKEN:
+                headers["authorization"] = f"Bearer {AGENT_TOKEN}"
+            resp = requests.get(AGENT_URL, headers=headers, timeout=5)
+            # Many webhook endpoints may not support GET but still be alive.
+            return resp.status_code < 500
+        except Exception:
+            return False
+
     if not ANTHROPIC_KEY:
         return False
     try:
