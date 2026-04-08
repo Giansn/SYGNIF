@@ -54,6 +54,8 @@ services:
       - "127.0.0.1:8089:8089"
     command: python3 /app/notification_handler.py --port 8089
 
+  # Trade overseer: same Docker network as Freqtrade APIs (not 127.0.0.1 from host).
+  # NPU/OpenVINO: run overseer on host if needed; this image is requests-only.
   trade-overseer:
     build:
       context: .
@@ -66,10 +68,12 @@ services:
       FT_SPOT_URL: "http://freqtrade:8080/api/v1"
       FT_FUTURES_URL: "http://freqtrade-futures:8081/api/v1"
       OVERSEER_HTTP_HOST: "0.0.0.0"
-    volumes:
-      - "./trade_overseer/data:/app/trade_overseer/data"
+      # Finance agent on host (Docker Desktop). Linux: set in .env or use extra_hosts.
+      FINANCE_AGENT_BRIEFING_URL: "http://host.docker.internal:8091/briefing"
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:
       - freqtrade
       - freqtrade-futures
+    volumes:
+      - "./trade_overseer/data:/app/trade_overseer/data"

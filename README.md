@@ -35,6 +35,8 @@ Both mount the same `./user_data` volume and share the strategy file. The compac
 - Fallback: if no endpoint, it can still use `ANTHROPIC_API_KEY` (legacy path).
 - Final fallback: rules-only summary if no model backend is reachable.
 
+`docker compose up` wires **`trade-overseer`** with **`FT_SPOT_URL` / `FT_FUTURES_URL`** pointing at the **`freqtrade`** and **`freqtrade-futures`** service names (not `127.0.0.1`), **`OVERSEER_HTTP_HOST=0.0.0.0`**, and **`FINANCE_AGENT_BRIEFING_URL`** defaulting to **`host.docker.internal`** so TA briefing can reach a finance agent running on the host.
+
 Overseer Telegram token priority:
 1. `SYGNIF_HEDGE_BOT_TOKEN` (recommended)
 2. `FINANCE_BOT_TOKEN`

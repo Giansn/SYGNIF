@@ -156,7 +156,10 @@ def check_events(trades: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Finance Agent briefing
 # ---------------------------------------------------------------------------
-FA_BRIEFING_URL = "http://127.0.0.1:8091/briefing"
+FA_BRIEFING_URL = os.environ.get(
+    "FINANCE_AGENT_BRIEFING_URL",
+    "http://127.0.0.1:8091/briefing",
+).strip()
 
 
 def _fetch_briefing(symbols: list[str]) -> str:
