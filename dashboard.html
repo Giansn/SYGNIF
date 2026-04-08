@@ -807,7 +807,7 @@ function buildGranularData(days) {
   }
   if (!equity && dailyRows.length) equity = Number(dailyRows[0].starting_balance) || 0;
 
-  const STEP = 15 * 60000;
+  const STEP = (days <= 1 ? 5 : 15) * 60000;
   const values = [], labels = [];
   let ti = 0, prevDay = '';
 
