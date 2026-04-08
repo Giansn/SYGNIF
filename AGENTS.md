@@ -99,3 +99,40 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Cursor Cloud specific instructions
+
+### Overview
+
+Sygnif is a dual-mode (spot + futures) Freqtrade crypto trading bot with Claude AI sentiment analysis, running on Bybit. The codebase is Python-only; Freqtrade itself runs inside Docker containers.
+
+### Running tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+Tests stub out `freqtrade`, `talib`, and `feedparser` via `tests/conftest.py`, so they run without Docker or exchange connectivity. All 90 tests should pass.
+
+### Linting
+
+No formal linter config exists in the repo. For basic checks:
+
+```bash
+flake8 --max-line-length=150 --select=E9,F63,F7,F82 SygnifStrategy.py notification_handler.py tests/
+```
+
+### Docker build & run
+
+The full stack (`docker compose up -d`) requires:
+- `.env` file (copy from `.env.example`)
+- `user_data/config.json` (copy from `config_claude_bot.example.json`)
+
+Both freqtrade containers need valid Bybit API keys to fetch market data (even in `dry_run: true` mode). The notification-handler requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Without these credentials, containers will start but fail at runtime.
+
+### Gotchas
+
+- `requirements.txt` pins `pandas_ta>=0.3.14` but the latest release is a beta (`0.4.x`). Install with `pip install --pre` or install `pandas_ta` separately: `pip install pandas_ta` (pip resolves to the beta automatically).
+- `SygnifStrategy.py` exists in **two locations** (root and `user_data/strategies/`). Always keep them in sync after edits.
+- The strategy is loaded once at container startup. Code changes require `docker compose restart freqtrade freqtrade-futures`.
+- Cloud VM geo-restrictions may block Bybit API calls via CloudFront (403). This is an environment limitation, not a code bug.
