@@ -642,9 +642,9 @@ tr:hover td { background: #ffffff04; }
       <div class="sec-t">Portfolio development</div>
       <div style="display:flex;align-items:center;gap:10px">
         <div class="tf-btns">
-          <button class="tf-btn" data-tf="1">1D</button>
+          <button class="tf-btn active" data-tf="1">1D</button>
           <button class="tf-btn" data-tf="7">7D</button>
-          <button class="tf-btn active" data-tf="30">30D</button>
+          <button class="tf-btn" data-tf="30">30D</button>
         </div>
         <div class="sec-count" id="chart-range">30d · equity</div>
       </div>
@@ -709,7 +709,7 @@ const API = window.location.origin;
 let tk = '';
 let closedTradesAll = [];
 let closedShowAll = false;
-let chartTF = 30;
+let chartTF = 1;
 let _dailyCache = null;
 let _tradesCache = [];
 
@@ -859,7 +859,7 @@ function updatePortfolioChart() {
   const span = Math.max(max - min, 1e-8);
   const n = vals.length;
   const trend = vals[n - 1] >= vals[0];
-  const lnColor = trend ? 'var(--g)' : 'var(--r)';
+  const lnColor = 'var(--ac)';
 
   const pts = vals.map((v, i) => {
     const x = padX + (i / (n - 1)) * cW;
