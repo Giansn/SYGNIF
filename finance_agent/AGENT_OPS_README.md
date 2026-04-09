@@ -4,6 +4,7 @@ This folder centralizes the Cursor Cloud finance-agent operating assets directly
 
 ## Included
 
+- `auto_improvement_workflow.md`: End-to-end **auto improvement** loop (agents, GitNexus nodes, approval gates, mermaid)
 - `cloud-runbook.md`: Cloud system prompt + JSON output contract
 - `futures-agent-prompt.md`: Futures analysis prompt with BTC dependency and strategy-tag comparison
 - `spot-agent-prompt.md`: Spot analysis prompt with BTC dependency and strategy-tag comparison
