@@ -1254,9 +1254,17 @@ class SygnifStrategy(IStrategy):
         # TA score for all rows
         ta_score = self._calculate_ta_score_vectorized(df)
 
-        # Strong TA signal — TA >= strong_ta_min_score + volume confirmation
+        # Strong TA — TA >= min + volume; skip chasing when 1h RSI is extremely overbought
         vol_ok = df["volume"] > (df["volume_sma_25"] * self.vol_strong_mult)
-        strong = prot & empty_ok & (ta_score >= self.strong_ta_min_score) & vol_ok
+        r1h = df.get("RSI_14_1h", pd.Series(50.0, index=df.index)).fillna(50.0)
+        strong_ta_htf_ok = r1h < 72.0
+        strong = (
+            prot
+            & empty_ok
+            & (ta_score >= self.strong_ta_min_score)
+            & vol_ok
+            & strong_ta_htf_ok
+        )
         df.loc[strong, "enter_long"] = 1
         df.loc[strong, "enter_tag"] = "strong_ta"
 
@@ -1310,10 +1318,16 @@ class SygnifStrategy(IStrategy):
 
         prot_short = df.get("protections_short_global", pd.Series(True, index=df.index))
 
-        # Strong TA short — same volume confirmation as strong_ta long (avoid illiquid chop)
+        # Strong TA short — volume gate; skip when 4h is extremely oversold (violent bounce risk)
         vol_ok_short = df["volume"] > (df["volume_sma_25"] * self.vol_strong_mult)
+        r4h = df.get("RSI_14_4h", pd.Series(50.0, index=df.index)).fillna(50.0)
+        strong_short_htf_ok = r4h > 28.0
         strong_short = (
-            prot_short & empty_ok & (ta_score <= self.strong_ta_short_max_score) & vol_ok_short
+            prot_short
+            & empty_ok
+            & (ta_score <= self.strong_ta_short_max_score)
+            & vol_ok_short
+            & strong_short_htf_ok
         )
         df.loc[strong_short, "enter_short"] = 1
         df.loc[strong_short, "enter_tag"] = "strong_ta_short"
@@ -1428,8 +1442,8 @@ class SygnifStrategy(IStrategy):
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(df) > 0 and "volume_sma_25" in df.columns:
                 vol_avg = df.iloc[-1].get("volume_sma_25", 0)
-                if vol_avg < 25000:
-                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 25k, skipping")
+                if vol_avg < 50000:
+                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 50k, skipping")
                     return False
 
         return True

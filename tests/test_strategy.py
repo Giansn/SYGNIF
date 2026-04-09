@@ -119,6 +119,21 @@ class TestEntryPaths:
         strong = result[result["enter_tag"] == "strong_ta"]
         assert len(strong) > 0
 
+    def test_strong_ta_skips_extreme_1h_overbought(self, strategy, make_df):
+        """1h RSI >= 72 blocks strong_ta long (no chase into HTF extension)."""
+        df = make_df(
+            RSI_14=25.0, RSI_3=8.0,
+            CMF_20=0.20,
+            AROONU_14=85.0, AROOND_14=20.0,
+            STOCHRSIk_14_14_3_3=15.0,
+            RSI_14_1h=75.0,
+        )
+        df["EMA_9"] = df["close"] + 1
+        df["EMA_26"] = df["close"] - 1
+
+        result = strategy.populate_entry_trend(df, {"pair": "BTC/USDT"})
+        assert (result["enter_tag"] == "strong_ta").sum() == 0
+
     def test_no_entry_when_protections_fail(self, strategy, make_df):
         df = make_df(
             RSI_14=25.0, RSI_3=1.0,  # would be bullish but...
@@ -151,6 +166,18 @@ class TestEntryPaths:
         last = result.iloc[-1]
         assert last["enter_short"] == 1
         assert last["enter_tag"] in ("swing_failure_short", "claude_swing_short", "strong_ta_short")
+
+    def test_strong_ta_short_skips_extreme_4h_oversold(self, strategy, make_df):
+        """4h RSI <= 28 blocks strong_ta_short (bounce risk)."""
+        strategy.can_short = True
+        df = make_df(
+            RSI_14=75.0, RSI_3=92.0,
+            RSI_14_4h=22.0,
+        )
+        df["volume"] = df["volume_sma_25"] * 2.0
+
+        result = strategy.populate_entry_trend(df, {"pair": "ETH/USDT"})
+        assert (result["enter_tag"] == "strong_ta_short").sum() == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -496,6 +523,36 @@ class TestSlotCaps:
         Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
         result = strategy.confirm_trade_entry(
             "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta_short", "short")
+        assert result is True
+
+    def test_futures_volume_gate_blocks_below_50k(self, strategy, make_df):
+        strategy.config = {"trading_mode": "futures"}
+        df = make_df()
+        df.loc[df.index[-1], "volume_sma_25"] = 40000.0
+        strategy.dp = type("DP", (), {
+            "get_analyzed_dataframe": lambda self, pair, tf: (df, None)
+        })()
+        from freqtrade.persistence import Trade
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: [])
+
+        result = strategy.confirm_trade_entry(
+            "LOWVOL/USDT:USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long",
+        )
+        assert result is False
+
+    def test_futures_volume_gate_allows_at_50k(self, strategy, make_df):
+        strategy.config = {"trading_mode": "futures"}
+        df = make_df()
+        df.loc[df.index[-1], "volume_sma_25"] = 50000.0
+        strategy.dp = type("DP", (), {
+            "get_analyzed_dataframe": lambda self, pair, tf: (df, None)
+        })()
+        from freqtrade.persistence import Trade
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: [])
+
+        result = strategy.confirm_trade_entry(
+            "OKVOL/USDT:USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long",
+        )
         assert result is True
 
 
