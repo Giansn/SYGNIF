@@ -16,7 +16,7 @@ Cloud Agents on this worker should **read and follow** these assets for finance/
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationships, 47 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **xrp_claude_bot** (1336 symbols, 2877 relationships, 112 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

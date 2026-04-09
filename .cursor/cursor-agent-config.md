@@ -30,7 +30,9 @@ Optional: `OLLAMA_MODEL` nur als Fallback, wenn `CURSOR_*` fehlen.
 
 ## Projektregeln
 
-`.cursor/rules/sygnif-agent-inherit.mdc`
+- `.cursor/rules/sygnif-agent-inherit.mdc`
+- `.cursor/rules/sygnif-linear-workflow.mdc` — linearer Ablauf (ein Einstieg → sequentielle Daten → Antwort)
+- `.cursor/rules/sygnif-predict-workflow.mdc`
 
 ## Workflow-Schleife (Finance Agent ↔ Cursor ↔ Overseer)
 

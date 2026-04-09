@@ -1,7 +1,11 @@
+# Host-only Trade Overseer. Do NOT enable alongside docker-compose `trade-overseer`:
+# both bind 127.0.0.1:8090 → systemd unit will crash-loop with "Address already in use".
+# Production here uses Docker (see repo docker-compose.yml). For host-only: stop/disable
+# the container first, then enable this unit.
 [Unit]
-Description=Sygnif Trade Overseer (Plutus-3B)
-After=docker.service ollama.service
-Wants=ollama.service
+Description=Sygnif Trade Overseer (HTTP API for finance_agent)
+After=docker.service network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

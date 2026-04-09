@@ -70,8 +70,11 @@ services:
       OVERSEER_HTTP_HOST: "0.0.0.0"
       # Finance agent on host (Docker Desktop). Linux: set in .env or use extra_hosts.
       FINANCE_AGENT_BRIEFING_URL: "http://host.docker.internal:8091/briefing"
+      OVERSEER_AGENT_URL: "http://host.docker.internal:8091/overseer/commentary"
     ports:
       - "127.0.0.1:8090:8090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - freqtrade
       - freqtrade-futures

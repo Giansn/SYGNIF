@@ -1,0 +1,49 @@
+---
+description: Linear pipeline — Cursor entry → classify → data (sequential) → synthesize; no parallel forks
+alwaysApply: true
+---
+
+# Sygnif: linear workflow
+
+Use this **ordered pipeline** when handling Sygnif/trading/finance tasks so work stays **one-direction** and **debuggable**. It complements `sygnif-predict-workflow.mdc` (Predict → Analyze → Proofread → Adjust) and `sygnif-agent-inherit.mdc`.
+
+## 0. Single entry
+
+- **Cursor** (IDE Agent or `cursor-agent-worker` on `~/xrp_claude_bot`) is the **only coordinator** for chat history, slash-style commands, and “what to do next.”
+- Do **not** spawn a second parallel reasoning path (e.g. duplicate LLM chains) unless the user explicitly asks for comparison.
+
+## 1. Classify (one pass)
+
+| Kind of request | Next step |
+|-----------------|-----------|
+| Scenarios, levels, horizon, TA write-up | `sygnif-predict-workflow.mdc` |
+| Strategy behaviour, tags, rails | `user_data/strategies/SygnifStrategy.py` + `strategy_adaptation.json` contract |
+| Live context: open plays, trade summary, overseer views | Step 3c when needed |
+| Telegram parity / bot semantics | `finance_agent/bot.py` and related `finance_agent/*.md` |
+
+## 2. Local / repo (always first data step)
+
+- Confirm **worker** health if relevant: `http://127.0.0.1:8093/healthz`.
+- Read only the **files** needed from this repo — no broad codebase grep “just in case.”
+
+## 3. External facts (**sequential** — skip what you do not need)
+
+Do **not** call all of these every time. Stop when you have enough to answer.
+
+1. **Finance agent HTTP** (`finance-agent.service`, briefing on `:8091`) — only when Telegram/HTTP behaviour or server-side routing matters.
+2. **Overseer** — `OVERSEER_URL` or default `http://127.0.0.1:8090`: `/overview`, `/plays`, `/trades` as needed. Container `trade-overseer` is authoritative; do not assume the host `trade-overseer.service` is running.
+
+## 4. Synthesize
+
+- One coherent answer in Cursor; **compact**, mobile-friendly where appropriate.
+- Cite **concrete** sources (file paths, endpoint path, or service name).
+
+## 5. Persist (optional, last)
+
+- Updates to **`user_data/strategy_adaptation.json`** only **after** analysis, and only within bounds in `user_data/strategy_adaptation.py` — see `sygnif-agent-inherit.mdc`.
+
+## Anti-patterns
+
+- Parallel “full scans” of EC2, repo, and all HTTP APIs for every question.
+- Inventing overseer or Freqtrade state without reading API/logs.
+- Bypassing adaptation rails in strategy code when JSON overrides exist for the same intent.
