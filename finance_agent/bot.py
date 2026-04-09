@@ -21,10 +21,13 @@ Commands:
 """
 
 import base64
+import importlib.util
 import json
 import logging
 import os
+import subprocess
 import sys
+import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -77,9 +80,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _sygnif_repo() -> Path:
+    """Freqtrade repo with `user_data/` (strategy_adaptation.json, advisor_state.json)."""
+    return Path(os.environ.get("SYGNIF_REPO", "/home/ubuntu/xrp_claude_bot")).resolve()
+
+
 def cmd_strategy_analytics() -> str:
     """Runtime strategy adaptation JSON + path (SygnifStrategy hot-reload)."""
-    p = _repo_root() / "user_data" / "strategy_adaptation.json"
+    p = _sygnif_repo() / "user_data" / "strategy_adaptation.json"
     if not p.is_file():
         return f"*Strategy analytics*\n`{p}` — _not present_ (defaults from strategy class).\n"
     try:
@@ -98,6 +106,188 @@ def cmd_strategy_analytics() -> str:
         return f"*Strategy adaptation*\n```json\n{json.dumps(data, indent=2)[:3500]}\n```"
     except Exception as e:
         return f"*Strategy analytics* — read error: `{e}`"
+
+
+def cmd_sygnif_state() -> str:
+    """Last advisor observer snapshot (JSON file, no LLM)."""
+    p = _sygnif_repo() / "user_data" / "advisor_state.json"
+    if not p.is_file():
+        return (
+            f"*Advisor state* — `{p.name}` not yet written. "
+            f"Set `ADVISOR_BG_INTERVAL_SEC` (>0) in `.env` or run:\n"
+            f"`python3 {_sygnif_repo() / 'scripts' / 'sygnif_advisor_observer.py'}`"
+        )
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return f"*Advisor state* — read error: `{e}`"
+    if len(raw) > 3800:
+        raw = raw[:3800] + "\n…(truncated)"
+    return f"*Advisor state* (`{p.name}`)\n```json\n{raw}\n```"
+
+
+def cmd_sygnif_pending() -> str:
+    """Show queued proposals (apply with `/sygnif approve <id>`)."""
+    p = _sygnif_repo() / "user_data" / "advisor_pending.json"
+    if not p.is_file():
+        return "*Advisor pending* — no queue file yet (observer may add heuristics when `ADVISOR_HEURISTICS=1`)."
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return f"*Advisor pending* — `{e}`"
+    items = [x for x in data.get("items", []) if x.get("status") == "pending"]
+    if not items:
+        return "*Advisor pending* — no *pending* items (all applied or empty)."
+    lines = [f"*Pending proposals* ({len(items)})\n"]
+    for it in items[:15]:
+        iid = it.get("id", "?")
+        lines.append(f"• `{iid}` — {it.get('reason', '')[:200]}")
+        lines.append(f"  overrides: `{it.get('proposed_overrides')}`")
+    lines.append("\nApply: `/sygnif approve <id>` (merges into `strategy_adaptation.json`).")
+    return "\n".join(lines)
+
+
+def cmd_sygnif_approve(item_id: str) -> str:
+    """Merge validated proposed_overrides into strategy_adaptation.json; mark item applied."""
+    item_id = (item_id or "").strip()
+    if not item_id:
+        return "Usage: `/sygnif approve <id>` — see `/sygnif pending`"
+
+    pend_path = _sygnif_repo() / "user_data" / "advisor_pending.json"
+    adapt_path = _sygnif_repo() / "user_data" / "strategy_adaptation.json"
+    mod_path = _sygnif_repo() / "user_data" / "strategy_adaptation.py"
+
+    if not pend_path.is_file():
+        return "*approve* — no `advisor_pending.json`"
+
+    try:
+        data = json.loads(pend_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return f"*approve* — pending read error: `{e}`"
+
+    items = data.get("items", [])
+    hit = None
+    for it in items:
+        if it.get("id") == item_id and it.get("status") == "pending":
+            hit = it
+            break
+    if not hit:
+        return f"*approve* — no pending item `{item_id}`"
+
+    prop = hit.get("proposed_overrides") or {}
+    if not isinstance(prop, dict) or not prop:
+        return "*approve* — empty `proposed_overrides`"
+
+    spec = importlib.util.spec_from_file_location("_sygnif_sa", mod_path)
+    if spec is None or spec.loader is None:
+        return "*approve* — cannot load `strategy_adaptation.py`"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    validated = mod.validate_overrides(prop)
+    if not validated:
+        return "*approve* — nothing valid after clamp (check BOUNDS)."
+
+    base: dict = {}
+    if adapt_path.is_file():
+        try:
+            base = json.loads(adapt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            base = {}
+    if not isinstance(base, dict):
+        base = {}
+    ovr = base.get("overrides")
+    if not isinstance(ovr, dict):
+        ovr = {}
+    ovr.update(validated)
+    base["overrides"] = ovr
+    base["updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    base["source"] = "advisor_approve"
+    base["reason"] = f"approved {item_id}: {(hit.get('reason') or '')[:220]}"
+
+    tmp = adapt_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(base, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(adapt_path)
+
+    hit["status"] = "applied"
+    hit["applied_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pend_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return (
+        f"*Applied* `{item_id}` → `{validated}`\n"
+        f"_Freqtrade picks up overrides in ~60s (no restart)._"
+    )
+
+
+def _try_sygnif_direct(text: str) -> str | None:
+    """Non-LLM /sygnif subcommands for deterministic ops."""
+    parts = text.strip().split()
+    if len(parts) < 2:
+        return None
+    root = parts[0].lower().split("@")[0]
+    if root != "/sygnif":
+        return None
+    sub = parts[1].lower().split("@")[0]
+    if sub == "state":
+        return cmd_sygnif_state()
+    if sub == "pending":
+        return cmd_sygnif_pending()
+    if sub == "approve" and len(parts) >= 3:
+        return cmd_sygnif_approve(parts[2])
+    return None
+
+
+def _start_advisor_background() -> None:
+    """Periodic observer: writes advisor_state.json (+ optional heuristics → advisor_pending.json)."""
+    interval = int(os.environ.get("ADVISOR_BG_INTERVAL_SEC", "3600"))
+    if interval <= 0:
+        logger.info("Advisor background: disabled (ADVISOR_BG_INTERVAL_SEC<=0)")
+        return
+
+    script = _sygnif_repo() / "scripts" / "sygnif_advisor_observer.py"
+    every_n = int(os.environ.get("ADVISOR_TELEGRAM_EVERY_N", "0"))
+
+    def _loop():
+        n = 0
+        while True:
+            time.sleep(interval)
+            n += 1
+            try:
+                env = {**os.environ, "SYGNIF_REPO": str(_sygnif_repo())}
+                subprocess.run(
+                    [sys.executable, str(script)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                    check=False,
+                )
+                logger.info("Advisor observer tick ok (interval=%ss)", interval)
+            except Exception as e:
+                logger.error("Advisor observer: %s", e)
+            try:
+                if os.environ.get("ADVISOR_BG_TELEGRAM", "").strip() not in ("1", "true", "yes"):
+                    continue
+                if every_n > 0 and (n % every_n != 0):
+                    continue
+                ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
+                tg_send(
+                    f"*Advisor* — tick {ts}\n"
+                    f"State → `{_sygnif_repo()}/user_data/advisor_state.json`\n"
+                    f"`/sygnif state` · `/sygnif pending`",
+                    reply_markup=KEYBOARD,
+                )
+            except Exception as e:
+                logger.error("Advisor telegram digest: %s", e)
+
+    t = threading.Thread(target=_loop, name="sygnif-advisor", daemon=True)
+    t.start()
+    logger.info(
+        "Advisor background: every %ss → %s (telegram digest=%s, every_n=%s)",
+        interval,
+        script,
+        os.environ.get("ADVISOR_BG_TELEGRAM", "0"),
+        every_n,
+    )
 
 
 def gather_sygnif_cycle() -> str:
@@ -1705,6 +1895,9 @@ def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
         "`/sygnif` / `/cursor` — **Zyklus:** Cursor-Worker + Overseer + Strategie-Adaptation + Signals + Tendency + Macro (ein Kontext für das LLM)\n"
+        "`/sygnif state` — letzter Observer-Snapshot (`advisor_state.json`, kein LLM)\n"
+        "`/sygnif pending` — Warteschlange für Live-Overrides (`advisor_pending.json`)\n"
+        "`/sygnif approve <id>` — freigegebene Overrides → `strategy_adaptation.json` (Hot-Reload)\n"
         "`/sygnif analytics` — Nur Runtime-Overrides (`strategy_adaptation.json`)\n"
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
@@ -2372,6 +2565,7 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
             if sub == "help":
                 return (
                     "`/sygnif` — voller Zyklus (Worker + Overseer + Adaptation + Signals + Tendency + Macro).\n"
+                    "`/sygnif state|pending|approve <id>` — Observer / Freigabe (ohne LLM; siehe /fa_help).\n"
                     "`/sygnif analytics` — nur `strategy_adaptation.json`.\n"
                     "`/sygnif tendency|signals|macro|finance [args]` — Teilmodul.\n"
                     "`/cursor` — Alias wie `/sygnif`."
@@ -2436,12 +2630,20 @@ def agent_slash_dispatch(chat_id: str, full_text: str) -> str:
 
 
 def handle_command(text: str, chat_id: str) -> tuple[str, object, str] | None:
-    """Alle Slash-Befehle: Loading → eine LLM-Antwort (agent_slash_dispatch)."""
+    """Slash-Befehle: wo möglich deterministisch; sonst LLM (agent_slash_dispatch)."""
     if not text.strip().startswith("/"):
         return None
+    stripped = text.strip()
+    direct = _try_sygnif_direct(stripped)
+    if direct is not None:
+        return (
+            "📋 Sygnif (direct)",
+            lambda _a: direct,
+            "",
+        )
     return (
         "\U0001f916 Sygnif Agent…",
-        lambda _a: agent_slash_dispatch(chat_id, text.strip()),
+        lambda _a: agent_slash_dispatch(chat_id, stripped),
         "",
     )
 
@@ -2450,7 +2652,6 @@ def handle_command(text: str, chat_id: str) -> tuple[str, object, str] | None:
 # HTTP server for overseer integration (:8091)
 # ---------------------------------------------------------------------------
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 import json as _json
 
 
@@ -2546,6 +2747,7 @@ def main():
         sys.exit(1)
 
     _start_http()
+    _start_advisor_background()
 
     logger.info("Finance Agent started. Polling for commands...")
     tg_send("Finance Agent online.", reply_markup=KEYBOARD)

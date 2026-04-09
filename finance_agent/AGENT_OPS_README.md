@@ -21,7 +21,8 @@ This folder centralizes the Cursor Cloud finance-agent operating assets directly
 
 ## Workflow loop (Telegram / Cursor / Overseer)
 
-- **Single LLM entry:** Alle Slash-Befehle laufen über `agent_slash_dispatch` → Cursor Cloud (`llm_analyze`); Freitext nutzt denselben LLM mit Session-Verlauf.
-- **Cycle bundle:** `/sygnif` oder `/cursor` lädt Worker-Health, Overseer `/overview` + `/trades`, `user_data/strategy_adaptation.json` (Analytics), dann Signals / Tendency / Macro — ein Kontextstring für die Antwort.
-- **Env:** `OVERSEER_URL` (default `http://127.0.0.1:8090`), `CURSOR_WORKER_HEALTH_URL` (default `http://127.0.0.1:8093/healthz`).
+- **Single LLM entry:** Slash-Befehle laufen über `agent_slash_dispatch` → Cursor Cloud (`llm_analyze`); Ausnahme: **`/sygnif state`**, **`/sygnif pending`**, **`/sygnif approve <id>`** sind deterministisch (kein LLM).
+- **Cycle bundle:** `/sygnif` oder `/cursor` lädt Worker-Health, Overseer `/overview` + `/trades`, `strategy_adaptation.json` (über `SYGNIF_REPO`), dann Signals / Tendency / Macro — Kontext für die Antwort.
+- **Background observer:** `scripts/sygnif_advisor_observer.py` schreibt `user_data/advisor_state.json` (+ optional Heuristiken → `advisor_pending.json`). Der Telegram-Bot startet dazu einen Thread, wenn `ADVISOR_BG_INTERVAL_SEC` > 0 (Default **3600**). Freigabe: `/sygnif approve <id>` merged validierte Keys in `strategy_adaptation.json`.
+- **Env:** `SYGNIF_REPO` (default `/home/ubuntu/xrp_claude_bot`), `OVERSEER_URL`, `CURSOR_WORKER_HEALTH_URL`, optional `ADVISOR_BG_TELEGRAM=1` + `ADVISOR_TELEGRAM_EVERY_N`, `ADVISOR_HEURISTICS=0` zum Abschalten der Vorschläge.
 - Siehe auch `.cursor/cursor-agent-config.md`.
