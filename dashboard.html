@@ -59,6 +59,20 @@ body::before {
 /* Layout */
 .wrap { max-width: 1440px; margin: 0 auto; padding: 16px 20px; position: relative; z-index: 1; }
 
+/* Ops / strategy reset notice */
+.ops-banner {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--y-bd);
+  background: var(--y-bg);
+  color: var(--y);
+}
+.ops-banner strong { color: var(--t1); font-weight: 600; }
+
 /* Header */
 .head {
   display: flex;
@@ -613,6 +627,9 @@ tr:hover td { background: #ffffff04; }
 <!-- Dashboard -->
 <div class="wrap" id="dashboard">
   <div id="err"></div>
+  <div class="ops-banner" role="status">
+    <strong>Ops 2026-04-09</strong> — Alle offenen Trades per API geschlossen (<code>forceexit</code>, Spot: market). Strategie: <strong>SygnifStrategy</strong> (aktueller Code). Neue Positionen nur bei Bot-Signalen; Freqtrade-Logs unverändert unter <code>user_data/logs/</code>.
+  </div>
 
   <div class="head">
     <div class="logo">

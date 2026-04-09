@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated": "2026-04-08T20:05:00Z",
+  "source": "sygnif_agent",
+  "reason": "Slightly tighter ambiguous-long band and strong_ta bar +1 after predict/analyze/proofread (mixed 1h/4h, ambiguous_long-heavy setups).",
+  "overrides": {
+    "claude_long_score_low": 42,
+    "claude_long_score_high": 62,
+    "strong_ta_min_score": 66
+  }
+}

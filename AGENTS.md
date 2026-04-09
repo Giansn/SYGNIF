@@ -1,3 +1,18 @@
+# Sygnif Agent — Cursor Cloud Worker
+
+The private **Cursor Agent Worker** for this repository (`agent worker`, systemd `cursor-agent-worker`, workspace `~/xrp_claude_bot`) **is** the **Sygnif Agent** in Cursor. It **inherits** the full **finance agent** toolkit:
+
+| Path | Role |
+|------|------|
+| `finance_agent/bot.py` | Telegram-oriented command surface, TA/Bybit, LLM routing, research |
+| `finance_agent/mode_router.py` | `futures_long` / `futures_short` / `spot` routing |
+| `finance_agent/*.md` | Runbooks, ops, spot/futures prompts, strategy comparison, shorts module |
+| `finance_agent/AI Upload/` | Research workflows and agent prompts |
+
+Cloud Agents on this worker should **read and follow** these assets for finance/crypto tasks and align explanations with **`user_data/strategies/SygnifStrategy.py`**. Analysis-only for trading decisions unless the user requests code/config changes.
+
+---
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
@@ -17,7 +32,7 @@ This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationshi
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/sygnif/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/xrp_claude_bot/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -56,10 +71,10 @@ This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationshi
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/sygnif/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/sygnif/clusters` | All functional areas |
-| `gitnexus://repo/sygnif/processes` | All execution flows |
-| `gitnexus://repo/sygnif/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/xrp_claude_bot/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/xrp_claude_bot/clusters` | All functional areas |
+| `gitnexus://repo/xrp_claude_bot/processes` | All execution flows |
+| `gitnexus://repo/xrp_claude_bot/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 

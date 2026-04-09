@@ -482,6 +482,22 @@ class TestSlotCaps:
             "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta", "long")
         assert result is True
 
+    def test_strong_ta_short_cap_blocks_when_full(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["strong_ta_short"] * 6)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta_short", "short")
+        assert result is False
+
+    def test_strong_ta_short_cap_allows_under_limit(self, strategy):
+        from freqtrade.persistence import Trade
+        trades = self._make_open_trades(["strong_ta_short"] * 4)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        result = strategy.confirm_trade_entry(
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "strong_ta_short", "short")
+        assert result is True
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Info Timeframes config

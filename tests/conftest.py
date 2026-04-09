@@ -52,6 +52,11 @@ _feedparser = types.ModuleType("feedparser")
 _feedparser.parse = lambda url: types.SimpleNamespace(entries=[])
 sys.modules["feedparser"] = _feedparser
 
+# cursor_cloud_completion (repo module; optional outside Docker)
+_cc = types.ModuleType("cursor_cloud_completion")
+_cc.cursor_cloud_completion = lambda *args, **kwargs: ""
+sys.modules["cursor_cloud_completion"] = _cc
+
 # Now we can import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

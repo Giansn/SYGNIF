@@ -13,9 +13,14 @@ Commands:
   /plays           — AI investment opportunity scan
   /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
+  /deduce <text>   — Deductive chain (premises → conclusion, Sygnif-aware)
+  /ask <text>      — LLM via Cursor Cloud Agent API (optional: Ollama-Fallback)
+  Freitext         — Same as chat; context = Telegram-Verlauf (Session)
+  /clear           — Chat-Verlauf löschen
   /fa_help         — Show commands
 """
 
+import base64
 import json
 import logging
 import os
@@ -23,6 +28,7 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 import feedparser
 import numpy as np
@@ -38,10 +44,120 @@ logger = logging.getLogger("finance_agent")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TG_TOKEN = os.environ.get("FINANCE_BOT_TOKEN", "")
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
-ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+# Telegram: Sygnif Agent bot (@Sygnif_Agent_Bot) — AGENT_* in .env; legacy fallbacks.
+TG_TOKEN = (
+    os.environ.get("AGENT_BOT_TOKEN", "").strip()
+    or os.environ.get("SYGNIF_HEDGE_BOT_TOKEN", "").strip()
+    or os.environ.get("FINANCE_BOT_TOKEN", "").strip()
+)
+TG_CHAT = (
+    os.environ.get("AGENT_CHAT_ID", "").strip()
+    or os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+)
+# LLM: primär Cursor Cloud Agents API (gleiches Modell wie Sygnif über cursor-agent-worker + Cursor).
+# Optional: Ollama auf der Instanz wenn keine CURSOR_*-Keys gesetzt.
+CURSOR_API_BASE = os.environ.get("CURSOR_API_BASE", "https://api.cursor.com").rstrip("/")
+CURSOR_API_KEY = os.environ.get("CURSOR_API_KEY", "").strip()
+CURSOR_AGENT_REPOSITORY = os.environ.get("CURSOR_AGENT_REPOSITORY", "").strip()
+CURSOR_AGENT_REF = os.environ.get("CURSOR_AGENT_REF", "main").strip()
+CURSOR_AGENT_MODEL = os.environ.get("CURSOR_AGENT_MODEL", "").strip()
+CURSOR_AGENT_MAX_WAIT_SEC = int(os.environ.get("CURSOR_AGENT_MAX_WAIT_SEC", "900"))
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "").strip()
 BYBIT = "https://api.bybit.com/v5"
+
+# Trade overseer (Docker or host) + Cursor agent worker health
+OVERSEER_URL = os.environ.get("OVERSEER_URL", "http://127.0.0.1:8090").rstrip("/")
+CURSOR_WORKER_HEALTH_URL = os.environ.get(
+    "CURSOR_WORKER_HEALTH_URL", "http://127.0.0.1:8093/healthz"
+)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def cmd_strategy_analytics() -> str:
+    """Runtime strategy adaptation JSON + path (SygnifStrategy hot-reload)."""
+    p = _repo_root() / "user_data" / "strategy_adaptation.json"
+    if not p.is_file():
+        return f"*Strategy analytics*\n`{p}` — _not present_ (defaults from strategy class).\n"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return f"*Strategy adaptation* — invalid JSON structure\n"
+        overrides = data.get("overrides")
+        if isinstance(overrides, dict) and overrides:
+            lines = [f"*Strategy adaptation* (`{p.name}`)\n"]
+            for k in sorted(overrides.keys())[:40]:
+                lines.append(f"• `{k}` → `{overrides[k]}`")
+            meta = {k: data[k] for k in ("version", "updated", "source", "reason") if k in data}
+            if meta:
+                lines.append("\n_Meta:_ " + " ".join(f"{k}={v}" for k, v in meta.items()))
+            return "\n".join(lines)
+        return f"*Strategy adaptation*\n```json\n{json.dumps(data, indent=2)[:3500]}\n```"
+    except Exception as e:
+        return f"*Strategy analytics* — read error: `{e}`"
+
+
+def gather_sygnif_cycle() -> str:
+    """Single bundle for Cursor agent: overseer + adaptation + signals + tendency + macro + worker health."""
+    parts: list[str] = []
+    parts.append("=== SYGNIF AGENT CYCLE (raw facts for synthesis) ===\n")
+
+    # 1) Cursor worker (optional)
+    try:
+        h = requests.get(CURSOR_WORKER_HEALTH_URL, timeout=2)
+        parts.append(f"cursor_agent_worker: HTTP {h.status_code}\n")
+    except Exception as e:
+        parts.append(f"cursor_agent_worker: unreachable ({e})\n")
+
+    # 2) Overseer
+    try:
+        ov = requests.get(f"{OVERSEER_URL}/overview", timeout=5)
+        parts.append(f"overseer /overview: HTTP {ov.status_code}\n{ov.text[:1200]}\n")
+    except Exception as e:
+        parts.append(f"overseer /overview: error `{e}`\n")
+    try:
+        tr = requests.get(f"{OVERSEER_URL}/trades", timeout=10)
+        if tr.ok:
+            data = tr.json()
+            trades = data.get("trades") or []
+            tlines = []
+            for t in trades[:25]:
+                pair = t.get("pair", "?")
+                tid = t.get("trade_id", "?")
+                pct = t.get("profit_pct", 0)
+                tag = t.get("enter_tag") or ""
+                inst = t.get("instance", "")
+                tlines.append(f"  id={tid} {pair} [{inst}] {pct:+.2f}% tag={tag}")
+            parts.append(
+                f"overseer open trades: {len(trades)}\n" + "\n".join(tlines) + "\n"
+            )
+        else:
+            parts.append(f"overseer /trades: HTTP {tr.status_code}\n")
+    except Exception as e:
+        parts.append(f"overseer /trades: error `{e}`\n")
+
+    parts.append("=== STRATEGY RUNTIME ===\n")
+    parts.append(cmd_strategy_analytics())
+    parts.append("\n=== SIGNALS (top scan) ===\n")
+    sig = cmd_signals()
+    parts.append(sig[:4500] + ("…" if len(sig) > 4500 else ""))
+    parts.append("\n=== TENDENCY ===\n")
+    parts.append(cmd_tendency()[:2500])
+    parts.append("\n=== MACRO (snippet) ===\n")
+    parts.append(cmd_macro()[:1200])
+    parts.append(
+        "\n---\n_Note:_ Slash-Befehle laufen über `agent_slash_dispatch` → Cursor Cloud (`llm_analyze`). "
+        "Freitext nutzt denselben LLM-Pfad mit Chat-Verlauf.\n"
+    )
+    return "\n".join(parts)
+
+
+# Telegram conversational memory (in-process; restart clears). Max messages (user+assistant turns*2).
+TELEGRAM_CHAT_MAX_HISTORY = int(os.environ.get("TELEGRAM_CHAT_MAX_HISTORY", "40"))
+TELEGRAM_CHAT_MAX_CHARS = int(os.environ.get("TELEGRAM_CHAT_MAX_CHARS", "24000"))
 
 # Strategy constants (mirrors SygnifStrategy.py)
 MAJOR_PAIRS = {"BTC", "ETH", "SOL", "XRP"}
@@ -79,10 +195,12 @@ def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None =
 # Persistent reply keyboard — shown at bottom of chat
 KEYBOARD = {
     "keyboard": [
-        ["/overview", "/tendency", "/signals"],
-        ["/scan", "/ta BTC", "/ta ETH"],
+        ["/sygnif", "/overview", "/tendency"],
+        ["/signals", "/scan", "/ta BTC"],
         ["/plays", "/market", "/movers"],
-        ["/news", "/evaluate", "/fa_help"],
+        ["/deduce", "/ask", "/fa_help"],
+        ["/news", "/evaluate", "/finance-agent"],
+        ["/clear"],
     ],
     "resize_keyboard": True,
     "one_time_keyboard": False,
@@ -104,6 +222,60 @@ def tg_poll(offset: int) -> tuple[list, int]:
     except Exception as e:
         logger.error(f"Poll error: {e}")
         return [], offset
+
+
+# ---------------------------------------------------------------------------
+# Telegram chat memory (context window = recent messages in this chat)
+# ---------------------------------------------------------------------------
+_chat_histories: dict[str, list[dict[str, str]]] = {}
+
+
+def _history_trim(chat_id: str) -> None:
+    k = str(chat_id)
+    hist = _chat_histories.get(k)
+    if not hist:
+        return
+    while len(hist) > TELEGRAM_CHAT_MAX_HISTORY:
+        hist.pop(0)
+    total = sum(len(m.get("text", "")) for m in hist)
+    while hist and total > TELEGRAM_CHAT_MAX_CHARS:
+        removed = hist.pop(0)
+        total -= len(removed.get("text", ""))
+
+
+def clear_chat_history(chat_id: str) -> str:
+    k = str(chat_id)
+    _chat_histories.pop(k, None)
+    return "_Chat-Verlauf gelöscht._"
+
+
+def _format_chat_history(chat_id: str) -> str:
+    k = str(chat_id)
+    lines: list[str] = []
+    for m in _chat_histories.get(k, []):
+        label = "Nutzer" if m.get("role") == "user" else "Assistent"
+        lines.append(f"{label}: {m.get('text', '')}")
+    return "\n".join(lines) if lines else "(noch kein Verlauf in dieser Session)"
+
+
+def conversational_reply(user_text: str, chat_id: str) -> str:
+    """Reply using LLM with prior Telegram messages as context (same chat)."""
+    k = str(chat_id)
+    prior = _format_chat_history(k)
+    prompt = (
+        "Du bist Sygnif Finance Agent (Crypto, Bybit, SygnifStrategy). "
+        "Antworte auf die NEUESTE Nutzer-Nachricht unten. Nutze den Telegram-Verlauf nur als Kontext. "
+        "Kurz und mobilfreundlich; Sprache wie der Nutzer (DE/EN). Keine leeren Floskeln.\n\n"
+        f"--- Verlauf (alt → neu) ---\n{prior}\n\n"
+        f"--- Neueste Nachricht ---\n{user_text}"
+    )
+    reply = llm_analyze(prompt, max_tokens=2200)
+    if k not in _chat_histories:
+        _chat_histories[k] = []
+    _chat_histories[k].append({"role": "user", "text": user_text[:8000]})
+    _chat_histories[k].append({"role": "assistant", "text": reply[:12000]})
+    _history_trim(k)
+    return reply
 
 
 # ---------------------------------------------------------------------------
@@ -597,34 +769,151 @@ def _format_score_label(score: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Claude Haiku — AI analysis
+# LLM: Cursor Cloud Agents API (primary) or Ollama (fallback)
 # ---------------------------------------------------------------------------
-def claude_analyze(prompt: str, max_tokens: int = 1500) -> str:
-    """Call Claude Haiku for analysis."""
-    if not ANTHROPIC_KEY:
-        return "_Claude API key not configured._"
+def _cursor_auth_header() -> str:
+    return "Basic " + base64.b64encode(f"{CURSOR_API_KEY}:".encode()).decode()
+
+
+def _ollama_llm(prompt: str, max_tokens: int) -> str:
     try:
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            f"{OLLAMA_BASE_URL}/api/chat",
             json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": max_tokens,
+                "model": OLLAMA_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"num_predict": min(max_tokens, 8192)},
             },
-            timeout=30,
+            timeout=120,
         )
-        if resp.ok:
-            return resp.json()["content"][0]["text"]
-        logger.error(f"Claude error: {resp.status_code}")
-        return "_Analysis unavailable._"
+        if not resp.ok:
+            logger.error(f"Ollama HTTP {resp.status_code}: {resp.text[:500]}")
+            return f"_Ollama-Fehler ({resp.status_code}). Läuft `ollama serve`?_"
+        data = resp.json()
+        msg = data.get("message") or {}
+        text = (msg.get("content") or "").strip()
+        if text:
+            return text
+        return "_Ollama: leere Antwort._"
     except Exception as e:
-        logger.error(f"Claude error: {e}")
-        return "_Analysis unavailable._"
+        logger.error(f"Ollama error: {e}")
+        return f"_Ollama nicht erreichbar (`{OLLAMA_BASE_URL}`)._\n_{e}_"
+
+
+def _cursor_format_conversation(messages: list[dict]) -> str:
+    assistant_chunks: list[str] = []
+    for m in messages:
+        t = (m.get("type") or "").lower()
+        text = (m.get("text") or "").strip()
+        if not text:
+            continue
+        if "assistant" in t:
+            assistant_chunks.append(text)
+    if assistant_chunks:
+        return "\n\n".join(assistant_chunks)
+    return "\n\n".join((m.get("text") or "").strip() for m in messages if (m.get("text") or "").strip())
+
+
+def _cursor_cloud_llm(prompt: str, max_tokens: int) -> str:
+    """POST /v0/agents @ api.cursor.com — Sygnif Agent LLM (aligned with Cloud Agent worker)."""
+    _ = max_tokens
+    wrapped = (
+        "[Sygnif Finance Agent — reply in conversation only; no PR unless asked.]\n\n" + prompt
+    )
+    body: dict = {
+        "prompt": {"text": wrapped},
+        "source": {"repository": CURSOR_AGENT_REPOSITORY, "ref": CURSOR_AGENT_REF},
+        "target": {"autoCreatePr": False},
+    }
+    if CURSOR_AGENT_MODEL:
+        body["model"] = CURSOR_AGENT_MODEL
+    try:
+        r = requests.post(
+            f"{CURSOR_API_BASE}/v0/agents",
+            headers={
+                "Authorization": _cursor_auth_header(),
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        if not r.ok:
+            return f"_Cursor API {r.status_code}:_{r.text[:800]}_"
+        task = r.json()
+        task_id = task.get("id")
+        if not task_id:
+            return "_Cursor: keine Task-ID._"
+        url = task.get("target", {}).get("url") or f"https://cursor.com/agents?id={task_id}"
+        deadline = time.monotonic() + max(60, CURSOR_AGENT_MAX_WAIT_SEC)
+        status = task.get("status", "")
+        summary = (task.get("summary") or "").strip()
+        while time.monotonic() < deadline:
+            if status in ("FINISHED", "FAILED", "CANCELLED"):
+                break
+            time.sleep(10)
+            gr = requests.get(
+                f"{CURSOR_API_BASE}/v0/agents/{task_id}",
+                headers={"Authorization": _cursor_auth_header()},
+                timeout=60,
+            )
+            if not gr.ok:
+                logger.error(f"Cursor get_task {gr.status_code}")
+                break
+            task = gr.json()
+            status = task.get("status", "")
+            summary = (task.get("summary") or "").strip()
+
+        cr = requests.get(
+            f"{CURSOR_API_BASE}/v0/agents/{task_id}/conversation",
+            headers={"Authorization": _cursor_auth_header()},
+            timeout=60,
+        )
+        conv_text = ""
+        if cr.ok:
+            msgs = cr.json().get("messages") or []
+            conv_text = _cursor_format_conversation(msgs)
+        parts = [f"*Sygnif (Cursor Cloud)* — `{status}`", f"[Task]({url})"]
+        if summary:
+            parts.append(f"*Summary:*\n{summary}")
+        if conv_text:
+            parts.append(conv_text)
+        elif status == "FAILED":
+            parts.append("_Task FAILED._")
+        else:
+            parts.append("_Noch keine Antwort — später erneut oder CURSOR_AGENT_MAX_WAIT_SEC erhöhen._")
+        return "\n\n".join(parts)
+    except Exception as e:
+        logger.error(f"Cursor cloud LLM: {e}")
+        return f"_Cursor Cloud Fehler:_ `{e}`"
+
+
+def llm_analyze(prompt: str, max_tokens: int = 1500) -> str:
+    """Primary: Cursor Cloud Agents API. Fallback: Ollama. `LLM_BACKEND=ollama|none`."""
+    backend = os.environ.get("LLM_BACKEND", "").strip().lower()
+    if backend == "none":
+        return "_LLM aus (`LLM_BACKEND=none`)._"
+
+    if backend == "ollama":
+        if not OLLAMA_MODEL:
+            return "_OLLAMA_MODEL fehlt._"
+        return _ollama_llm(prompt, max_tokens)
+
+    if backend in ("cursor", "cursor_cloud"):
+        if not CURSOR_API_KEY or not CURSOR_AGENT_REPOSITORY:
+            return "_CURSOR_API_KEY + CURSOR_AGENT_REPOSITORY in .env (cursor.com/settings)._"
+        return _cursor_cloud_llm(prompt, max_tokens)
+
+    # Default: Cloud if configured (Sygnif Agent = same stack as worker), else Ollama
+    if CURSOR_API_KEY and CURSOR_AGENT_REPOSITORY:
+        return _cursor_cloud_llm(prompt, max_tokens)
+    if OLLAMA_MODEL:
+        return _ollama_llm(prompt, max_tokens)
+
+    return (
+        "_Kein LLM._ Setze `CURSOR_API_KEY` + `CURSOR_AGENT_REPOSITORY` (Cloud Agent) "
+        "oder `OLLAMA_MODEL` + `ollama serve`."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -668,7 +957,7 @@ def _fmt_price(price: float) -> str:
 # Command: /tendency — Market tendency (bull/bear)
 # ---------------------------------------------------------------------------
 def cmd_tendency() -> str:
-    """Market tendency: TA scan + Claude AI insight."""
+    """Market tendency: TA scan + local LLM insight."""
     tickers = bybit_tickers()
     if not tickers:
         return "Failed to fetch data."
@@ -759,7 +1048,7 @@ Rules:
 - Flag any risks or watch-outs (overbought RSI, divergence, etc.)
 - 3-4 sentences max, no disclaimers, be direct"""
 
-    insight = claude_analyze(prompt, max_tokens=200)
+    insight = llm_analyze(prompt, max_tokens=200)
     lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
@@ -955,7 +1244,7 @@ Write a concise research report in Markdown with these sections:
 
 Keep it under 350 words. Be specific with numbers. No disclaimers."""
 
-    analysis = claude_analyze(prompt)
+    analysis = llm_analyze(prompt)
 
     msg = (
         f"*Research Report: {ticker}*\n"
@@ -1056,12 +1345,12 @@ Risk: Low/Medium/High
 
 Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total under 400 words."""
 
-    analysis = claude_analyze(prompt, max_tokens=2000)
+    analysis = llm_analyze(prompt, max_tokens=2000)
 
     # Save plays for trade overseer
     try:
         requests.post(
-            "http://127.0.0.1:8090/plays",
+            f"{OVERSEER_URL}/plays",
             json={"raw_text": analysis, "market_context": market_ctx},
             timeout=3,
         )
@@ -1193,7 +1482,7 @@ For each, output one line:
 
 Side is Long or Short. Skip weak opportunities. Max 6 lines. Be specific with numbers."""
 
-    ranking = claude_analyze(prompt, max_tokens=400)
+    ranking = llm_analyze(prompt, max_tokens=400)
 
     now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
     lines = [f"*Scan* | {now_str}\n"]
@@ -1206,7 +1495,7 @@ Side is Long or Short. Skip weak opportunities. Max 6 lines. Be specific with nu
 # ---------------------------------------------------------------------------
 # Command: /overview — Full trade + market overview (consults overseer)
 # ---------------------------------------------------------------------------
-OVERSEER_TRADES = "http://127.0.0.1:8090/trades"
+OVERSEER_TRADES = f"{OVERSEER_URL}/trades"
 
 
 def _duration_str(seconds: float) -> str:
@@ -1364,11 +1653,60 @@ def cmd_news(ticker: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Command: /deduce — structured deductive reasoning (local LLM)
+# ---------------------------------------------------------------------------
+def cmd_deduce(args: str) -> str:
+    """Premises → intermediate steps → conclusion; Sygnif / market aware."""
+    raw = (args or "").strip()
+    if not raw:
+        return (
+            "*Deduktiv*\n\n"
+            "Nutze: `/deduce <These oder Frage>`\n"
+            "Beispiel: `/deduce Wenn BTC die Woche bullisch bleibt, welche Alts passen zu Sygnif swing tags?`"
+        )
+    prompt = f"""You are a trading research assistant for Sygnif (Freqtrade, Bybit, TA score 0–100, tags like strong_ta, claude_s*, swing_failure, claude_swing).
+
+Task: answer using explicit DEDUCTIVE reasoning.
+
+Format your answer EXACTLY with these sections (use the headings):
+1) **Primissen** — facts/assumptions you rely on (bullet list)
+2) **Schritte** — numbered logical steps (if A and B then C)
+3) **Fazit** — one tight conclusion
+4) **Unsicherheiten** — what could invalidate the chain (bullets)
+
+User question (may be German or English):
+{raw}
+
+Keep total under ~900 words. Prefer precise terms over hype. No generic disclaimers."""
+    return llm_analyze(prompt, max_tokens=2500)
+
+
+# ---------------------------------------------------------------------------
+# Command: /ask and /chat — free-form LLM dialogue (stateless turns)
+# ---------------------------------------------------------------------------
+def cmd_ask(args: str) -> str:
+    """Open-ended chat with LLM; same memory as plain-text messages (Telegram-Verlauf)."""
+    raw = (args or "").strip()
+    if not raw:
+        return (
+            "*Freier Chat (Cursor Cloud / Ollama)*\n\n"
+            "• Nachricht **ohne** `/` schreiben — Kontext = bisheriger Chat.\n"
+            "• Oder `/ask` / `/chat` mit Text.\n"
+            "• `/clear` — Verlauf löschen.\n"
+            f"• Limit: ca. {TELEGRAM_CHAT_MAX_HISTORY} Nachrichten / {TELEGRAM_CHAT_MAX_CHARS} Zeichen (Session, bei Bot-Neustart leer)."
+        )
+    return conversational_reply(raw, TG_CHAT)
+
+
+# ---------------------------------------------------------------------------
 # Command: /fa_help
 # ---------------------------------------------------------------------------
 def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
+        "`/sygnif` / `/cursor` — **Zyklus:** Cursor-Worker + Overseer + Strategie-Adaptation + Signals + Tendency + Macro (ein Kontext für das LLM)\n"
+        "`/sygnif analytics` — Nur Runtime-Overrides (`strategy_adaptation.json`)\n"
+        "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
         "`/finance-agent <cmd>` — Run specific module\n"
         "`/finance-agent <TICKER>` — Research for ticker\n"
@@ -1382,6 +1720,9 @@ def cmd_help() -> str:
         "`/research ETH` — Full AI research report\n"
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
+        "`/deduce <text>` — Deductive chain (premises → steps → conclusion)\n"
+        "`/ask` / `/chat` — LLM mit *Chat-Verlauf* (wie Freitext ohne `/`)\n"
+        "`/clear` — Chat-Verlauf löschen\n"
         "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
     )
@@ -1463,7 +1804,12 @@ def cmd_finance_agent(args: str) -> str:
         "macro": lambda: cmd_macro(),
         "overview": lambda: cmd_overview(),
         "evaluate": lambda: cmd_evaluate(),
+        "cycle": lambda: gather_sygnif_cycle(),
+        "analytics": lambda: cmd_strategy_analytics(),
         "help": lambda: cmd_help(),
+        "deduce": lambda: cmd_deduce(tail),
+        "ask": lambda: cmd_ask(tail),
+        "chat": lambda: cmd_ask(tail),
         "ta": lambda: cmd_ta(tail or "BTC"),
         "research": lambda: cmd_research(tail or "BTC"),
     }
@@ -1471,7 +1817,7 @@ def cmd_finance_agent(args: str) -> str:
         return subcommands[sub]()
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return cmd_research(sub.upper())
-    return "Unknown /finance-agent command. Use `market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro`"
+    return "Unknown /finance-agent command. Use `cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
 
 
 # ---------------------------------------------------------------------------
@@ -1479,7 +1825,7 @@ def cmd_finance_agent(args: str) -> str:
 # ---------------------------------------------------------------------------
 def cmd_overseer() -> str:
     try:
-        resp = requests.get("http://127.0.0.1:8090/overview", timeout=5)
+        resp = requests.get(f"{OVERSEER_URL}/overview", timeout=5)
         data = resp.json()
         commentary = data.get("last_commentary", "")
         if commentary:
@@ -1556,7 +1902,7 @@ ACTION is HOLD, TRAIL, or CUT. Reason max 6 words. Example:
 ETH HOLD RSI:50 uptrend intact
 FHE CUT RSI:26 broke support"""
 
-    raw = claude_analyze(prompt, max_tokens=400)
+    raw = llm_analyze(prompt, max_tokens=400)
 
     # 5. Parse actions into lookup
     actions = {}
@@ -1626,71 +1972,478 @@ FHE CUT RSI:26 broke support"""
 
 
 # ---------------------------------------------------------------------------
-# Command dispatch — returns response string (matches sygnif_bot.py pattern)
+# Slash commands → single LLM reply (no hand-written cmd_* output as final message)
 # ---------------------------------------------------------------------------
-COMMANDS = {
-    "/finance-agent": lambda args: cmd_finance_agent(args),
-    "/overview": lambda args: cmd_overview(),
-    "/tendency": lambda args: cmd_tendency(),
-    "/market":   lambda args: cmd_market(),
-    "/movers":   lambda args: cmd_movers(),
-    "/ta":       lambda args: cmd_ta(args),
-    "/signals":  lambda args: cmd_signals(),
-    "/scan":     lambda args: cmd_scan(),
-    "/research": lambda args: cmd_research(args),
-    "/plays":    lambda args: cmd_plays(),
-    "/news":     lambda args: cmd_news(args),
-    "/overseer": lambda args: cmd_overseer(),
-    "/evaluate": lambda args: cmd_evaluate(),
-    "/fa_help":  lambda args: cmd_help(),
-}
+_PLAYS_AGENT_HINT = """
+(Format-Ziel für /plays: genau 3 umsetzbare Plays im Sygnif-Stil — Entry-Typen: strong_ta, strong_ta_short,
+claude_sentiment*, swing_failure. Pro Play: Thesis, Entry, TP, SL, Timeframe, Risk.)
+"""
 
 
-# Commands that take a while — send a loading message first
-_SLOW_COMMANDS = {"/finance-agent", "/overview", "/tendency", "/signals", "/scan", "/research", "/plays", "/evaluate", "/macro"}
+def _gather_tendency_for_agent() -> str:
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch data."
+    core_syms = ["BTCUSDT", "ETHUSDT"]
+    pairs = _filter_pairs(tickers, min_turnover=5_000_000)
+    top_alts = [p for p in sorted(pairs, key=lambda x: x["vol"], reverse=True)
+                if p["sym"] not in ("BTC", "ETH")][:3]
+    scan_syms = core_syms + [f"{p['sym']}USDT" for p in top_alts]
 
-# Loading messages per command
-_LOADING_MSG = {
-    "/finance-agent": "Running finance-agent workflow...",
-    "/overview":  "\U0001f50d Contacting overseer + scanning TA...",
-    "/tendency":  "\U0001f4ca Scanning market tendency...",
-    "/signals":   "\U0001f4e1 Scanning signals across top pairs...",
-    "/research":  "\U0001f9e0 Researching — TA + news + AI analysis...",
-    "/plays":     "\U0001f3af Scanning opportunities — TA + AI...",
-    "/scan":      "\U0001f50e Scanning opportunities — TA + news + AI ranking...",
-    "/macro":     "\U0001f30d Building macro-crypto context...",
-    "/evaluate":  "\U0001f916 Evaluating positions...",
-}
+    bull_count = 0
+    bear_count = 0
+    total = 0
+    coin_data: list[str] = []
+    lines: list[str] = []
+    for sym in scan_syms:
+        df = bybit_kline(sym, interval="60", limit=200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        ta = calc_ta_score(ind)
+        sig = detect_signals(ind, sym.replace("USDT", ""))
+        score = ta["score"]
+        total += 1
+        name = sym.replace("USDT", "")
+        trend = ind.get("trend", "?")
+        rsi = ind.get("rsi", 50)
+        willr = ind.get("willr", -50)
+        macd = ind.get("macd_signal_text", "?")
+        entry = sig["entries"][0] if sig["entries"] else "none"
+        if score >= 55:
+            bull_count += 1
+            icon = "\U0001f7e2"
+        elif score <= 45:
+            bear_count += 1
+            icon = "\U0001f534"
+        else:
+            icon = "\u26aa"
+        lines.append(f"{icon} `{name:>5}` {_fmt_price(ind['price'])} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
+        coin_data.append(
+            f"{name}: ${ind['price']:.4g} {trend} TA:{score} RSI:{rsi:.0f} "
+            f"WR:{willr:.0f} MACD:{macd} signal:{entry}"
+        )
+    if total == 0:
+        verdict = "No data"
+    elif bull_count > bear_count and bull_count >= total * 0.6:
+        verdict = "BULLISH majority"
+    elif bear_count > bull_count and bear_count >= total * 0.6:
+        verdict = "BEARISH majority"
+    elif bull_count > bear_count:
+        verdict = "LEAN BULLISH"
+    elif bear_count > bull_count:
+        verdict = "LEAN BEARISH"
+    else:
+        verdict = "NEUTRAL"
+    headlines = fetch_news("", max_items=5)
+    news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent news."
+    data_block = "\n".join(coin_data)
+    table = "\n".join(lines)
+    return (
+        f"Tendency scan (BTC/ETH + top 3 alts by vol)\n"
+        f"Rule-of-thumb verdict: {verdict} | bull:{bull_count} bear:{bear_count} "
+        f"neutral:{total - bull_count - bear_count} (n={total})\n"
+        f"{table}\n\nPer-coin:\n{data_block}\n\nHeadlines:\n{news_text}"
+    )
 
 
-def handle_command(text: str) -> str | tuple | None:
-    """Route command to handler.
+def _gather_research_for_agent(ticker: str) -> str:
+    ticker = ticker.upper().strip() or "BTC"
+    symbol = f"{ticker}USDT"
+    df = bybit_kline(symbol, interval="60", limit=200)
+    ind = calc_indicators(df) if not df.empty else {}
+    sig = detect_signals(ind, ticker)
+    headlines = fetch_news(ticker)
+    news_text = "\n".join(f"- {h}" for h in headlines[:5]) if headlines else "No recent news."
+    tickers = bybit_tickers()
+    pair_data = next((t for t in tickers if t.get("symbol") == symbol), {})
+    price = float(pair_data.get("lastPrice", 0))
+    change_24h = float(pair_data.get("price24hPcnt", 0)) * 100
+    vol_24h = float(pair_data.get("turnover24h", 0))
+    ta_summary = "No TA data available."
+    strat_summary = ""
+    if ind:
+        ta_summary = (
+            f"Price: ${ind['price']:.4g}, Trend: {ind['trend']}, "
+            f"RSI14: {ind['rsi']:.1f} ({ind['rsi_signal']}), RSI3: {ind['rsi3']:.0f}, "
+            f"MACD: {ind['macd_signal_text']} (hist: {ind['macd_hist']:.4g}), "
+            f"BB position: {ind['bb_position']}, "
+            f"Williams%%R: {ind['willr']:.0f}, StochRSI: {ind['stochrsi_k']:.0f}, "
+            f"Aroon U/D: {ind['aroonu']:.0f}/{ind['aroond']:.0f}, CMF: {ind['cmf']:.3f}, "
+            f"Support: {ind['support']:.4g}, Resistance: {ind['resistance']:.4g}, "
+            f"Volume: {ind['vol_ratio']:.1f}x average"
+        )
+        entry_str = ", ".join(sig["entries"]) if sig["entries"] else "None"
+        strat_summary = (
+            f"\nSTRATEGY CONTEXT:\n"
+            f"- TA Score: {sig['ta_score']}/100 ({_format_score_label(sig['ta_score'])})\n"
+            f"- Active Signals: {entry_str}\n"
+            f"- Leverage Tier: {sig['leverage']:.0f}x (ATR {sig['atr_pct']:.1f}%)\n"
+            f"- Swing Failure: {'SF Long' if ind.get('sf_long') else 'SF Short' if ind.get('sf_short') else 'None'}"
+        )
+    return (
+        f"Research raw data for {ticker}:\n"
+        f"Price: ${price:.4g} (24h: {change_24h:+.1f}%) Vol ${vol_24h/1e6:.1f}M\n"
+        f"{ta_summary}{strat_summary}\n\nNews:\n{news_text}"
+    )
 
-    Returns:
-        str — immediate response (fast commands)
-        tuple(loading_msg, handler, args) — for slow commands (dispatcher sends loading first)
-        None — unknown command
-    """
-    if not text.strip().startswith("/"):
-        return None
 
-    parts = text.strip().split(maxsplit=1)
-    cmd = parts[0].lower().split("@")[0]  # strip @botname suffix
+def _gather_plays_for_agent() -> str:
+    tickers = bybit_tickers()
+    pairs = []
+    exclude = {"USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDD", "USDP", "USDS", "USDE"}
+    for t in tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        base = sym.replace("USDT", "")
+        if base in exclude or any(x in base for x in ("2L", "3L", "5L", "2S", "3S", "5S")):
+            continue
+        try:
+            change = float(t.get("price24hPcnt", 0)) * 100
+            turnover = float(t.get("turnover24h", 0))
+            price = float(t.get("lastPrice", 0))
+        except (ValueError, TypeError):
+            continue
+        if turnover < 1_000_000:
+            continue
+        pairs.append({"sym": base, "price": price, "change": change, "vol": turnover})
+
+    top_by_vol = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:10]
+    top_gainers = sorted(pairs, key=lambda x: x["change"], reverse=True)[:5]
+    top_losers = sorted(pairs, key=lambda x: x["change"])[:5]
+
+    market_ctx = "Top by volume (with strategy TA score):\n"
+    for p in top_by_vol:
+        df = bybit_kline(f"{p['sym']}USDT", "60", 200)
+        ind = calc_indicators(df) if not df.empty else {}
+        sig = detect_signals(ind, p["sym"])
+        signal_str = sig["entries"][0] if sig["entries"] else "no_signal"
+        market_ctx += (
+            f"  {p['sym']}: ${p['price']:.4g} ({p['change']:+.1f}%) "
+            f"vol ${p['vol']/1e6:.0f}M | TA:{sig['ta_score']} {signal_str} "
+            f"| Lev:{sig['leverage']:.0f}x\n"
+        )
+    market_ctx += "\nTop gainers:\n"
+    for p in top_gainers:
+        market_ctx += f"  {p['sym']}: +{p['change']:.1f}%\n"
+    market_ctx += "\nTop losers:\n"
+    for p in top_losers:
+        market_ctx += f"  {p['sym']}: {p['change']:.1f}%\n"
+
+    btc_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ind = calc_indicators(btc_df) if not btc_df.empty else {}
+    btc_sig = detect_signals(btc_ind, "BTC")
+    btc_ctx = ""
+    if btc_ind:
+        btc_ctx = (
+            f"\nBTC Context: ${btc_ind['price']:,.0f}, {btc_ind['trend']}, "
+            f"RSI {btc_ind['rsi']:.0f}, MACD {btc_ind['macd_signal_text']}, "
+            f"TA Score: {btc_sig['ta_score']}/100"
+        )
+    return f"{market_ctx}{btc_ctx}{_PLAYS_AGENT_HINT}"
+
+
+def _gather_scan_for_agent() -> str:
+    tickers = bybit_tickers()
+    if not tickers:
+        return "Failed to fetch data."
+    pairs = _filter_pairs(tickers, min_turnover=2_000_000)
+    top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:15]
+
+    signal_pairs = []
+    for p in top:
+        df = bybit_kline(f"{p['sym']}USDT", "60", 200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        sig = detect_signals(ind, p["sym"])
+        entries = sig["entries"]
+        if not entries or entries == ["ambiguous_short"]:
+            continue
+        signal_pairs.append({
+            "sym": p["sym"], "ind": ind, "sig": sig,
+            "price": ind["price"], "vol": p["vol"],
+        })
+
+    if not signal_pairs:
+        return "No active signals across top 15 pairs (scan)."
+
+    scan_pairs = signal_pairs[:6]
+    data_lines = []
+    for sp in scan_pairs:
+        sym = sp["sym"]
+        ind = sp["ind"]
+        sig = sp["sig"]
+        entry = sig["entries"][0]
+        headlines = fetch_news(sym, max_items=2)
+        news_str = headlines[0].split(" — ")[0] if headlines else "No recent news"
+        data_lines.append(
+            f"{sym}: ${ind['price']:.4g} {ind['trend']} "
+            f"TA:{sig['ta_score']} {entry} RSI:{ind['rsi']:.0f} "
+            f"WR:{ind['willr']:.0f} Lev:{sig['leverage']:.0f}x "
+            f"| News: \"{news_str}\""
+        )
+    data_block = "\n".join(data_lines)
+    return (
+        f"Deep scan (top 15 vol pairs, up to 6 with signals + news). "
+        f"Scanned {len(top)} pairs, {len(signal_pairs)} with signals.\n\n"
+        f"Candidates:\n{data_block}\n\n"
+        "(Rankiere nach Überzeugung / gib kompakte Empfehlung — eine LLM-Antwort.)"
+    )
+
+
+def _gather_evaluate_for_agent() -> str:
+    try:
+        resp = requests.get(OVERSEER_TRADES, timeout=10)
+        data = resp.json()
+        trades = data.get("trades", [])
+    except Exception as e:
+        return f"Overseer unavailable: {e}"
+
+    if not trades:
+        return "No open trades."
+
+    trade_syms = list({
+        t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        for t in trades
+    })
+    ta_context = []
+    for sym in trade_syms:
+        df = bybit_kline(f"{sym}USDT", "60", 200)
+        if df.empty:
+            continue
+        ind = calc_indicators(df)
+        if not ind:
+            continue
+        sig = detect_signals(ind, sym)
+        entry = sig["entries"][0] if sig["entries"] else "none"
+        exit_s = sig["exits"][0] if sig["exits"] else "none"
+        ta_context.append(
+            f"{sym}: ${ind['price']:.4g} {ind['trend']} TA:{sig['ta_score']} "
+            f"RSI:{ind['rsi']:.0f} WR:{ind['willr']:.0f} "
+            f"MACD:{ind['macd_signal_text']} CMF:{ind['cmf']:.3f} "
+            f"S:{ind['support']:.4g} R:{ind['resistance']:.4g} "
+            f"signal:{entry} exit:{exit_s}"
+        )
+
+    trade_lines = []
+    for t in sorted(trades, key=lambda x: x["profit_pct"]):
+        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
+        inst = t["instance"][0]
+        tag = t.get("enter_tag", "") or "?"
+        trade_lines.append(
+            f"{pair}[{inst}] {t['profit_pct']:+.2f}% ${t['current_rate']:.4g} {tag}"
+        )
+
+    ta_block = "\n".join(ta_context) if ta_context else "No TA data"
+    trades_block = "\n".join(trade_lines)
+    return (
+        f"Evaluate: HOLD / TRAIL / CUT pro Position sinnvoll einordnen.\n\n"
+        f"TA:\n{ta_block}\n\nTrades:\n{trades_block}"
+    )
+
+
+def _gather_finance_agent_for_agent(args: str) -> str:
+    raw = (args or "").strip()
+    if not raw:
+        parts = [
+            "=== TENDENCY (raw) ===\n" + _gather_tendency_for_agent(),
+            "=== SIGNALS ===\n" + cmd_signals(),
+            "=== MACRO ===\n" + cmd_macro(),
+            "=== PLAYS (raw) ===\n" + _gather_plays_for_agent(),
+        ]
+        return (
+            "Finance-Agent Gesamtreport — fasse zusammen, priorisiere klare Kernaussagen.\n\n"
+            + "\n\n".join(parts)
+        )
+
+    parts = raw.split(maxsplit=1)
+    sub = parts[0].lower().strip()
+    tail = parts[1].strip() if len(parts) > 1 else ""
+    if sub == "market":
+        return cmd_market()
+    if sub == "movers":
+        return cmd_movers()
+    if sub == "signals":
+        return cmd_signals()
+    if sub == "scan":
+        return _gather_scan_for_agent()
+    if sub == "plays":
+        return _gather_plays_for_agent()
+    if sub == "tendency":
+        return _gather_tendency_for_agent()
+    if sub == "macro":
+        return cmd_macro()
+    if sub == "overview":
+        return cmd_overview()
+    if sub == "evaluate":
+        return _gather_evaluate_for_agent()
+    if sub == "cycle":
+        return gather_sygnif_cycle()
+    if sub == "analytics":
+        return cmd_strategy_analytics()
+    if sub == "help":
+        return cmd_help()
+    if sub == "deduce":
+        return _gather_slash_context("/deduce", tail, f"/finance-agent deduce {tail}")
+    if sub in ("ask", "chat"):
+        return _gather_slash_context(f"/{sub}", tail, raw)
+    if sub == "ta":
+        return cmd_ta(tail or "BTC")
+    if sub == "research":
+        return _gather_research_for_agent(tail or "BTC")
+    if sub.isalpha() and 2 <= len(sub) <= 10:
+        return _gather_research_for_agent(sub.upper())
+    return f"Unknown /finance-agent subcommand: {raw}"
+
+
+def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
+    try:
+        if cmd == "/market":
+            return cmd_market()
+        if cmd == "/movers":
+            return cmd_movers()
+        if cmd == "/ta":
+            return cmd_ta(args or "BTC")
+        if cmd == "/news":
+            return cmd_news(args)
+        if cmd == "/signals":
+            return cmd_signals()
+        if cmd == "/overview":
+            return cmd_overview()
+        if cmd == "/macro":
+            return cmd_macro()
+        if cmd == "/overseer":
+            return cmd_overseer()
+        if cmd == "/fa_help":
+            return cmd_help()
+        if cmd == "/tendency":
+            return _gather_tendency_for_agent()
+        if cmd == "/research":
+            return _gather_research_for_agent(args or "BTC")
+        if cmd == "/plays":
+            return _gather_plays_for_agent()
+        if cmd == "/scan":
+            return _gather_scan_for_agent()
+        if cmd == "/evaluate":
+            return _gather_evaluate_for_agent()
+        if cmd == "/deduce":
+            a = (args or "").strip()
+            if not a:
+                return "(Nutzer: /deduce ohne Text — kurz erklären: `/deduce <Frage>`)"
+            return (
+                "Deduktive Aufgabe (Sygnif: Freqtrade, Bybit, TA 0–100, Tags wie strong_ta, claude_s*, swing_failure):\n"
+                f"{a}"
+            )
+        if cmd in ("/ask", "/chat"):
+            a = (args or "").strip()
+            if not a:
+                return (
+                    "(Nutzer: /ask oder /chat ohne Text — erkläre Freitext ohne Slash, "
+                    f"/ask mit Text, /clear; Limit ~{TELEGRAM_CHAT_MAX_HISTORY} Nachrichten.)"
+                )
+            return f"(Beantworte als fortgesetzten Dialog; Nutzerfrage:)\n{a}"
+        if cmd == "/finance-agent":
+            return _gather_finance_agent_for_agent(args)
+        if cmd in ("/sygnif", "/cursor"):
+            # Single entry point: overseer + strategy analytics + signals + tendency (+ Cursor worker health).
+            a = (args or "").strip()
+            if not a:
+                return gather_sygnif_cycle()
+            sub = a.split(maxsplit=1)[0].lower()
+            rest = a.split(maxsplit=1)[1].strip() if " " in a else ""
+            if sub == "analytics":
+                return cmd_strategy_analytics()
+            if sub == "tendency":
+                return _gather_tendency_for_agent()
+            if sub == "finance":
+                return _gather_finance_agent_for_agent(rest)
+            if sub == "signals":
+                return cmd_signals()
+            if sub == "macro":
+                return cmd_macro()
+            if sub in ("ask", "chat"):
+                return _gather_slash_context(f"/{sub}", rest, raw)
+            if sub == "help":
+                return (
+                    "`/sygnif` — voller Zyklus (Worker + Overseer + Adaptation + Signals + Tendency + Macro).\n"
+                    "`/sygnif analytics` — nur `strategy_adaptation.json`.\n"
+                    "`/sygnif tendency|signals|macro|finance [args]` — Teilmodul.\n"
+                    "`/cursor` — Alias wie `/sygnif`."
+                )
+            return gather_sygnif_cycle()
+        if cmd == "/clear":
+            return "(Intern: Verlauf geleert.)"
+    except Exception as e:
+        logger.error(f"_gather_slash_context {cmd}: {traceback.format_exc()}")
+        return f"Fehler beim Laden der Daten: {e}"
+    return f"(Unbekannter Befehl {cmd} — keine Rohdaten; ggf. /fa_help.)"
+
+
+def agent_generate_slash_reply(full_text: str, chat_id: str) -> str:
+    raw = full_text.strip()
+    parts = raw.split(maxsplit=1)
+    cmd = parts[0].lower().split("@")[0]
     args = parts[1] if len(parts) > 1 else ""
 
-    handler = COMMANDS.get(cmd)
-    if handler is None:
-        return None
+    if cmd == "/clear":
+        clear_chat_history(chat_id)
+        ctx = (
+            "Der Chat-Verlauf wurde geleert. Bestätige kurz (1–2 Sätze) und verweise optional auf /fa_help."
+        )
+    else:
+        ctx = _gather_slash_context(cmd, args, raw)
 
-    try:
-        if cmd in _SLOW_COMMANDS:
-            loading = _LOADING_MSG.get(cmd, "\u23f3 Working...")
-            # Return loading msg + handler callable — dispatcher sends loading first
-            return (loading, handler, args)
-        return handler(args)
-    except Exception as e:
-        logger.error(f"Command {cmd} error: {traceback.format_exc()}")
-        return f"Error: {e}"
+    hist = _format_chat_history(chat_id)
+    prompt = (
+        "Du bist Sygnif Finance Agent (Telegram, Markdown). "
+        "Slash-Befehle laufen zentral über denselben LLM-Pfad wie der Cursor-Agent (Cursor Cloud API). "
+        "Erzeuge die *vollständige* Antwort auf den Slash-Befehl — eigenständig formuliert, "
+        "mobilfreundlich. Nutze SERVER-KONTEXT nur als Fakten; keine erfundenen Kurse.\n\n"
+        f"--- Bisheriger Chat ---\n{hist}\n\n"
+        f"--- SERVER-KONTEXT ---\n{ctx}\n\n"
+        f"--- BEFEHL ---\n{raw}\n\n"
+        "Antwort in Markdown. Sprache wie der Nutzer (DE/EN)."
+    )
+    return llm_analyze(prompt, max_tokens=2800)
+
+
+def agent_slash_dispatch(chat_id: str, full_text: str) -> str:
+    out = agent_generate_slash_reply(full_text, chat_id)
+    parts = full_text.strip().split(maxsplit=1)
+    cmd = parts[0].lower().split("@")[0]
+    if cmd == "/plays":
+        try:
+            requests.post(
+                f"{OVERSEER_URL}/plays",
+                json={"raw_text": out, "market_context": "agent_slash"},
+                timeout=3,
+            )
+        except Exception:
+            pass
+    k = str(chat_id)
+    if k not in _chat_histories:
+        _chat_histories[k] = []
+    _chat_histories[k].append({"role": "user", "text": full_text.strip()[:8000]})
+    _chat_histories[k].append({"role": "assistant", "text": out[:12000]})
+    _history_trim(k)
+    return out
+
+
+def handle_command(text: str, chat_id: str) -> tuple[str, object, str] | None:
+    """Alle Slash-Befehle: Loading → eine LLM-Antwort (agent_slash_dispatch)."""
+    if not text.strip().startswith("/"):
+        return None
+    return (
+        "\U0001f916 Sygnif Agent…",
+        lambda _a: agent_slash_dispatch(chat_id, text.strip()),
+        "",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1786,10 +2539,10 @@ def _start_http():
 
 def main():
     if not TG_TOKEN:
-        print("Set FINANCE_BOT_TOKEN env var")
+        print("Set AGENT_BOT_TOKEN (or SYGNIF_HEDGE_BOT_TOKEN / FINANCE_BOT_TOKEN) env var")
         sys.exit(1)
     if not TG_CHAT:
-        print("Set TELEGRAM_CHAT_ID env var")
+        print("Set AGENT_CHAT_ID or TELEGRAM_CHAT_ID env var")
         sys.exit(1)
 
     _start_http()
@@ -1806,9 +2559,21 @@ def main():
                 text = msg.get("text", "")
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 if text and str(chat_id) == str(TG_CHAT):
-                    reply = handle_command(text)
-                    if reply is None:
+                    stripped = (text or "").strip()
+                    if not stripped:
                         continue
+                    if stripped.startswith("/"):
+                        reply = handle_command(text, chat_id)
+                        if reply is None:
+                            tg_send("_Unbekannter Befehl._ Siehe `/fa_help`", reply_markup=KEYBOARD)
+                            continue
+                    else:
+                        # Freitext: gleicher Kontext wie /ask (Telegram-Verlauf)
+                        reply = (
+                            "\U0001f4ac Mit Chat-Verlauf...",
+                            lambda _a: conversational_reply(stripped, chat_id),
+                            "",
+                        )
                     if isinstance(reply, tuple):
                         # Slow command: (loading_msg, handler, args)
                         loading, handler_fn, handler_args = reply

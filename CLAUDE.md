@@ -4,10 +4,20 @@
 
 Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment analysis. Runs on Bybit via Docker on AWS EC2 (eu-central-1).
 
+### Sygnif Agent — Cursor worker + finance agent
+
+| Role | What |
+|------|------|
+| **Sygnif Agent (Cursor)** | **Cursor Cloud Agent** + **`cursor-agent-worker.service`** on this repo is the main runtime — enough for Sygnif Agent work. Telegram LLM uses the **same** Cloud API when `CURSOR_API_KEY` + `CURSOR_AGENT_REPOSITORY` are in `.env` (see `.cursor/cursor-agent-config.md`). |
+| **Inheritance** | **inherits** the **finance agent** surface: `finance_agent/bot.py`, `mode_router.py`, runbooks under `finance_agent/`, `AI Upload/`. See `.cursor/rules/sygnif-agent-inherit.mdc`. |
+| **Adaptive strategy** | After analysis, the agent may update `user_data/strategy_adaptation.json` → bounded keys in `user_data/strategy_adaptation.py`; Freqtrade picks up changes ~60s without restart. |
+| **Telegram** | `finance-agent.service` runs `~/finance_agent/bot.py` (copy synced from this repo); shared `.env`. |
+
 ## Architecture
 
 | Component | Description |
 |---|---|
+| `Network/` | **Symlink** → `~/Network` — OpenVINO / NPU graph code (`edge_npu_infer/`, …). GitHub: `Giansn/Network`. Not committed; local link only. |
 | `SygnifStrategy.py` | Main strategy — NFI-derived, multi-TF analysis, Claude sentiment layer |
 | `user_data/config.json` | Spot config (port 8080) |
 | `user_data/config_futures.json` | Futures config (port 8081, isolated margin, 2-5x leverage) |
@@ -189,7 +199,7 @@ This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationshi
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/sygnif/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/xrp_claude_bot/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -228,10 +238,10 @@ This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationshi
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/sygnif/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/sygnif/clusters` | All functional areas |
-| `gitnexus://repo/sygnif/processes` | All execution flows |
-| `gitnexus://repo/sygnif/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/xrp_claude_bot/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/xrp_claude_bot/clusters` | All functional areas |
+| `gitnexus://repo/xrp_claude_bot/processes` | All execution flows |
+| `gitnexus://repo/xrp_claude_bot/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 

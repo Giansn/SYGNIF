@@ -1,0 +1,31 @@
+---
+description: Predict → Analyze → Proofread → Adjust; horizon check + bounded finetune
+alwaysApply: true
+---
+
+# Sygnif: prediction & analysis workflow
+
+Use this loop **when it fits** — market movement calls, TA write-ups, strategy commentary, or agent-generated `/` replies:
+
+## 1. Predict
+
+- Clear **scenarios** (base / up / down) and **levels** (support, resistance, invalidation).
+- Name **time horizon** (e.g. 24–48h) and **what would falsify** the thesis.
+- Output **compact**, mobile-friendly (tables/bullets).
+
+## 2. Analyze
+
+- Ground in **data**: Bybit spot, `finance_agent` indicators / Sygnif TA score & signals where relevant.
+- Call out **conflicts** (e.g. 1h vs 4h, score vs trend label) — don’t hide mixed signals.
+
+## 3. Proofread
+
+- **Numbers** consistent (price, %, levels).
+- **No internal contradictions** in the same answer.
+- **Language** matches the user (e.g. German when they write German).
+- No generic **disclaimers** unless the user asks for investment-advice framing.
+
+## 4. Adjust
+
+- **Horizon (optional):** snapshot + later check — `scripts/prediction_horizon_check.py` (`save` at prediction time, `check` at +24h / +48h UTC or ad hoc). Verdict is mechanical (in range vs broke S/R) — use to **learn**, not as oracle.
+- **Strategy (optional, bounded):** if analysis supports it, update `user_data/strategy_adaptation.json` → `overrides` only for keys in `user_data/strategy_adaptation.py` (`DEFAULTS` / `BOUNDS`). Document `source`, `reason`, `updated` (ISO UTC). Never bypass rails in strategy code for the same intent.

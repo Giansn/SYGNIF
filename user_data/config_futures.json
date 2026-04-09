@@ -94,8 +94,8 @@
 
     "telegram": {
         "enabled": true,
-        "token": "${TELEGRAM_FUTURES_BOT_TOKEN}",
-        "chat_id": "${TELEGRAM_CHAT_ID}",
+        "token": "8016276540:AAHU7BycH5lUhc1MlZyRx-0qD6bNvMla44E",
+        "chat_id": "1134139785",
         "notification_settings": {
             "status": "on",
             "warning": "on",
@@ -115,10 +115,10 @@
         "listen_port": 8081,
         "verbosity": "error",
         "enable_openapi": true,
-        "jwt_secret_key": "${JWT_SECRET_KEY}",
+        "jwt_secret_key": "",
         "CORS_origins": ["http://localhost:8081", "http://3.122.252.186:8081", "http://3.122.252.186:8889"],
-        "username": "${FT_FUTURES_USER:freqtrader}",
-        "password": "${FT_FUTURES_PASS:CHANGE_ME}"
+        "username": "freqtrader",
+        "password": "nh3mAcWyhKdDQQ%A!&7@"
     },
 
     "bot_name": "Sygnif-Futures",

@@ -8,6 +8,7 @@ user_data/hyperopt_results/
 user_data/plot/
 user_data/notebooks/
 user_data/freqaimodels/
+user_data/doom_cooldown.json
 __pycache__/
 *.pyc
 movers_pairlist.json
@@ -25,6 +26,7 @@ user_data_futures/
 trade_overseer/.env
 trade_overseer/__pycache__/
 trade_overseer/data/state.json
+trade_overseer/data/plays.json
 
 # finance_agent
 finance_agent/.env
@@ -39,5 +41,5 @@ outputs/
 .tracking_baseline.txt
 SYGNIF/
 
-# Root-level scratch scripts (not part of shipped tree)
-/scripts/
+# Symlink to sibling repo (OpenVINO / edge NPU — not part of SYGNIF tree)
+Network

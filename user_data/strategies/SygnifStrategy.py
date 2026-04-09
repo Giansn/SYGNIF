@@ -6,18 +6,21 @@ Architecture (inspired by NostalgiaForInfinityX7):
 - BTC correlation: BTC/USDT indicators merged into all pairs
 - NFI-style indicators: RSI_3/14, Aroon, StochRSI, CMF, CCI, ROC, BB, EMA, Williams %R
 - Global protections: Multi-TF cascade prevents buying during crashes
-- Claude sentiment layer: When signals are ambiguous, Claude Haiku analyzes news
+- Sentiment layer: ambiguous TA zone → news + **Cursor Cloud Agent** (preferred when
+  `CURSOR_*` set) or **Anthropic Haiku** fallback — JSON score -20..+20
 - NFI-style exit logic: Profit-tiered RSI exits + overbought signals + doom stoploss
 
-Cost: ~$0.50-1.00/month with Haiku at ~20 calls/day
+Cost: Cursor Cloud task pricing + optional Haiku fallback; see `SENTIMENT_BACKEND` in `.env`.
 """
 
 import logging
 import os
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import importlib.util
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +34,8 @@ from freqtrade.strategy import IStrategy, merge_informative_pair
 from freqtrade.persistence import Trade
 from pandas import DataFrame
 
+from cursor_cloud_completion import cursor_cloud_completion
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,9 +44,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SygnifSentiment:
-    """Lightweight Claude API wrapper for crypto sentiment analysis."""
+    """Sentiment via Cursor Cloud Agent API (primary) or Anthropic Haiku (fallback)."""
 
     def __init__(self):
+        # auto | cursor_cloud | anthropic — auto prefers Cursor when CURSOR_* are set
+        self._sentiment_backend = os.environ.get("SENTIMENT_BACKEND", "auto").strip().lower()
         self.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self.model = "claude-haiku-4-5-20251001"
         self.base_url = "https://api.anthropic.com/v1/messages"
@@ -63,6 +70,32 @@ class SygnifSentiment:
         self._circuit_open_until = 0.0
         self._circuit_threshold = 5       # failures before opening
         self._circuit_cooldown = 300       # 5 min pause when open
+
+    def _use_cursor_cloud(self) -> bool:
+        b = self._sentiment_backend
+        if b in ("cursor", "cursor_cloud"):
+            return True
+        if b == "anthropic":
+            return False
+        # auto: match finance_agent — same CURSOR_* when both set
+        if os.environ.get("CURSOR_API_KEY", "").strip() and os.environ.get(
+            "CURSOR_AGENT_REPOSITORY", ""
+        ).strip():
+            return True
+        return False
+
+    def _parse_sentiment_score(self, text: str) -> Optional[float]:
+        """Extract {\"score\": ...} from model output."""
+        if not text:
+            return None
+        match = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
+        if not match:
+            return None
+        try:
+            result = json.loads(match.group(0))
+            return max(-20.0, min(20.0, float(result["score"])))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return None
 
     def _call_api_with_retry(self, payload: dict, max_attempts: int = 3) -> Optional[requests.Response]:
         """POST to Anthropic API with exponential backoff and circuit breaker.
@@ -240,22 +273,25 @@ class SygnifSentiment:
         headlines: list[str],
     ) -> float:
         """
-        Ask Claude for a sentiment score.
-        Returns: adjustment between -20 and +20
+        Cursor Cloud Agent (preferred) or Anthropic Haiku — score -20..+20.
         """
         self._reset_daily_counter()
 
         cached = self._get_cached(token)
         if cached is not None:
-            logger.info(f"Claude sentiment (cached) for {token}: {cached}")
+            logger.info(f"Sentiment (cached) for {token}: {cached}")
             return cached
 
         if self.daily_calls >= self.daily_limit:
-            logger.warning("Claude daily limit reached, returning neutral")
+            logger.warning("Sentiment daily limit reached, returning neutral")
             return 0.0
 
-        if not self.api_key:
-            logger.warning("No ANTHROPIC_API_KEY set, skipping sentiment")
+        use_cursor = self._use_cursor_cloud()
+        if not use_cursor and not self.api_key:
+            logger.warning(
+                "Skipping sentiment: set CURSOR_API_KEY + CURSOR_AGENT_REPOSITORY (Cursor) "
+                "and/or ANTHROPIC_API_KEY (Haiku fallback)"
+            )
             return 0.0
 
         news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent headlines available."
@@ -282,6 +318,46 @@ Rules:
 
 Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"}}"""
 
+        self.daily_calls += 1
+
+        if use_cursor:
+            text = cursor_cloud_completion(prompt, label="Sygnif sentiment")
+            if text is None:
+                self.api_errors += 1
+                self._consecutive_failures += 1
+                self._maybe_trip_breaker()
+                logger.error(f"Cursor Cloud sentiment for {token}: failed or empty")
+                # auto-fallback to Anthropic if configured
+                if self._sentiment_backend == "auto" and self.api_key:
+                    logger.info(f"Falling back to Anthropic Haiku for {token}")
+                    use_cursor = False
+                else:
+                    return None
+
+        if use_cursor:
+            score = self._parse_sentiment_score(text)
+            if score is None:
+                self.parse_errors += 1
+                logger.error(f"Cursor sentiment: no JSON in response: {text[:200] if text else ''}")
+                return None
+            reason = ""
+            try:
+                m = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
+                if m:
+                    reason = json.loads(m.group(0)).get("reason", "") or ""
+            except Exception:
+                pass
+            if score != 0:
+                self.non_zero_calls += 1
+            logger.info(
+                f"Cursor sentiment for {token}: {score} — {reason} "
+                f"[stats: {self.daily_calls}c {self.non_zero_calls}nz {self.parse_errors}pe {self.api_errors}ae]"
+            )
+            self._cache[token] = (time.time(), score)
+            self._consecutive_failures = 0
+            return float(score)
+
+        # Anthropic Haiku path
         payload = {
             "model": self.model,
             "max_tokens": 100,
@@ -289,7 +365,6 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
         }
 
         resp = self._call_api_with_retry(payload)
-        self.daily_calls += 1
 
         if resp is None:
             self.api_errors += 1
@@ -304,16 +379,18 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
         try:
             data = resp.json()
             text = data["content"][0]["text"]
-            # Extract JSON object from text (Claude sometimes wraps in markdown/extra text)
-            import re
-            match = re.search(r'\{[^{}]*"score"[^{}]*\}', text, re.DOTALL)
-            if not match:
+            score = self._parse_sentiment_score(text)
+            if score is None:
                 self.parse_errors += 1
                 logger.error(f"Claude sentiment: no JSON object found in response: {text[:200]}")
                 return None
-            result = json.loads(match.group(0))
-            score = max(-20, min(20, float(result["score"])))
-            reason = result.get("reason", "")
+            reason = ""
+            try:
+                m = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
+                if m:
+                    reason = json.loads(m.group(0)).get("reason", "") or ""
+            except Exception:
+                pass
             if score != 0:
                 self.non_zero_calls += 1
             logger.info(
@@ -406,9 +483,21 @@ class SygnifStrategy(IStrategy):
     _doom_loss_count: dict[str, list[float]] = {}  # consecutive loss tracking
 
     # Slot caps per entry type (prevent one type hogging all slots)
-    max_slots_strong = 6      # strong_ta entries (TA >= 65)
+    max_slots_strong = 6      # strong_ta entries (TA >= strong_ta_min_score)
+    max_slots_strong_short = 6  # strong_ta_short (futures) — mirrors long cap
     max_slots_swing = 4       # swing_failure, claude_swing, etc.
     _swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
+
+    # --- Runtime tunables (defaults; overridden by user_data/strategy_adaptation.json) ---
+    strong_ta_min_score = 65
+    strong_ta_short_max_score = 25
+    claude_long_score_low = 40
+    claude_long_score_high = 64
+    claude_short_score_low = 30
+    claude_short_score_high = 60
+    vol_strong_mult = 1.2
+    _adaptation_last_load: float = 0.0
+    _adaptation_refresh_secs: int = 60
 
     # Premium tag reservation: non-premium entries are capped at
     # premium_nonreserved_max open trades. Remaining slots (max_open_trades -
@@ -428,9 +517,31 @@ class SygnifStrategy(IStrategy):
         self._load_doom_cooldown()
         self._refresh_movers()
         self._refresh_new_pairs()
+        self._refresh_strategy_adaptation(force=True)
+
+    def _refresh_strategy_adaptation(self, force: bool = False) -> None:
+        """Load bounded overrides from user_data/strategy_adaptation.json (hot-reload)."""
+        now = time.time()
+        if not force and (now - self._adaptation_last_load) < self._adaptation_refresh_secs:
+            return
+        self._adaptation_last_load = now
+        try:
+            ud = Path(__file__).resolve().parent.parent
+            mod_path = ud / "strategy_adaptation.py"
+            json_path = ud / "strategy_adaptation.json"
+            spec = importlib.util.spec_from_file_location("_sygnif_adapt", mod_path)
+            if spec is None or spec.loader is None or not mod_path.is_file():
+                return
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            ovr = mod.load_adaptation_file(json_path)
+            mod.apply_defaults_and_overrides(self, ovr)
+        except Exception as e:
+            logger.warning("strategy_adaptation: %s", e)
 
     def bot_loop_start(self, current_time=None, **kwargs) -> None:
         """Inject movers and externally-sourced new pairs into active whitelist."""
+        self._refresh_strategy_adaptation(force=False)
         self._refresh_movers()
         self._refresh_new_pairs()
         if not self.dp:
@@ -1143,9 +1254,9 @@ class SygnifStrategy(IStrategy):
         # TA score for all rows
         ta_score = self._calculate_ta_score_vectorized(df)
 
-        # Strong TA signal — requires TA >= 65 + volume confirmation
-        vol_ok = df["volume"] > (df["volume_sma_25"] * 1.2)
-        strong = prot & empty_ok & (ta_score >= 65) & vol_ok
+        # Strong TA signal — TA >= strong_ta_min_score + volume confirmation
+        vol_ok = df["volume"] > (df["volume_sma_25"] * self.vol_strong_mult)
+        strong = prot & empty_ok & (ta_score >= self.strong_ta_min_score) & vol_ok
         df.loc[strong, "enter_long"] = 1
         df.loc[strong, "enter_tag"] = "strong_ta"
 
@@ -1155,7 +1266,7 @@ class SygnifStrategy(IStrategy):
             last_prot = prot.iloc[-1] if hasattr(prot, 'iloc') else True
             last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
 
-            if last_prot and last_empty and 40 <= last_score <= 64:
+            if last_prot and last_empty and self.claude_long_score_low <= last_score <= self.claude_long_score_high:
                 pair = metadata.get("pair", "XRP/USDT")
                 token = pair.split("/")[0]
                 price = df.iloc[-1]["close"]
@@ -1199,8 +1310,11 @@ class SygnifStrategy(IStrategy):
 
         prot_short = df.get("protections_short_global", pd.Series(True, index=df.index))
 
-        # Strong TA short signal — entry without Claude
-        strong_short = prot_short & empty_ok & (ta_score <= 25)
+        # Strong TA short — same volume confirmation as strong_ta long (avoid illiquid chop)
+        vol_ok_short = df["volume"] > (df["volume_sma_25"] * self.vol_strong_mult)
+        strong_short = (
+            prot_short & empty_ok & (ta_score <= self.strong_ta_short_max_score) & vol_ok_short
+        )
         df.loc[strong_short, "enter_short"] = 1
         df.loc[strong_short, "enter_tag"] = "strong_ta_short"
 
@@ -1210,7 +1324,7 @@ class SygnifStrategy(IStrategy):
             last_prot_s = prot_short.iloc[-1] if hasattr(prot_short, 'iloc') else True
             last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, 'iloc') else True
 
-            if last_prot_s and last_empty and 30 <= last_score <= 60:
+            if last_prot_s and last_empty and self.claude_short_score_low <= last_score <= self.claude_short_score_high:
                 pair = metadata.get("pair", "XRP/USDT")
                 token = pair.split("/")[0]
                 price = df.iloc[-1]["close"]
@@ -1280,6 +1394,14 @@ class SygnifStrategy(IStrategy):
             count = sum(1 for t in open_trades if (t.enter_tag or "") == "strong_ta")
             if count >= self.max_slots_strong:
                 logger.info(f"Strong TA slot cap: {count}/{self.max_slots_strong}, skipping {pair}")
+                return False
+
+        if tag == "strong_ta_short":
+            count = sum(1 for t in open_trades if (t.enter_tag or "") == "strong_ta_short")
+            if count >= self.max_slots_strong_short:
+                logger.info(
+                    f"Strong TA short slot cap: {count}/{self.max_slots_strong_short}, skipping {pair}"
+                )
                 return False
 
         if tag in self._swing_tags:

@@ -159,3 +159,10 @@ curl -s http://localhost:8081/api/v1/ping
 | 8081 | Freqtrade API (futures) |
 | 8888 | Spot dashboard |
 | 8889 | Futures dashboard |
+
+## AWS Session Manager (SSM)
+
+Persistent shell without inbound SSH: see [docs/AWS_SSM_SESSION_MANAGER.md](docs/AWS_SSM_SESSION_MANAGER.md).
+
+Quick verify after reboot: ~/xrp_claude_bot/scripts/verify-ssm-agent.sh
+
