@@ -18,7 +18,7 @@ BTC dependency for alts:
 - Apply lead-lag pause after BTC impulse moves
 
 Strategy comparison policy:
-- Compare `swing_failure`, `claude_swing` vs baseline `claude_s0`
+- Compare `swing_failure`, `sygnif_swing` vs baseline `sygnif_s0` (legacy `claude_*` / `fa_*` in history)
 - Report trade count, win rate, total P/L, avg P/L, avg duration
 - Verdict per tag: `BETTER` / `MIXED` / `WORSE`
 - No promote/demote below sample threshold

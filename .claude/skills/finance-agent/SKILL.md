@@ -170,7 +170,8 @@ Exits (examples): Williams %R extremes — confirm against `SygnifStrategy.py` /
 | Tag | Meaning |
 |-----|---------|
 | `swing_failure` / `swing_failure_short` | Pattern; TA on the weak side of **`sf_ta_split`**; **`custom_exit`** = swing TP/SL only. |
-| `claude_swing` / `claude_swing_short` | Pattern + TA on confirming side of **`sf_ta_split`**; swing exit first, then **may** use Williams/RSI paths. |
+| `sygnif_swing` / `sygnif_swing_short` (legacy `claude_*` / `fa_*`) | Pattern + TA on confirming side of **`sf_ta_split`**; swing exit first, then **may** use Williams/RSI paths. |
+| `sygnif_s{N}` / `sygnif_short_s{N}` (legacy `claude_*`) | Mid-TA + finance-agent sentiment; **`exit_*`** = normal RSI/WillR/soft SL stack (not swing-only). |
 
 **Hot-reload (`user_data/strategy_adaptation.json` → `overrides`):** Clamped in `user_data/strategy_adaptation.py` (`DEFAULTS`, `BOUNDS`). Swing-related keys include **`max_slots_swing`**, **`sf_lookback_bars`**, **`sf_vol_filter_min`**, **`sf_sl_base`**, **`sf_sl_vol_scale`**, **`sf_tp_vol_scale`**, **`sf_ta_split`**, plus existing TA/sentiment keys. Reload ~60s in `bot_loop_start`; no restart. **Cursor workflow:** `.cursor/rules/sygnif-swing-tuning.mdc`.
 
@@ -182,7 +183,7 @@ Exits (examples): Williams %R extremes — confirm against `SygnifStrategy.py` /
 
 **Tag-level SQL:** `scripts/merge_backup_trade_analysis.sql`; touch rates: `user_data/logs/touch_rate_tracker.jsonl`.
 
-When the user asks **swing vs indicator interruption**, cite **`custom_exit`** for `swing_failure` vs `claude_swing` and **tag-level stats**.
+When the user asks **swing vs indicator interruption**, cite **`custom_exit`** for `swing_failure` vs `sygnif_swing` and **tag-level stats**.
 
 ### Leverage tiers (reference)
 
@@ -238,7 +239,8 @@ Dockerized overseer often uses `host.docker.internal` to reach a host-run financ
 | `user_data/strategy_adaptation.py` | Bounded overrides loader (`sf_*`, slots, sentiment bands) |
 | `user_data/strategies/MarketStrategy2.py` | MS2 strategy (sentiment + same SF stack as SygnifStrategy) |
 | `.cursor/rules/sygnif-swing-tuning.mdc` | Agent workflow for swing JSON tuning |
-| `scripts/merge_backup_trade_analysis.sql` | Merged spot+futures backup SQLite: tag stats, `claude_swing` by `exit_reason`, median hold |
+| `scripts/merge_backup_trade_analysis.sql` | Merged spot+futures backup SQLite: tag stats, `sygnif_swing` / legacy tags by `exit_reason`, median hold |
+| `finance_agent/network_post_trade_workflow.md` | **Five-phase post-trade:** fetch outcome → compare to thesis → win/fail → post-exit price + post-hoc thesis → predictability check (`GET /training` → `post_trade_network_workflow`) |
 
 ---
 

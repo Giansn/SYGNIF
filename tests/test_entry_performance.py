@@ -54,6 +54,15 @@ class TestClassify:
         assert classify("claude_s3") == "fa_s"
         assert classify("claude_short_s2") == "fa_s"
 
+    def test_sygnif_s_maps_to_fa_s(self):
+        assert classify("sygnif_s3") == "fa_s"
+        assert classify("sygnif_short_s2") == "fa_s"
+        assert classify("sygnif_s-5") == "fa_s"
+
+    def test_sygnif_swing_classifies(self):
+        assert classify("sygnif_swing") == "fa_swing"
+        assert classify("sygnif_swing_short") == "fa_swing"
+
     def test_fa_short_s(self):
         assert classify("fa_short_s3") == "fa_s"
 

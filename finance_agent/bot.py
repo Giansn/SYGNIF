@@ -1784,7 +1784,7 @@ def cmd_deduce(args: str) -> str:
             "Nutze: `/deduce <These oder Frage>`\n"
             "Beispiel: `/deduce Wenn BTC die Woche bullisch bleibt, welche Alts passen zu Sygnif swing tags?`"
         )
-    prompt = f"""You are a trading research assistant for Sygnif (Freqtrade, Bybit, TA score 0–100, tags like strong_ta, fa_s*, swing_failure, fa_swing).
+    prompt = f"""You are a trading research assistant for Sygnif (Freqtrade, Bybit, TA score 0–100, tags like strong_ta, sygnif_s*, swing_failure, sygnif_swing; legacy fa_* / claude_* in DB).
 
 Task: answer using explicit DEDUCTIVE reasoning.
 

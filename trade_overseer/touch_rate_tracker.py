@@ -12,8 +12,8 @@ Reports per-entry-family statistics including:
 
 Also reports per-exit-family realized P&L distribution.
 
-Tags like `fa_s-5`, `fa_s3` (and legacy `claude_s*`) collapse into the
-`fa_s` long family; `fa_short_s*` (and legacy `claude_short_s*`) into the
+Tags like `fa_s-5`, `sygnif_s3` (and legacy `claude_s*`) collapse into the
+`fa_s` long family; `fa_short_s*` / `sygnif_short_s*` (and legacy `claude_short_s*`) into the
 short row. Dynamic `exit_profit_rsi_*` exit reasons are grouped by prefix.
 The full strategy taxonomy is enumerated
 explicitly so families that have never fired still show up as 0-row entries
@@ -43,12 +43,12 @@ from typing import Optional
 ENTRY_FAMILIES = [
     # (family_id, side, regex, description)
     ("strong_ta",            "long",  r"^strong_ta$",                "TA score >= 65 + vol > 1.2x"),
-    ("fa_s",             "long",  r"^((fa_s)|(claude_s))-?\d+$", "TA 40-70 + finance-agent sentiment"),
-    ("fa_swing",         "long",  r"^(fa_swing|claude_swing)$", "Failure swing + TA >= 50"),
+    ("fa_s",             "long",  r"^((fa_s)|(claude_s)|(sygnif_s))-?\d+$", "TA 40-70 + finance-agent sentiment"),
+    ("fa_swing",         "long",  r"^(fa_swing|claude_swing|sygnif_swing)$", "Failure swing + TA >= 50"),
     ("swing_failure",        "long",  r"^swing_failure$",            "Failure swing standalone"),
     ("strong_ta_short",      "short", r"^strong_ta_short$",          "TA score <= 25"),
-    ("fa_short_s",       "short", r"^((fa_short_s)|(claude_short_s))-?\d+$", "TA 30-60 + bearish sentiment"),
-    ("fa_swing_short",   "short", r"^(fa_swing_short|claude_swing_short)$", "Failure swing + TA <= 50"),
+    ("fa_short_s",       "short", r"^((fa_short_s)|(claude_short_s)|(sygnif_short_s))-?\d+$", "TA 30-60 + bearish sentiment"),
+    ("fa_swing_short",   "short", r"^(fa_swing_short|claude_swing_short|sygnif_swing_short)$", "Failure swing + TA <= 50"),
     ("swing_failure_short",  "short", r"^swing_failure_short$",      "Failure swing standalone short"),
 ]
 

@@ -20,7 +20,7 @@ Edit `user_data/strategy_adaptation.json` → `overrides`. Values are **clamped*
 | `sf_sl_base` | Base stop distance fraction for `sf_sl_pct` | ↔ risk per trade |
 | `sf_sl_vol_scale` | Volatility term in `sf_sl_pct` | ↑ wider stops in volatile tape |
 | `sf_tp_vol_scale` | How far `sf_tp_ema` sits beyond EMA120 | ↑ larger TP target |
-| `sf_ta_split` | TA score boundary: long `claude_swing` if ≥ split, `swing_failure` if below; short inverted | ↑ more `swing_failure*` vs `claude_swing*` |
+| `sf_ta_split` | TA score boundary: long `sygnif_swing` if ≥ split, `swing_failure` if below; short inverted | ↑ more `swing_failure*` vs `sygnif_swing*` |
 
 Related non-swing keys that still change swing *context*: `strong_ta_min_score`, protections are unchanged in code—tune structure with `sf_*` and slots.
 
@@ -32,7 +32,7 @@ Related non-swing keys that still change swing *context*: `strong_ta_min_score`,
 ## Workflow
 
 1. Adjust JSON overrides; set `reason` + `updated` for audit.
-2. Backtest / dry-run; compare tag mix (`claude_swing*` vs `swing_failure*`) and `exit_sf_*` rates.
+2. Backtest / dry-run; compare tag mix (`sygnif_swing*` vs `swing_failure*`) and `exit_sf_*` rates.
 3. See `docs/backtest_live_parity.md` if comparing live vs backtest.
 
 ## Do not

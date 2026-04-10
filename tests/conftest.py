@@ -94,9 +94,11 @@ def strategy():
         "swing_failure",
         "fa_swing",
         "claude_swing",
+        "sygnif_swing",
         "swing_failure_short",
         "fa_swing_short",
         "claude_swing_short",
+        "sygnif_swing_short",
     }
     s.can_short = False
     s.dp = None

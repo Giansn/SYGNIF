@@ -64,16 +64,24 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             reason = "Top loser \u2014 mean-reversion bounce"
         elif tag.startswith("fa_short_s"):
             reason = f"AI bearish sentiment ({tag.replace('fa_short_s', '+')})"
-        elif tag.startswith("fa_s"):
-            reason = f"AI bullish sentiment ({tag.replace('fa_s', '+')})"
-        elif tag == "fa_swing":
+        elif tag.startswith("sygnif_short_s"):
+            reason = f"Bearish sentiment ({tag.replace('sygnif_short_s', '+')})"
+        elif tag.startswith("claude_short_s"):
+            reason = f"Bearish sentiment ({tag.replace('claude_short_s', '+')})"
+        elif tag in ("fa_swing", "sygnif_swing", "claude_swing"):
             reason = "Failure Swing \u2014 TA confluence"
+        elif tag in ("fa_swing_short", "sygnif_swing_short", "claude_swing_short"):
+            reason = "Bearish Swing \u2014 TA confluence"
         elif tag == "swing_failure":
             reason = "Failure Swing \u2014 standalone"
-        elif tag == "fa_swing_short":
-            reason = "Bearish Swing \u2014 TA confluence"
         elif tag == "swing_failure_short":
             reason = "Bearish Swing \u2014 standalone"
+        elif tag.startswith("fa_s"):
+            reason = f"AI bullish sentiment ({tag.replace('fa_s', '+')})"
+        elif tag.startswith("sygnif_s"):
+            reason = f"Bullish sentiment ({tag.replace('sygnif_s', '+')})"
+        elif tag.startswith("claude_s"):
+            reason = f"Bullish sentiment ({tag.replace('claude_s', '+')})"
         else:
             reason = tag if tag else "Standard signal"
         # ── ORDER PLACED ──
@@ -90,7 +98,14 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             lines.append(f"*Reason:* {reason}")
             if tag in ("swing_failure", "swing_failure_short"):
                 lines.append(f"*Exit plan:* Swing TP/SL")
-            elif tag in ("fa_swing", "fa_swing_short"):
+            elif tag in (
+                "fa_swing",
+                "fa_swing_short",
+                "sygnif_swing",
+                "sygnif_swing_short",
+                "claude_swing",
+                "claude_swing_short",
+            ):
                 lines.append(f"*Exit plan:* Swing \u2192 General")
             else:
                 lines.append(f"*Exit plan:* RSI/WillR/SL")

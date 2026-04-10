@@ -13,7 +13,7 @@ Mandatory sequence:
 2) Setup checks (ORB/IB/VWAP/RVOL/delta where available)
 3) Route task mode (`futures_long`, `futures_short`, `spot`) using labels first, then keywords
 4) BTC dependency gate for alt assets
-5) Strategy-tag comparison (swing_failure, claude_swing vs baseline claude_s0)
+5) Strategy-tag comparison (swing_failure, sygnif_swing vs baseline sygnif_s0; legacy claude_* in DB)
 6) Return LONG/SHORT/BUY/HOLD/NO_TRADE with risk plan and confidence
 
 If confirmations conflict or data is stale/missing => NO_TRADE or BLOCKED.

@@ -6,6 +6,7 @@ find Jupyter and repo paths. Does not run training or load model weights.
 
 See requirements-training.txt (same directory) for optional torch/orthogonium pins used
 in the nn-zero-to-hero venv, not in production finance-agent.
+network_post_trade_workflow.md documents the post-trade network analysis template for agent training.
 """
 from __future__ import annotations
 
@@ -83,6 +84,9 @@ def build_training_payload() -> dict[str, Any]:
         "optional_training_requirements": str(
             Path(__file__).resolve().parent / "requirements-training.txt"
         ),
+        "post_trade_network_workflow": str(
+            Path(__file__).resolve().parent / "network_post_trade_workflow.md"
+        ),
         "integration_note": (
             "Optional numpy MLP blends with rules when SENTIMENT_MLP_WEIGHTS is set; retrain with "
             "scripts/train_sentiment_mlp.py (synthetic + optional --freqtrade-db closed trades). "
@@ -90,7 +94,8 @@ def build_training_payload() -> dict[str, Any]:
             "Alongside the nn-zero-to-hero course, Orthogonium-backed orthogonal / 1-Lipschitz experiments: "
             "install optional deps via optional_training_requirements "
             "(same install line as in requirements-training.txt: activate nn-zero-to-hero .venv, pip install -r path from optional_training_requirements); "
-            "pin package versions when exporting serialized weights (Orthogonium README)."
+            "pin package versions when exporting serialized weights (Orthogonium README). "
+            "Post-trade analysis (5 phases: fetch outcome → compare to thesis → win/fail → post-exit price + post-hoc thesis → predictability check): post_trade_network_workflow."
         ),
     }
     return out

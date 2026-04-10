@@ -173,7 +173,16 @@ def format_entry_msg(msg):
         return "\n".join(lines)
 
     # Order Filled
-    if tag in ("swing_failure", "swing_failure_short", "fa_swing", "fa_swing_short"):
+    if tag in (
+        "swing_failure",
+        "swing_failure_short",
+        "fa_swing",
+        "fa_swing_short",
+        "sygnif_swing",
+        "sygnif_swing_short",
+        "claude_swing",
+        "claude_swing_short",
+    ):
         tp_pcts = [0.02, 0.03, 0.05, 0.08]
         sl_pct = 0.04
     else:

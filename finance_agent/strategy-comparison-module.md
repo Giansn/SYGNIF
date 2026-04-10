@@ -3,8 +3,8 @@
 ## Tags
 
 - `swing_failure`
-- `claude_swing`
-- Baseline: `claude_s0`
+- `sygnif_swing`
+- Baseline: `sygnif_s0` (legacy: `claude_swing`, `claude_s0`, `fa_*`)
 
 ## Required metrics per tag
 

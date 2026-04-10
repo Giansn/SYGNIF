@@ -15,7 +15,7 @@ ENTRY_FAMILIES = {
     "strong_ta": re.compile(r"^strong_ta$"),
     "strong_ta_short": re.compile(r"^strong_ta_short$"),
     "fa_s": re.compile(r"^((fa_(short_)?s)|(claude_(short_)?s))-?\d+$"),
-    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing))(_short)?$"),
+    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing)|(sygnif_swing))(_short)?$"),
     "swing_failure": re.compile(r"^swing_failure(_short)?$"),
 }
 

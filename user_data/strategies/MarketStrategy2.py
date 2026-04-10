@@ -676,8 +676,19 @@ class MarketStrategy2(IStrategy):
     # Slot caps per entry type (prevent one type hogging all slots)
     max_slots_strong = 6      # strong_ta entries (TA >= strong_ta_min_score)
     max_slots_strong_short = 6  # strong_ta_short (futures) — mirrors long cap
-    max_slots_swing = 4       # swing_failure, claude_swing, etc.
-    _swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
+    max_slots_swing = 4       # swing_failure, sygnif_swing (+ fa_/claude_ legacy aliases)
+    _swing_tags = frozenset({
+        "swing_failure",
+        "swing_failure_short",
+        "sygnif_swing",
+        "sygnif_swing_short",
+        "fa_swing",
+        "fa_swing_short",
+        "claude_swing",
+        "claude_swing_short",
+    })
+    _swing_hybrid_long = frozenset({"sygnif_swing", "fa_swing", "claude_swing"})
+    _swing_hybrid_short = frozenset({"sygnif_swing_short", "fa_swing_short", "claude_swing_short"})
 
     # --- Runtime tunables (defaults; overridden by user_data/strategy_adaptation.json) ---
     strong_ta_min_score = 65
@@ -700,7 +711,9 @@ class MarketStrategy2(IStrategy):
     # Premium tag reservation: non-premium entries are capped at
     # premium_nonreserved_max open trades. Remaining slots (max_open_trades -
     # premium_nonreserved_max) are reserved for tags in PREMIUM_TAGS only.
-    PREMIUM_TAGS = frozenset({"claude_s-5", "claude_swing_short"})
+    PREMIUM_TAGS = frozenset(
+        {"sygnif_s-5", "sygnif_swing_short", "claude_s-5", "claude_swing_short"}
+    )
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
     # Claude layer (same attr name as SygnifStrategy — populate_entry_trend uses self.claude)
@@ -710,7 +723,9 @@ class MarketStrategy2(IStrategy):
     RISK_PCT = 0.02  # 2% of equity risked per trade
 
     # --- DCA scale-in (Lesson 4) ---
-    DCA_ELIGIBLE_TAGS = frozenset({"claude_s-2", "claude_s-5"})
+    DCA_ELIGIBLE_TAGS = frozenset(
+        {"sygnif_s-2", "sygnif_s-5", "claude_s-2", "claude_s-5"}
+    )
     DCA_DRAWDOWN_STEP = -0.03
     DCA_MAX_ENTRIES = 1
     DCA_SCALE_FACTOR = 0.5
@@ -1385,7 +1400,7 @@ class MarketStrategy2(IStrategy):
         enter_tag = trade.enter_tag or ""
 
         # --- Swing failure trades: use their own dynamic SL (on-exchange) ---
-        if enter_tag in ("swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"):
+        if enter_tag in self._swing_tags:
             try:
                 df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
                 if len(df) > 0 and "sf_sl_pct" in df.columns:
@@ -1560,7 +1575,7 @@ class MarketStrategy2(IStrategy):
                     final_score = last_score + sentiment
                     if final_score >= self.sentiment_threshold_buy:
                         df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"sygnif_s{sentiment:.0f}"
 
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
@@ -1572,9 +1587,9 @@ class MarketStrategy2(IStrategy):
                 last_score = ta_score.iloc[-1]
                 split = float(self.sf_ta_split)
                 if last_score >= split:
-                    # claude_swing: failure swing + TA confluence
+                    # sygnif_swing: failure swing + TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing"
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "sygnif_swing"
                 else:
                     # swing_failure: standalone, TA not confirming but pattern is clear
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
@@ -1623,7 +1638,7 @@ class MarketStrategy2(IStrategy):
                     final_score = last_score + sentiment
                     if final_score <= self.sentiment_threshold_sell:
                         df.iloc[-1, df.columns.get_loc("enter_short")] = 1
-                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_short_s{sentiment:.0f}"
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = f"sygnif_short_s{sentiment:.0f}"
 
         # --- Failure Swing short entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_short", 0):
@@ -1635,9 +1650,9 @@ class MarketStrategy2(IStrategy):
                 last_score = ta_score.iloc[-1]
                 split = float(self.sf_ta_split)
                 if last_score <= split:
-                    # claude_swing short: failure swing + bearish TA confluence
+                    # sygnif_swing_short: failure swing + bearish TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
-                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing_short"
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "sygnif_swing_short"
                 else:
                     # swing_failure_short: standalone pattern
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
@@ -1779,7 +1794,7 @@ class MarketStrategy2(IStrategy):
 
         # Premium-tag slot reservation
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
-        # leaving the top slots available only for high-edge tags (claude_s-5).
+        # leaving the top slots available only for high-edge tags (e.g. sygnif_s-5).
         # Premium tags bypass this cap and may fill up to max_open_trades.
         if tag not in self.PREMIUM_TAGS:
             total_open = len(open_trades)
@@ -1892,7 +1907,7 @@ class MarketStrategy2(IStrategy):
         if enter_tag == "swing_failure":
             return self._exit_swing_failure(last, current_rate, trade, current_profit)
 
-        if enter_tag == "claude_swing":
+        if enter_tag in self._swing_hybrid_long:
             # Hybrid: check both EMA-TP and Williams %R, first one wins
             sf_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
             if sf_exit:
@@ -1975,7 +1990,7 @@ class MarketStrategy2(IStrategy):
         if enter_tag == "swing_failure_short":
             return self._exit_swing_failure(last, current_rate, trade, current_profit)
 
-        if enter_tag == "claude_swing_short":
+        if enter_tag in self._swing_hybrid_short:
             sf_exit = self._exit_swing_failure(last, current_rate, trade, current_profit)
             if sf_exit:
                 return sf_exit

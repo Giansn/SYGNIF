@@ -10,7 +10,7 @@ Data sources (in priority order):
 
 Families analysed:
   - swing_failure  (long + short)
-  - fa_swing   (long + short; legacy claude_swing* still classified)
+  - fa_swing   (long + short; sygnif_swing* + legacy fa_/claude_swing*)
   - fa_s       (all fa_s* / fa_short_s* collapsed; baseline = fa_s0)
 
 Usage:
@@ -73,8 +73,10 @@ BASELINE_TAG = "fa_s0"
 # Families we care about for this report
 TARGET_FAMILIES = {
     "swing_failure": re.compile(r"^swing_failure(_short)?$"),
-    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing))(_short)?$"),
-    "fa_s": re.compile(r"^((fa_(short_)?s)|(claude_(short_)?s))-?\d+$"),
+    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing)|(sygnif_swing))(_short)?$"),
+    "fa_s": re.compile(
+        r"^((fa_(short_)?s)|(claude_(short_)?s)|(sygnif_(short_)?s))-?\d+$"
+    ),
 }
 
 GHOSTED_EXIT_REASONS = {"force_exit", "emergency_exit", "liquidation"}

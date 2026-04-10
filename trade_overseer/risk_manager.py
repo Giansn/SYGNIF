@@ -79,10 +79,18 @@ class RiskEngineConfig:
     max_slots_swing: int = 4
     premium_nonreserved_max: int = 10
 
-    premium_tags: frozenset = frozenset({"fa_s-5", "fa_swing_short"})
+    premium_tags: frozenset = frozenset(
+        {"fa_s-5", "fa_swing_short", "sygnif_s-5", "sygnif_swing_short", "claude_s-5", "claude_swing_short"}
+    )
     swing_tags: frozenset = frozenset({
-        "swing_failure", "fa_swing",
-        "swing_failure_short", "fa_swing_short",
+        "swing_failure",
+        "fa_swing",
+        "sygnif_swing",
+        "claude_swing",
+        "swing_failure_short",
+        "fa_swing_short",
+        "sygnif_swing_short",
+        "claude_swing_short",
     })
 
     doom_cooldown_secs: int = 14400

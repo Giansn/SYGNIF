@@ -44,16 +44,16 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 
 def _collapse_tag(tag: str) -> str:
-    """Collapse fa_s{N} / fa_short_s{N} (and legacy claude_*) to family names."""
+    """Collapse fa_s{N} / fa_short_s{N} (and sygnif_* / legacy claude_*) to family names."""
     if not tag:
         return "unknown"
-    if tag.startswith(("fa_swing_short", "claude_swing_short")):
+    if tag.startswith(("fa_swing_short", "claude_swing_short", "sygnif_swing_short")):
         return "fa_swing_shortN"
-    if tag.startswith(("fa_swing", "claude_swing")):
+    if tag.startswith(("fa_swing", "claude_swing", "sygnif_swing")):
         return "fa_swingN"
-    if tag.startswith(("fa_short_s", "claude_short_s")):
+    if tag.startswith(("fa_short_s", "claude_short_s", "sygnif_short_s")):
         return "fa_short_sN"
-    if tag.startswith(("fa_s", "claude_s")):
+    if tag.startswith(("fa_s", "claude_s", "sygnif_s")) and "swing" not in tag:
         return "fa_sN"
     return tag
 

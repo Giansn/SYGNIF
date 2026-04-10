@@ -23,10 +23,11 @@ Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment ana
 |---|---|---|
 | `strong_ta` | Long | TA score >= 65 + volume > 1.2x SMA25 |
 | `strong_ta_short` | Short | TA score <= 25 (vectorized) |
-| `claude_s{N}` | Long | TA 40-70 + Claude sentiment, combined >= 55 |
-| `claude_short_s{N}` | Short | TA 30-60 + Claude sentiment, combined <= 40 |
-| `claude_swing` | Long | Failure swing + TA >= 50 |
-| `claude_swing_short` | Short | Failure swing + TA <= 50 |
+| `sygnif_s{N}` | Long | TA 40-70 + finance-agent sentiment, combined >= 55 |
+| `sygnif_short_s{N}` | Short | TA 30-60 + bearish sentiment, combined <= 40 |
+| `sygnif_swing` | Long | Failure swing + TA >= 50 |
+| `sygnif_swing_short` | Short | Failure swing + TA <= 50 |
+| `claude_*` / `fa_*` | — | Legacy `enter_tag` values still recognized for open trades & analytics |
 | `swing_failure` | Long | Failure swing standalone |
 | `swing_failure_short` | Short | Failure swing standalone |
 
@@ -95,12 +96,12 @@ These fixes were deployed 2026-04-06. The strategy proves itself when:
 | `CooldownPeriod` (line 372) | **2 candles (10 min)** | 5→1 caused SIREN whipsaw (50s re-entry); 1→2 blocks same-pair churn while preserving cross-pair rotation |
 | `max_open_trades` (futures) | **12** | 10 normal + 2 reserved for premium tags |
 | `dry_run_wallet` (futures) | **$240** | $192 tradable / 12 slots = **$16/trade** (was $8) |
-| `PREMIUM_TAGS` (line 416) | `{claude_s-5, claude_swing_short}` | Slots 11-12 reserved; non-premium hard-capped at 10 via `confirm_trade_entry` |
+| `PREMIUM_TAGS` | `{sygnif_s-5, sygnif_swing_short}` (+ legacy `claude_*`) | Slots 11-12 reserved; non-premium hard-capped at 10 via `confirm_trade_entry` |
 | `premium_nonreserved_max` | 10 | Non-premium cap inside the 12-slot book |
 
 ### Touch-Rate Tracker
 
-`trade_overseer/touch_rate_tracker.py` reports per-entry-family hit-rate of the +1% breakeven-arming threshold, plus avg peak vs realized (slippage). Collapses `claude_s{N}` / `claude_short_s{N}` to families and lists never-fired strategy paths so dead code is visible. Ghosts `force_exit`/`emergency_exit`/`liquidation` from entry stats. Logs JSONL to `user_data/logs/touch_rate_tracker.jsonl` for trend tracking.
+`trade_overseer/touch_rate_tracker.py` reports per-entry-family hit-rate of the +1% breakeven-arming threshold, plus avg peak vs realized (slippage). Collapses `sygnif_s*` / legacy `claude_*` / `fa_*` into families and lists never-fired strategy paths so dead code is visible. Ghosts `force_exit`/`emergency_exit`/`liquidation` from entry stats. Logs JSONL to `user_data/logs/touch_rate_tracker.jsonl` for trend tracking.
 
 ```bash
 ssh ubuntu@3.122.252.186 "cd ~/SYGNIF && python3 trade_overseer/touch_rate_tracker.py"
