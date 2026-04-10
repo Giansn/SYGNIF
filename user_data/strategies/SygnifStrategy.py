@@ -16,9 +16,8 @@ Cost: With `SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP=1`, sentiment is **non-LLM** on 
   See `SENTIMENT_BACKEND` only if you deliberately disable HTTP and use cloud/Anthropic.
 
 **Backend switch:** Set `SYGNIF_STRATEGY_BACKEND=ms2` (or `marketstrategy2`) so the Freqtrade
-class `SygnifStrategy` inherits **MarketStrategy2** (live snapshot + Haiku loop sentiment)
-while keeping `config["strategy"] = "SygnifStrategy"`. Default unset / `sygnif` = this file's
-HTTP-first **SygnifSentiment** stack (**_SygnifStrategyDefault**).
+class `SygnifStrategy` inherits **MarketStrategy2** while keeping `config["strategy"] = "SygnifStrategy"`.
+Default = **SygnifSentiment** stack (**_SygnifStrategyDefault**).
 """
 
 import logging
@@ -327,7 +326,6 @@ class SygnifSentiment:
                 logger.info("Sentiment HTTP (%s) for %s: %s", http_url, token, sc)
                 return float(sc)
             logger.warning("SYGNIF_SENTIMENT_HTTP failed (%s): %s", token, err)
-            # Finance-agent path only — do not fall through to Cursor/Haiku.
             return None
 
         if self.daily_calls >= self.daily_limit:
@@ -1982,8 +1980,8 @@ if _MS2_BASE is not None:
         """
         Same as :class:`MarketStrategy2` while keeping config ``strategy: SygnifStrategy``.
 
-        Enable with ``SYGNIF_STRATEGY_BACKEND=ms2`` or ``marketstrategy2`` (e.g. in ``.env`` or
-        compose). Restart Freqtrade after changing — import-time switch.
+        Enable with ``SYGNIF_STRATEGY_BACKEND=ms2`` or ``marketstrategy2``. Restart Freqtrade
+        after changing — import-time switch.
         """
 
         pass
