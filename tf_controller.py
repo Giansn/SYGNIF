@@ -9,9 +9,11 @@ import json
 import subprocess
 import time
 import requests
+from pathlib import Path
 
-STRATEGY_PATH = "/home/ubuntu/xrp_claude_bot/user_data/strategies/SygnifStrategy.py"
-CONFIG_PATH = "/home/ubuntu/xrp_claude_bot/user_data/config.json"
+_repo = Path(os.environ.get("SYGNIF_REPO", str(Path.home() / "SYGNIF")))
+STRATEGY_PATH = str(_repo / "user_data/strategies/SygnifStrategy.py")
+CONFIG_PATH = str(_repo / "user_data/config.json")
 VALID_TIMEFRAMES = {
     "/tf5m": "5m",
     "/tf15m": "15m",

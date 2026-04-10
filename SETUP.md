@@ -3,6 +3,8 @@
 > Freqtrade trading bot on Bybit spot with NFI-inspired strategy + Claude sentiment layer.
 > Runs on an Azure VM at `51.102.104.76`.
 
+> **Naming:** The product/repo is **Sygnif**. Clone into **`~/SYGNIF`** (canonical). **`xrp_claude_bot`** was an old folder name only — if a host still uses it, set **`SYGNIF_REPO=/home/ubuntu/xrp_claude_bot`** in `.env` or symlink **`~/SYGNIF`** → that directory.
+
 ---
 
 ## Architecture
@@ -32,8 +34,8 @@
 ## 1. Clone the Repo
 
 ```bash
-git clone https://github.com/Giansn/sygnif.git ~/xrp_claude_bot
-cd ~/xrp_claude_bot
+git clone https://github.com/Giansn/sygnif.git ~/SYGNIF
+cd ~/SYGNIF
 ```
 
 ---
@@ -92,31 +94,44 @@ The bot reads top gainers/losers from `user_data/movers_pairlist.json`, updated 
 python3 update_movers.py
 
 # Add to cron (every 4h)
-(crontab -l; echo "0 */4 * * * /usr/bin/python3 ~/xrp_claude_bot/update_movers.py >> ~/xrp_claude_bot/movers_update.log 2>&1") | crontab -
+(crontab -l; echo "0 */4 * * * /usr/bin/python3 ~/SYGNIF/update_movers.py >> ~/SYGNIF/movers_update.log 2>&1") | crontab -
 ```
 
 ---
 
-## 4. Connect Claude Code
+## 4. Cursor & Claude Code
 
-### SSH into the server
+### Cursor (IDE & Cloud Agent)
+
+Open this repo in **Cursor**. Persistent guidance lives in:
+
+| Component | Source | What it does |
+|-----------|--------|--------------|
+| **`.cursor/rules/*.mdc`** | Project | Agent identity, workflows (always-on or glob-scoped) |
+| **`SYGNIF_CONTEXT.md`** | Project root | Strategy, risk, deployment, tests, key files |
+| **`AGENTS.md`** | Project root | GitNexus rules (inside `gitnexus:start` … `end`) |
+| **MCP servers** | Cursor / global | GitNexus, AWS, etc. (configure per environment) |
+
+Use **@SYGNIF_CONTEXT.md** or **@AGENTS.md** in chat when you want that context injected explicitly.
+
+### Claude Code (CLI over SSH)
 
 ```bash
 ssh ubuntu@51.102.104.76
-cd ~/xrp_claude_bot
+cd ~/SYGNIF
 claude   # launches Claude Code CLI
 ```
 
 Or use **Claude Code Desktop/Web** with remote SSH connection.
 
-### What's available in a Claude Code session
-
-Once inside `~/xrp_claude_bot`, Claude Code automatically picks up:
+### What Claude Code loads automatically
 
 | Component | Source | What it does |
 |-----------|--------|--------------|
-| `CLAUDE.md` | Project root | Enforces GitNexus impact analysis before edits |
-| GitNexus MCP | Global config | Code intelligence -- query, context, impact, rename |
+| **`CLAUDE.md`** | Project root | Claude Code entry + GitNexus block (mirrors `AGENTS.md`; refreshed by `gitnexus analyze`) |
+| **`SYGNIF_CONTEXT.md`** | Project root | Strategy / ops narrative |
+| **`AGENTS.md`** | Project root | GitNexus impact / graph rules |
+| GitNexus MCP | Global config | Code intelligence — query, context, impact, rename |
 | Finance Agent | `~/.claude/skills/finance-agent/` | Market research, TA, news, plays, strategy exploration |
 | GitNexus Skills | `.claude/skills/gitnexus/` | Exploring, debugging, refactoring, impact analysis |
 | Pre/PostToolUse Hooks | `~/.claude/settings.json` | Auto-enriches searches with graph context, detects stale index |
@@ -155,7 +170,7 @@ This makes GitNexus available to **every** Claude Code session on this machine.
 ### Index the repo
 
 ```bash
-cd ~/xrp_claude_bot
+cd ~/SYGNIF
 npx gitnexus analyze
 ```
 
@@ -185,10 +200,12 @@ Expected output: ~145 nodes, ~305 edges, 15 clusters, 9 execution flows.
 | Resource URI | Content |
 |--------------|---------|
 | `gitnexus://repos` | All indexed repositories |
-| `gitnexus://repo/xrp_claude_bot/context` | Codebase overview |
-| `gitnexus://repo/xrp_claude_bot/clusters` | Functional areas |
-| `gitnexus://repo/xrp_claude_bot/processes` | Execution flows |
-| `gitnexus://repo/xrp_claude_bot/process/{name}` | Step-by-step flow trace |
+| `gitnexus://repo/SYGNIF/context` | Codebase overview |
+| `gitnexus://repo/SYGNIF/clusters` | Functional areas |
+| `gitnexus://repo/SYGNIF/processes` | Execution flows |
+| `gitnexus://repo/SYGNIF/process/{name}` | Step-by-step flow trace |
+
+GitNexus resource paths use the **indexed directory name** from `npx gitnexus status`; it should be **`SYGNIF`** when you run `analyze` from **`~/SYGNIF`**.
 
 ---
 
@@ -333,7 +350,7 @@ Two repos are indexed by GitNexus and available for code exploration:
 
 | Repo | Path | Nodes | Use |
 |------|------|-------|-----|
-| **xrp_claude_bot** (Sygnif) | `~/xrp_claude_bot` | 145 | Our strategy -- entries, exits, sentiment, movers |
+| **Sygnif** | `~/SYGNIF` | (varies) | Our strategy — entries, exits, sentiment, movers |
 | **NostalgiaForInfinity** (NFI) | `~/NostalgiaForInfinity` | 1,662 | Reference strategy -- patterns, grind modes, exit logic |
 
 Query across both:
@@ -361,7 +378,7 @@ Login: `freqtrader` / (password from `.env`)
 ## 11. Project Structure
 
 ```
-xrp_claude_bot/
+SYGNIF/   # or your clone directory; see naming note above
 +-- docker-compose.yml          # Freqtrade container config
 +-- .env                        # API keys (git-ignored)
 +-- SygnifStrategy.py           # Strategy (root copy)
@@ -370,7 +387,10 @@ xrp_claude_bot/
 +-- dashboard.html              # Custom web dashboard
 +-- dashboard_server.py         # Dashboard HTTP server
 +-- tf_controller.py            # Timeframe controller
-+-- CLAUDE.md                   # GitNexus rules for Claude Code
++-- SYGNIF_CONTEXT.md           # Strategy, risk, deploy (human + agent context)
++-- AGENTS.md                   # GitNexus rules (fenced; refreshed by analyze)
++-- CLAUDE.md                   # Claude entry + GitNexus block (same fenced text as AGENTS.md)
++-- .cursor/rules/              # Cursor IDE / Cloud Agent rules
 +-- SETUP.md                    # This file
 +-- user_data/
 |   +-- config.json             # Freqtrade config (git-ignored)

@@ -7,10 +7,13 @@ Env: .env — AGENT_BOT_TOKEN + AGENT_CHAT_ID (preferred), or legacy SYGNIF_HEDG
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.request
+from pathlib import Path
 
-ENV_PATH = "/home/ubuntu/xrp_claude_bot/.env"
+_default_repo = Path(os.environ.get("SYGNIF_REPO", str(Path.home() / "SYGNIF")))
+ENV_PATH = str(_default_repo / ".env")
 TG_MAX = 4096
 
 

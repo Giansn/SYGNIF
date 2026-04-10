@@ -23,7 +23,7 @@ from pathlib import Path
 
 import requests
 
-SYGNIF_REPO = Path(os.environ.get("SYGNIF_REPO", "/home/ubuntu/xrp_claude_bot")).resolve()
+SYGNIF_REPO = Path(os.environ.get("SYGNIF_REPO", str(Path.home() / "SYGNIF"))).resolve()
 OVERSEER_URL = os.environ.get("OVERSEER_URL", "http://127.0.0.1:8090").rstrip("/")
 WORKER_HEALTH = os.environ.get(
     "CURSOR_WORKER_HEALTH_URL", "http://127.0.0.1:8093/healthz"

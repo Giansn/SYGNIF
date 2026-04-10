@@ -62,15 +62,15 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             reason = "Top gainer \u2014 momentum pullback"
         elif tag == "mover_loser":
             reason = "Top loser \u2014 mean-reversion bounce"
-        elif tag.startswith("claude_short_s"):
-            reason = f"AI bearish sentiment ({tag.replace('claude_short_s', '+')})"
-        elif tag.startswith("claude_s"):
-            reason = f"AI bullish sentiment ({tag.replace('claude_s', '+')})"
-        elif tag == "claude_swing":
+        elif tag.startswith("fa_short_s"):
+            reason = f"AI bearish sentiment ({tag.replace('fa_short_s', '+')})"
+        elif tag.startswith("fa_s"):
+            reason = f"AI bullish sentiment ({tag.replace('fa_s', '+')})"
+        elif tag == "fa_swing":
             reason = "Failure Swing \u2014 TA confluence"
         elif tag == "swing_failure":
             reason = "Failure Swing \u2014 standalone"
-        elif tag == "claude_swing_short":
+        elif tag == "fa_swing_short":
             reason = "Bearish Swing \u2014 TA confluence"
         elif tag == "swing_failure_short":
             reason = "Bearish Swing \u2014 standalone"
@@ -90,7 +90,7 @@ content = content[:es] + r'''    def _format_entry_msg(self, msg: RPCEntryMsg) -
             lines.append(f"*Reason:* {reason}")
             if tag in ("swing_failure", "swing_failure_short"):
                 lines.append(f"*Exit plan:* Swing TP/SL")
-            elif tag in ("claude_swing", "claude_swing_short"):
+            elif tag in ("fa_swing", "fa_swing_short"):
                 lines.append(f"*Exit plan:* Swing \u2192 General")
             else:
                 lines.append(f"*Exit plan:* RSI/WillR/SL")

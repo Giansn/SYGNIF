@@ -6,8 +6,8 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/home/ubuntu/xrp_claude_bot/notify.sh up
-ExecStop=/home/ubuntu/xrp_claude_bot/notify.sh down
+ExecStart=/home/ubuntu/SYGNIF/notify.sh up
+ExecStop=/home/ubuntu/SYGNIF/notify.sh down
 
 [Install]
 WantedBy=multi-user.target

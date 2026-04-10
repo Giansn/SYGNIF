@@ -6,11 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/xrp_claude_bot
+WorkingDirectory=/home/ubuntu/SYGNIF
 Environment=HOME=/home/ubuntu
 # Same secrets & Cursor/finance vars as Docker, finance-agent, trade_overseer (CURSOR_API_KEY, BYBIT_*, etc.)
-EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
-ExecStart=/home/ubuntu/.local/bin/agent worker start --worker-dir /home/ubuntu/xrp_claude_bot --management-addr 127.0.0.1:8093 --name sygnif-xrp-worker
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+ExecStart=/home/ubuntu/.local/bin/agent worker start --worker-dir /home/ubuntu/SYGNIF --management-addr 127.0.0.1:8093 --name sygnif-cursor-worker
 Restart=on-failure
 RestartSec=15
 StandardOutput=append:/home/ubuntu/.local/share/cursor-agent/worker.log

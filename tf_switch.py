@@ -4,10 +4,18 @@ Timeframe controller via Freqtrade REST API + file watcher
 Watches /tmp/tf_change file for timeframe commands
 Usage: echo "5m" > /tmp/tf_change  (or via cron/webhook)
 """
-import os, json, time, subprocess, sys, requests
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-STRATEGY = "/home/ubuntu/xrp_claude_bot/user_data/strategies/SygnifStrategy.py"
-CONFIG = "/home/ubuntu/xrp_claude_bot/user_data/config.json"
+import requests
+
+_repo = Path(os.environ.get("SYGNIF_REPO", str(Path.home() / "SYGNIF")))
+STRATEGY = str(_repo / "user_data/strategies/SygnifStrategy.py")
+CONFIG = str(_repo / "user_data/config.json")
 VALID = ["5m", "15m", "30m", "1h", "4h"]
 
 def send_tg(msg):

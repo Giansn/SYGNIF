@@ -44,13 +44,17 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 
 def _collapse_tag(tag: str) -> str:
-    """Collapse claude_s{N} / claude_short_s{N} to family names."""
+    """Collapse fa_s{N} / fa_short_s{N} (and legacy claude_*) to family names."""
     if not tag:
         return "unknown"
-    if tag.startswith("claude_short_s"):
-        return "claude_short_sN"
-    if tag.startswith("claude_s"):
-        return "claude_sN"
+    if tag.startswith(("fa_swing_short", "claude_swing_short")):
+        return "fa_swing_shortN"
+    if tag.startswith(("fa_swing", "claude_swing")):
+        return "fa_swingN"
+    if tag.startswith(("fa_short_s", "claude_short_s")):
+        return "fa_short_sN"
+    if tag.startswith(("fa_s", "claude_s")):
+        return "fa_sN"
     return tag
 
 
@@ -287,10 +291,10 @@ def run_analysis(
     all_returns = [(t.get("close_profit") or 0) for t in trades]
     portfolio = compute_portfolio_stats(all_returns)
 
-    baseline = results.get("claude_sN", analyze_family([]))
+    baseline = results.get("fa_sN", analyze_family([]))
     comparisons = {}
     for family, stats in results.items():
-        if family != "claude_sN":
+        if family != "fa_sN":
             comparisons[family] = compare_vs_baseline(stats, baseline)
 
     return {
@@ -300,7 +304,7 @@ def run_analysis(
         "portfolio": portfolio,
         "families": results,
         "vs_baseline": comparisons,
-        "baseline": "claude_sN",
+        "baseline": "fa_sN",
     }
 
 
@@ -343,7 +347,7 @@ def print_report(analysis: dict):
     print(header)
     print("-" * len(header.strip()))
 
-    baseline_name = analysis.get("baseline", "claude_sN")
+    baseline_name = analysis.get("baseline", "fa_sN")
     for family, stats in analysis["families"].items():
         dur = f"{stats.get('avg_duration_min', 0):.0f}m" if stats.get("avg_duration_min") else "--"
         marker = " *" if family == baseline_name else ""

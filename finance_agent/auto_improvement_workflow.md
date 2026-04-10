@@ -22,7 +22,7 @@ Indexed repos (see skill **finance-agent**):
 
 | Repo | Typical queries |
 |------|-----------------|
-| **`xrp_claude_bot` (Sygnif)** | `populate_entry_trend`, `confirm_trade_entry`, `custom_exit`, `strategy_adaptation`, slot caps. |
+| **Sygnif** (this repo) | `populate_entry_trend`, `confirm_trade_entry`, `custom_exit`, `strategy_adaptation`, slot caps. |
 | **NostalgiaForInfinity** | Reference patterns only — read **targeted** sections, not whole file. |
 
 **Practice:** before editing symbols, run **`gitnexus_impact`** / **`gitnexus_detect_changes`** per project rules; use **`gitnexus_query`** for “who calls X?” and **`gitnexus_context`** on hot symbols.

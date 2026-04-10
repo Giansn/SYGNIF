@@ -35,26 +35,30 @@ class TestClassify:
     def test_swing_failure_short(self):
         assert classify("swing_failure_short") == "swing_failure"
 
-    def test_claude_swing_long(self):
-        assert classify("claude_swing") == "claude_swing"
+    def test_fa_swing_long(self):
+        assert classify("fa_swing") == "fa_swing"
 
-    def test_claude_swing_short(self):
-        assert classify("claude_swing_short") == "claude_swing"
+    def test_fa_swing_short(self):
+        assert classify("fa_swing_short") == "fa_swing"
 
-    def test_claude_s_zero(self):
-        assert classify("claude_s0") == "claude_s"
+    def test_fa_s_zero(self):
+        assert classify("fa_s0") == "fa_s"
 
-    def test_claude_s_positive(self):
-        assert classify("claude_s5") == "claude_s"
+    def test_fa_s_positive(self):
+        assert classify("fa_s5") == "fa_s"
 
-    def test_claude_s_negative(self):
-        assert classify("claude_s-5") == "claude_s"
+    def test_fa_s_negative(self):
+        assert classify("fa_s-5") == "fa_s"
 
-    def test_claude_short_s(self):
-        assert classify("claude_short_s3") == "claude_s"
+    def test_legacy_claude_s_maps_to_fa_s(self):
+        assert classify("claude_s3") == "fa_s"
+        assert classify("claude_short_s2") == "fa_s"
 
-    def test_claude_short_s_negative(self):
-        assert classify("claude_short_s-2") == "claude_s"
+    def test_fa_short_s(self):
+        assert classify("fa_short_s3") == "fa_s"
+
+    def test_fa_short_s_negative(self):
+        assert classify("fa_short_s-2") == "fa_s"
 
     def test_strong_ta_excluded(self):
         assert classify("strong_ta") is None
@@ -123,33 +127,33 @@ def _make_trade(tag: str, profit: float, open_d: str = "2026-04-01 10:00:00",
 class TestAggregate:
     def test_basic_counts(self):
         trades = [
-            _make_trade("claude_s0", 2.5),
-            _make_trade("claude_s0", -1.0),
-            _make_trade("claude_s5", 3.0),
+            _make_trade("fa_s0", 2.5),
+            _make_trade("fa_s0", -1.0),
+            _make_trade("fa_s5", 3.0),
             _make_trade("swing_failure", -5.0),
         ]
         stats = aggregate(trades)
-        assert stats["claude_s"].n == 3
-        assert stats["claude_s"].wins == 2
-        assert stats["claude_s"].losses == 1
+        assert stats["fa_s"].n == 3
+        assert stats["fa_s"].wins == 2
+        assert stats["fa_s"].losses == 1
         assert stats["swing_failure"].n == 1
 
     def test_win_rate(self):
         trades = [
-            _make_trade("claude_s0", 1.0),
-            _make_trade("claude_s0", 2.0),
-            _make_trade("claude_s0", -1.0),
+            _make_trade("fa_s0", 1.0),
+            _make_trade("fa_s0", 2.0),
+            _make_trade("fa_s0", -1.0),
         ]
         stats = aggregate(trades)
-        assert stats["claude_s"].win_rate == pytest.approx(66.67, abs=0.1)
+        assert stats["fa_s"].win_rate == pytest.approx(66.67, abs=0.1)
 
     def test_avg_profit(self):
         trades = [
-            _make_trade("claude_swing", 4.0),
-            _make_trade("claude_swing", -2.0),
+            _make_trade("fa_swing", 4.0),
+            _make_trade("fa_swing", -2.0),
         ]
         stats = aggregate(trades)
-        assert stats["claude_swing"].avg_profit == pytest.approx(1.0, abs=0.01)
+        assert stats["fa_swing"].avg_profit == pytest.approx(1.0, abs=0.01)
 
     def test_best_worst(self):
         trades = [
@@ -163,26 +167,26 @@ class TestAggregate:
 
     def test_by_tag_breakdown(self):
         trades = [
-            _make_trade("claude_s0", 1.0),
-            _make_trade("claude_s5", 2.0),
-            _make_trade("claude_s-5", 3.0),
+            _make_trade("fa_s0", 1.0),
+            _make_trade("fa_s5", 2.0),
+            _make_trade("fa_s-5", 3.0),
         ]
         stats = aggregate(trades)
-        assert "claude_s0" in stats["claude_s"].by_tag
-        assert "claude_s5" in stats["claude_s"].by_tag
-        assert "claude_s-5" in stats["claude_s"].by_tag
-        assert stats["claude_s"].by_tag["claude_s0"].n == 1
-        assert stats["claude_s"].by_tag["claude_s5"].n == 1
+        assert "fa_s0" in stats["fa_s"].by_tag
+        assert "fa_s5" in stats["fa_s"].by_tag
+        assert "fa_s-5" in stats["fa_s"].by_tag
+        assert stats["fa_s"].by_tag["fa_s0"].n == 1
+        assert stats["fa_s"].by_tag["fa_s5"].n == 1
 
     def test_short_tags_classified(self):
         trades = [
-            _make_trade("claude_short_s3", -2.0, is_short=True),
-            _make_trade("claude_swing_short", 1.0, is_short=True),
+            _make_trade("fa_short_s3", -2.0, is_short=True),
+            _make_trade("fa_swing_short", 1.0, is_short=True),
             _make_trade("swing_failure_short", -1.0, is_short=True),
         ]
         stats = aggregate(trades)
-        assert stats["claude_s"].n == 1
-        assert stats["claude_swing"].n == 1
+        assert stats["fa_s"].n == 1
+        assert stats["fa_swing"].n == 1
         assert stats["swing_failure"].n == 1
 
     def test_unrelated_tags_ignored(self):
@@ -195,12 +199,12 @@ class TestAggregate:
 
     def test_duration_tracked(self):
         trades = [
-            _make_trade("claude_s0", 1.0,
+            _make_trade("fa_s0", 1.0,
                         open_d="2026-04-01 10:00:00",
                         close_d="2026-04-01 13:00:00"),  # 3h
         ]
         stats = aggregate(trades)
-        assert stats["claude_s"].avg_duration_h == pytest.approx(3.0, abs=0.01)
+        assert stats["fa_s"].avg_duration_h == pytest.approx(3.0, abs=0.01)
 
     def test_empty_input(self):
         stats = aggregate([])
@@ -230,14 +234,14 @@ def test_db(tmp_path):
         )
     """)
     trades = [
-        (1, "BTC/USDT", "claude_s0", "stoploss_on_exchange", 0, 0, 3, 0.02, "2026-04-01 10:00:00", "2026-04-01 12:00:00"),
-        (2, "ETH/USDT", "claude_s5", "exit_profit_rsi_1", 0, 0, 3, 0.05, "2026-04-01 11:00:00", "2026-04-01 14:00:00"),
+        (1, "BTC/USDT", "fa_s0", "stoploss_on_exchange", 0, 0, 3, 0.02, "2026-04-01 10:00:00", "2026-04-01 12:00:00"),
+        (2, "ETH/USDT", "fa_s5", "exit_profit_rsi_1", 0, 0, 3, 0.05, "2026-04-01 11:00:00", "2026-04-01 14:00:00"),
         (3, "SOL/USDT", "swing_failure", "exit_sf_vol_sl", 0, 0, 3, -0.03, "2026-04-01 12:00:00", "2026-04-01 13:00:00"),
-        (4, "XRP/USDT", "claude_swing", "exit_willr_reversal", 0, 0, 3, 0.04, "2026-04-01 13:00:00", "2026-04-01 16:00:00"),
+        (4, "XRP/USDT", "fa_swing", "exit_willr_reversal", 0, 0, 3, 0.04, "2026-04-01 13:00:00", "2026-04-01 16:00:00"),
         (5, "BTC/USDT", "strong_ta", "stoploss_on_exchange", 0, 0, 1, -0.10, "2026-04-01 10:00:00", "2026-04-01 11:00:00"),
-        (6, "BTC/USDT", "claude_s0", "force_exit", 0, 0, 3, -0.01, "2026-04-01 10:00:00", "2026-04-01 11:00:00"),  # ghosted
-        (7, "BTC/USDT", "claude_short_s3", "exit_short_profit_rsi_1", 0, 1, 3, 0.03, "2026-04-01 10:00:00", "2026-04-01 12:00:00"),
-        (8, "BTC/USDT", "claude_s0", "stoploss_on_exchange", 1, 0, 3, None, "2026-04-01 15:00:00", None),  # still open
+        (6, "BTC/USDT", "fa_s0", "force_exit", 0, 0, 3, -0.01, "2026-04-01 10:00:00", "2026-04-01 11:00:00"),  # ghosted
+        (7, "BTC/USDT", "fa_short_s3", "exit_short_profit_rsi_1", 0, 1, 3, 0.03, "2026-04-01 10:00:00", "2026-04-01 12:00:00"),
+        (8, "BTC/USDT", "fa_s0", "stoploss_on_exchange", 1, 0, 3, None, "2026-04-01 15:00:00", None),  # still open
     ]
     conn.executemany(
         "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", trades
@@ -255,7 +259,7 @@ class TestSQLiteFetch:
     def test_excludes_ghosted(self, test_db):
         trades = fetch_trades_sqlite({"test": test_db}, days=0, side_filter="both")
         tags = [t["enter_tag"] for t in trades]
-        assert tags.count("claude_s0") == 1  # force_exit one excluded
+        assert tags.count("fa_s0") == 1  # force_exit one excluded
 
     def test_side_filter_long(self, test_db):
         trades = fetch_trades_sqlite({"test": test_db}, days=0, side_filter="long")
@@ -279,28 +283,28 @@ class TestSQLiteFetch:
 class TestReportText:
     def test_no_crash_with_data(self, capsys):
         trades = [
-            _make_trade("claude_s0", 2.0),
-            _make_trade("claude_s5", -1.0),
+            _make_trade("fa_s0", 2.0),
+            _make_trade("fa_s5", -1.0),
             _make_trade("swing_failure", 3.0),
-            _make_trade("claude_swing", -0.5),
+            _make_trade("fa_swing", -0.5),
         ]
         stats = aggregate(trades)
-        report_text(stats, "test scope", "claude_s0")
+        report_text(stats, "test scope", "fa_s0")
         out = capsys.readouterr().out
         assert "ENTRY-TAG PERFORMANCE ANALYSIS" in out
         assert "swing_failure" in out
 
     def test_no_crash_empty(self, capsys):
         stats = aggregate([])
-        report_text(stats, "empty", "claude_s0")
+        report_text(stats, "empty", "fa_s0")
 
     def test_baseline_marker(self, capsys):
         trades = [
-            _make_trade("claude_s0", 2.0),
-            _make_trade("claude_s5", 3.0),
+            _make_trade("fa_s0", 2.0),
+            _make_trade("fa_s5", 3.0),
         ]
         stats = aggregate(trades)
-        report_text(stats, "test", "claude_s0")
+        report_text(stats, "test", "fa_s0")
         out = capsys.readouterr().out
         assert "baseline" in out.lower()
 
@@ -312,16 +316,16 @@ class TestReportText:
 class TestReportJson:
     def test_valid_json(self, capsys):
         trades = [
-            _make_trade("claude_s0", 2.0),
+            _make_trade("fa_s0", 2.0),
             _make_trade("swing_failure", -1.0),
         ]
         stats = aggregate(trades)
-        report_json(stats, "test", "claude_s0")
+        report_json(stats, "test", "fa_s0")
         out = capsys.readouterr().out
         data = json.loads(out)
         assert "families" in data
-        assert "claude_s" in data["families"]
-        assert data["families"]["claude_s"]["n"] == 1
+        assert "fa_s" in data["families"]
+        assert data["families"]["fa_s"]["n"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +334,11 @@ class TestReportJson:
 
 class TestAppendLog:
     def test_creates_log_file(self, tmp_path):
-        trades = [_make_trade("claude_s0", 1.0)]
+        trades = [_make_trade("fa_s0", 1.0)]
         stats = aggregate(trades)
         log_path = tmp_path / "logs" / "test.jsonl"
         append_log(stats, "test", log_path)
         assert log_path.exists()
         record = json.loads(log_path.read_text().strip())
         assert "families" in record
-        assert record["families"]["claude_s"]["n"] == 1
+        assert record["families"]["fa_s"]["n"] == 1

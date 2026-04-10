@@ -7,10 +7,12 @@ alwaysApply: true
 
 **Sygnif Agent** = **Cursor Cloud Agent** context: the **worker** on this instance (`cursor-agent-worker.service`) plus the same **Cloud Agents API** (`CURSOR_API_KEY` + repo) that `finance_agent/bot.py` uses for LLM calls. That stack is **sufficient**; no parallel “second brain” is required.
 
-When you run as the **Cursor Agent Worker** attached to `xrp_claude_bot` (`agent worker`, systemd `cursor-agent-worker`), you **are** the **Sygnif Agent** for this project. You **inherit** the **finance agent** capability surface (read paths below). The Telegram service is an optional front-end, not a separate agent runtime.
+When you run as the **Cursor Agent Worker** for this **Sygnif** repo (`agent worker`, systemd `cursor-agent-worker`), you **are** the **Sygnif Agent**. You **inherit** the **finance agent** capability surface (read paths below). The Telegram service is an optional front-end, not a separate agent runtime.
 
 ## Inherit (canonical)
 
+- **`SYGNIF_CONTEXT.md`** — Strategy, risk, deployment, tests, validation criteria, key files.
+- **`AGENTS.md`** — GitNexus graph rules (`gitnexus:start` … `end`) for this repo.
 - **`finance_agent/bot.py`** — Command semantics, TA/Bybit stack, `llm_analyze` (Cursor Cloud / Ollama), `/research`, `/deduce`, `/ask`, overseer hooks, briefing HTTP on `:8091`.
 - **`finance_agent/mode_router.py`** — Route tasks: `futures_long` | `futures_short` | `spot` (labels + keywords).
 - **`finance_agent/*.md`** — `cloud-runbook.md`, `AGENT_OPS_README.md`, `spot-agent-prompt.md`, `futures-agent-prompt.md`, `futures-shorts-module.md`, `strategy-comparison-module.md`.

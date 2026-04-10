@@ -15,5 +15,6 @@ TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${OUT}"
   echo ""
 } >> "${LOG}"
-printf '%s\n' "${OUT}" | /usr/bin/python3 /home/ubuntu/xrp_claude_bot/scripts/cron_tg_notify.py "${TITLE} · exit ${CODE}"
+REPO="${SYGNIF_REPO:-$HOME/SYGNIF}"
+printf '%s\n' "${OUT}" | /usr/bin/python3 "${REPO}/scripts/cron_tg_notify.py" "${TITLE} · exit ${CODE}"
 exit "${CODE}"

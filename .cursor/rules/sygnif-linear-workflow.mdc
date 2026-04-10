@@ -9,7 +9,7 @@ Use this **ordered pipeline** when handling Sygnif/trading/finance tasks so work
 
 ## 0. Single entry
 
-- **Cursor** (IDE Agent or `cursor-agent-worker` on `~/xrp_claude_bot`) is the **only coordinator** for chat history, slash-style commands, and “what to do next.”
+- **Cursor** (IDE Agent or `cursor-agent-worker` on **`~/SYGNIF`**) is the **only coordinator** for chat history, slash-style commands, and “what to do next.”
 - Do **not** spawn a second parallel reasoning path (e.g. duplicate LLM chains) unless the user explicitly asks for comparison.
 
 ## 1. Classify (one pass)

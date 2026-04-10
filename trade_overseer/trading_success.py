@@ -53,14 +53,11 @@ TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 import re
 
 ENTRY_FAMILIES = {
-    "strong_ta":           re.compile(r"^strong_ta$"),
-    "claude_s":            re.compile(r"^claude_s-?\d+$"),
-    "claude_swing":        re.compile(r"^claude_swing$"),
-    "swing_failure":       re.compile(r"^swing_failure$"),
-    "strong_ta_short":     re.compile(r"^strong_ta_short$"),
-    "claude_short_s":      re.compile(r"^claude_short_s-?\d+$"),
-    "claude_swing_short":  re.compile(r"^claude_swing_short$"),
-    "swing_failure_short": re.compile(r"^swing_failure_short$"),
+    "strong_ta": re.compile(r"^strong_ta$"),
+    "strong_ta_short": re.compile(r"^strong_ta_short$"),
+    "fa_s": re.compile(r"^((fa_(short_)?s)|(claude_(short_)?s))-?\d+$"),
+    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing))(_short)?$"),
+    "swing_failure": re.compile(r"^swing_failure(_short)?$"),
 }
 
 EXIT_FAMILIES = {

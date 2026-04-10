@@ -1,0 +1,16 @@
+# Finance Agent HTTP: /briefing, POST /sygnif/sentiment, POST /overseer/commentary, /health
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir requests feedparser numpy pandas
+
+# Shared prompt + live Bybit snapshot (same as Freqtrade strategies)
+COPY user_data/strategies/sentiment_constants.py /app/sentiment_constants.py
+COPY user_data/strategies/live_market_snapshot.py /app/live_market_snapshot.py
+COPY finance_agent/ /app/finance_agent/
+
+ENV PYTHONPATH=/app
+EXPOSE 8091
+
+CMD ["python3", "/app/finance_agent/http_main.py"]

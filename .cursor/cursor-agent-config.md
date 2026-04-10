@@ -6,7 +6,7 @@ Der **Sygnif Agent** läuft über **Cursor Cloud Agent** + den **Worker** auf di
 
 | Service | Rolle |
 |---------|--------|
-| **`cursor-agent-worker.service`** | Private Worker-Verbindung zu Cursor; Workspace `~/xrp_claude_bot` |
+| **`cursor-agent-worker.service`** | Private Worker-Verbindung zu Cursor; Workspace **`~/SYGNIF`** |
 | **`finance-agent.service`** (optional) | Telegram-Bot — LLM nutzt **dieselbe** Cursor Cloud API (`CURSOR_*` in `.env`), Fallback Ollama |
 
 Health Worker: `http://127.0.0.1:8093/healthz`  

@@ -1,0 +1,19 @@
+# -----------------------------------------------------------------------------
+# Sygnif Network (external Docker bridge) — merge with base compose:
+#
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.sygnif-network.yml
+#   docker compose up -d
+#
+# Or one-shot:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.sygnif-network.yml docker compose up -d
+#
+# Create the network once on the EC2 host (name must match SYGNIF_EXTERNAL_NETWORK_NAME):
+#   docker network create sygnif_network
+#
+# Optional label (cosmetic): docker network create --label sygnif=1 sygnif_network
+# -----------------------------------------------------------------------------
+
+networks:
+  sygnif_backend:
+    external: true
+    name: ${SYGNIF_EXTERNAL_NETWORK_NAME:-sygnif_network}

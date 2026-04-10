@@ -2,6 +2,8 @@
 
 Full steps to recreate the Sygnif setup on a fresh Ubuntu instance.
 
+**Directory name:** clone into **`SYGNIF`** (or set **`SYGNIF_REPO`** if you keep a legacy path like **`xrp_claude_bot`**).
+
 ## 1. Prerequisites
 
 ```bash
@@ -15,8 +17,8 @@ sudo usermod -aG docker $USER
 
 ```bash
 cd ~
-git clone https://github.com/Giansn/SYGNIF.git xrp_claude_bot
-cd xrp_claude_bot
+git clone https://github.com/Giansn/SYGNIF.git SYGNIF
+cd SYGNIF
 ```
 
 ## 3. Environment File
@@ -138,7 +140,7 @@ Updates top gainers/losers from Bybit every 4 hours:
 ```bash
 crontab -e
 # Add:
-0 */4 * * * cd /home/ubuntu/xrp_claude_bot && /usr/bin/python3 update_movers.py >> movers_update.log 2>&1
+0 */4 * * * cd /home/ubuntu/SYGNIF && /usr/bin/python3 update_movers.py >> movers_update.log 2>&1
 ```
 
 ## 8. Verify Everything
@@ -217,5 +219,5 @@ If `network-dev-loop.service` / `network-dev-loop.timer` are installed (e.g. und
 
 Persistent shell without inbound SSH: see [docs/AWS_SSM_SESSION_MANAGER.md](docs/AWS_SSM_SESSION_MANAGER.md).
 
-Quick verify after reboot: ~/xrp_claude_bot/scripts/verify-ssm-agent.sh
+Quick verify after reboot: ~/SYGNIF/scripts/verify-ssm-agent.sh
 

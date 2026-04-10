@@ -152,7 +152,7 @@ class TestEntryPaths:
         result = strategy.populate_entry_trend(df, {"pair": "SOL/USDT"})
         last = result.iloc[-1]
         assert last["enter_long"] == 1
-        assert last["enter_tag"] in ("swing_failure", "claude_swing")
+        assert last["enter_tag"] in ("swing_failure", "fa_swing")
 
     def test_failure_swing_short_entry(self, strategy, make_df):
         strategy.can_short = True
@@ -165,7 +165,7 @@ class TestEntryPaths:
         result = strategy.populate_entry_trend(df, {"pair": "ETH/USDT"})
         last = result.iloc[-1]
         assert last["enter_short"] == 1
-        assert last["enter_tag"] in ("swing_failure_short", "claude_swing_short", "strong_ta_short")
+        assert last["enter_tag"] in ("swing_failure_short", "fa_swing_short", "strong_ta_short")
 
     def test_strong_ta_short_skips_extreme_4h_oversold(self, strategy, make_df):
         """4h RSI <= 28 blocks strong_ta_short (bounce risk)."""
@@ -419,33 +419,33 @@ class TestDoomCooldown:
 class TestSentiment:
     def test_cache_returns_cached(self, strategy):
         import time as t
-        strategy.claude._cache["BTC"] = (t.time(), 10.0)
-        result = strategy.claude._get_cached("BTC")
+        strategy.sentiment._cache["BTC"] = (t.time(), 10.0)
+        result = strategy.sentiment._get_cached("BTC")
         assert result == 10.0
 
     def test_cache_expired(self, strategy):
         import time as t
-        strategy.claude._cache["BTC"] = (t.time() - 1000, 10.0)
-        result = strategy.claude._get_cached("BTC")
+        strategy.sentiment._cache["BTC"] = (t.time() - 1000, 10.0)
+        result = strategy.sentiment._get_cached("BTC")
         assert result is None
 
     def test_no_api_key_returns_zero(self, strategy):
-        strategy.claude.api_key = ""
-        result = strategy.claude.analyze_sentiment("BTC", 50000.0, 50.0, [])
+        strategy.sentiment.api_key = ""
+        result = strategy.sentiment.analyze_sentiment("BTC", 50000.0, 50.0, [])
         assert result == 0.0
 
     def test_daily_limit_returns_zero(self, strategy):
-        strategy.claude.api_key = "test-key"
-        strategy.claude.daily_calls = 50
-        result = strategy.claude.analyze_sentiment("BTC", 50000.0, 50.0, [])
+        strategy.sentiment.api_key = "test-key"
+        strategy.sentiment.daily_calls = 50
+        result = strategy.sentiment.analyze_sentiment("BTC", 50000.0, 50.0, [])
         assert result == 0.0
 
     def test_daily_counter_resets(self, strategy):
         from datetime import date, timedelta
-        strategy.claude.daily_calls = 50
-        strategy.claude._last_reset = date.today() - timedelta(days=1)
-        strategy.claude._reset_daily_counter()
-        assert strategy.claude.daily_calls == 0
+        strategy.sentiment.daily_calls = 50
+        strategy.sentiment._last_reset = date.today() - timedelta(days=1)
+        strategy.sentiment._reset_daily_counter()
+        assert strategy.sentiment.daily_calls == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -463,7 +463,7 @@ class TestSlotCaps:
 
     def test_swing_cap_blocks_when_full(self, strategy):
         from freqtrade.persistence import Trade
-        trades = self._make_open_trades(["swing_failure", "claude_swing", "swing_failure", "claude_swing"])
+        trades = self._make_open_trades(["swing_failure", "fa_swing", "swing_failure", "fa_swing"])
         Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
         result = strategy.confirm_trade_entry(
             "NEW/USDT", "limit", 10, 1.0, "GTC", None, "swing_failure", "long")
@@ -471,10 +471,10 @@ class TestSlotCaps:
 
     def test_swing_cap_allows_under_limit(self, strategy):
         from freqtrade.persistence import Trade
-        trades = self._make_open_trades(["swing_failure", "claude_swing"])
+        trades = self._make_open_trades(["swing_failure", "fa_swing"])
         Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
         result = strategy.confirm_trade_entry(
-            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "claude_swing", "long")
+            "NEW/USDT", "limit", 10, 1.0, "GTC", None, "fa_swing", "long")
         assert result is True
 
     def test_strong_ta_cap_blocks_when_full(self, strategy):

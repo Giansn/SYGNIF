@@ -259,7 +259,7 @@ DEFAULT_POLICIES = {
             "drawdown_step": -0.03,
             "scale_factor": 0.5,
         },
-        "allowed_tags": ["claude_s-5", "strong_ta"],
+        "allowed_tags": ["fa_s-5", "strong_ta"],
     },
 }
 

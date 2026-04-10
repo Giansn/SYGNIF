@@ -18,7 +18,7 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
 fi
 
 # 2. Create project directory
-PROJECT_DIR="$HOME/xrp_claude_bot"
+PROJECT_DIR="${SYGNIF_REPO:-$HOME/SYGNIF}"
 mkdir -p "$PROJECT_DIR"
 cd "$PROJECT_DIR"
 

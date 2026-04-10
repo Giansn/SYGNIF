@@ -1,9 +1,10 @@
 """Overseer commentary client.
 
 Priority:
-1) External agent webhook (OVERSEER_AGENT_URL)
+1) External agent webhook (OVERSEER_AGENT_URL) — on the Sygnif node use finance-agent
+   http://127.0.0.1:8091/overseer/commentary (deterministic rules; no Haiku).
 2) OpenVINO NPU (SYGNIF_LLM_BACKEND=npu)
-3) Anthropic Claude API
+3) Anthropic Claude API (direct from this process)
 4) None (rules-only fallback in overseer)
 """
 import logging

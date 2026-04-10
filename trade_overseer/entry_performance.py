@@ -2,7 +2,7 @@
 Entry-tag performance analysis for Sygnif.
 
 Compares strategy entry families head-to-head: P/L, win rate, trade count,
-average duration.  Uses ``claude_s0`` as the baseline reference point.
+average duration.  Uses ``fa_s0`` as the baseline reference point.
 
 Data sources (in priority order):
   1. Freqtrade REST API  (--api, requires running instances)
@@ -10,8 +10,8 @@ Data sources (in priority order):
 
 Families analysed:
   - swing_failure  (long + short)
-  - claude_swing   (long + short)
-  - claude_s       (all claude_s{N} collapsed, baseline = claude_s0)
+  - fa_swing   (long + short; legacy claude_swing* still classified)
+  - fa_s       (all fa_s* / fa_short_s* collapsed; baseline = fa_s0)
 
 Usage:
   # From SQLite (default — both spot + futures)
@@ -68,13 +68,13 @@ DEFAULT_DBS = {
     "futures": Path("user_data/tradesv3-futures.sqlite"),
 }
 
-BASELINE_TAG = "claude_s0"
+BASELINE_TAG = "fa_s0"
 
 # Families we care about for this report
 TARGET_FAMILIES = {
-    "swing_failure":       re.compile(r"^swing_failure(_short)?$"),
-    "claude_swing":        re.compile(r"^claude_swing(_short)?$"),
-    "claude_s":            re.compile(r"^claude_(short_)?s-?\d+$"),
+    "swing_failure": re.compile(r"^swing_failure(_short)?$"),
+    "fa_swing": re.compile(r"^((fa_swing)|(claude_swing))(_short)?$"),
+    "fa_s": re.compile(r"^((fa_(short_)?s)|(claude_(short_)?s))-?\d+$"),
 }
 
 GHOSTED_EXIT_REASONS = {"force_exit", "emergency_exit", "liquidation"}
@@ -336,7 +336,7 @@ def report_text(stats: dict[str, TagStats], scope: str, baseline_tag: str):
     print(hdr)
     print("-" * len(hdr))
 
-    order = ["swing_failure", "claude_swing", "claude_s"]
+    order = ["swing_failure", "fa_swing", "fa_s"]
     for fam in order:
         s = stats.get(fam)
         if s is None or s.n == 0:
@@ -352,11 +352,11 @@ def report_text(stats: dict[str, TagStats], scope: str, baseline_tag: str):
             f"{_fh(s.avg_duration_h):>8}"
         )
 
-    # Per-tag breakdown for claude_s family (shows baseline)
-    cs = stats.get("claude_s")
+    # Per-tag breakdown for fa_s family (shows baseline)
+    cs = stats.get("fa_s")
     if cs and cs.by_tag:
         print(f"\n{'─' * 80}")
-        print(f"  claude_s family breakdown (baseline = {baseline_tag})")
+        print(f"  fa_s family breakdown (baseline = {baseline_tag})")
         print(f"{'─' * 80}\n")
 
         hdr2 = (f"  {'tag':<25} {'n':>4} {'win%':>7} {'avg_pnl':>9} "
@@ -385,7 +385,7 @@ def report_text(stats: dict[str, TagStats], scope: str, baseline_tag: str):
                   f"win rate {baseline_stats.win_rate:.1f}%, n={baseline_stats.n})")
 
     # Swing breakdown
-    for fam_key in ["swing_failure", "claude_swing"]:
+    for fam_key in ["swing_failure", "fa_swing"]:
         fam = stats.get(fam_key)
         if fam and len(fam.by_tag) > 1:
             print(f"\n{'─' * 80}")
@@ -424,7 +424,7 @@ def report_text(stats: dict[str, TagStats], scope: str, baseline_tag: str):
                 verdict = "BETTER" if ap_d > 0 and wr_d >= 0 else (
                     "MIXED" if (ap_d > 0) != (wr_d > 0) else "WORSE"
                 )
-                if fam_key == "claude_s":
+                if fam_key == "fa_s":
                     verdict = "(self)"
                 print(f"  {fam_key:<20} {wr_d:>+8.1f}% {ap_d:>+10.2f}%  {verdict}")
 
@@ -497,7 +497,7 @@ def append_log(stats: dict[str, TagStats], scope: str, log_path: Path):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Entry-tag performance analysis: swing_failure vs claude_swing vs claude_s baseline",
+        description="Entry-tag performance analysis: swing_failure vs fa_swing vs fa_s baseline",
     )
     p.add_argument("--api", action="store_true",
                    help="Pull data from Freqtrade REST API instead of SQLite")
@@ -549,7 +549,7 @@ def main():
     stats = aggregate(trades)
     total_matched = sum(s.n for s in stats.values())
     if total_matched == 0:
-        print("No trades matched target families (swing_failure, claude_swing, claude_s).",
+        print("No trades matched target families (swing_failure, fa_swing, fa_s).",
               file=sys.stderr)
         sys.exit(0)
 

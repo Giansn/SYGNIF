@@ -43,7 +43,7 @@ Verify on the box:
 ```bash
 sudo systemctl status snap.amazon-ssm-agent.amazon-ssm-agent --no-pager
 sudo systemctl is-enabled snap.amazon-ssm-agent.amazon-ssm-agent
-~/xrp_claude_bot/scripts/verify-ssm-agent.sh
+~/SYGNIF/scripts/verify-ssm-agent.sh
 ```
 
 If the agent is ever **inactive** after boot:

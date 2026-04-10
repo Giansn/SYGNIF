@@ -86,14 +86,14 @@ def strategy():
     s._doom_cooldown_path = os.path.join(tempfile.mkdtemp(), "doom_cooldown.json")
     s.max_slots_sentiment = 6
     s.max_slots_swing = 4
-    s._swing_tags = {"swing_failure", "claude_swing", "swing_failure_short", "claude_swing_short"}
+    s._swing_tags = {"swing_failure", "fa_swing", "swing_failure_short", "fa_swing_short"}
     s.can_short = False
     s.dp = None
 
     # Mock Claude sentiment
     from SygnifStrategy import SygnifSentiment
-    s.claude = SygnifSentiment()
-    s.claude.api_key = ""  # disable real API calls
+    s.sentiment = SygnifSentiment()
+    s.sentiment.api_key = ""  # disable real API calls
 
     return s
 

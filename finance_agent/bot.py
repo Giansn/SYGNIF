@@ -25,6 +25,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -37,6 +38,15 @@ import feedparser
 import numpy as np
 import pandas as pd
 import requests
+
+from expert_sentiment import expert_sygnif_sentiment_score
+from finance_agent_expert import (
+    expert_evaluate_lines,
+    expert_plays_from_scan,
+    expert_research_markdown,
+    expert_scan_ranking_rows,
+    expert_tendency_insight,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +92,8 @@ def _repo_root() -> Path:
 
 def _sygnif_repo() -> Path:
     """Freqtrade repo with `user_data/` (strategy_adaptation.json, advisor_state.json)."""
-    return Path(os.environ.get("SYGNIF_REPO", "/home/ubuntu/xrp_claude_bot")).resolve()
+    default = Path.home() / "SYGNIF"
+    return Path(os.environ.get("SYGNIF_REPO", str(default))).resolve()
 
 
 def cmd_strategy_analytics() -> str:
@@ -1147,7 +1158,7 @@ def _fmt_price(price: float) -> str:
 # Command: /tendency — Market tendency (bull/bear)
 # ---------------------------------------------------------------------------
 def cmd_tendency() -> str:
-    """Market tendency: TA scan + local LLM insight."""
+    """Market tendency: TA scan + finance-agent expert (headlines + rules)."""
     tickers = bybit_tickers()
     if not tickers:
         return "Failed to fetch data."
@@ -1163,7 +1174,8 @@ def cmd_tendency() -> str:
     bear_count = 0
     total = 0
     lines = ["*Market Tendency*\n"]
-    coin_data = []  # collect for Claude prompt
+    coin_data = []  # compact scan lines
+    score_rows = []
 
     for sym in scan_syms:
         df = bybit_kline(sym, interval="60", limit=200)
@@ -1195,6 +1207,7 @@ def cmd_tendency() -> str:
             icon = "\u26aa"
 
         lines.append(f"{icon} `{name:>5}` {pf} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
+        score_rows.append({"name": name, "score": score})
         coin_data.append(
             f"{name}: ${ind['price']:.4g} {trend} TA:{score} RSI:{rsi:.0f} "
             f"WR:{willr:.0f} MACD:{macd} signal:{entry}"
@@ -1217,29 +1230,15 @@ def cmd_tendency() -> str:
         verdict = "\u26aa *NEUTRAL* — no clear direction"
     lines.append(verdict)
 
-    # --- Claude AI insight ---
     headlines = fetch_news("", max_items=5)
-    news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent news."
-    data_block = "\n".join(coin_data)
-
-    prompt = f"""You are Sygnif's market analyst. Give a 3-4 sentence market tendency reading.
-
-MARKET DATA:
-{data_block}
-
-Bull/Bear count: {bull_count} bullish, {bear_count} bearish, {total - bull_count - bear_count} neutral
-
-RECENT NEWS:
-{news_text}
-
-Rules:
-- State the overall tendency clearly (bullish/bearish/neutral)
-- Mention the key driver (BTC leading? alts diverging? news catalyst?)
-- Flag any risks or watch-outs (overbought RSI, divergence, etc.)
-- 3-4 sentences max, no disclaimers, be direct"""
-
-    insight = llm_analyze(prompt, max_tokens=200)
-    lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
+    avg_for_news = (
+        sum(r["score"] for r in score_rows) / len(score_rows) if score_rows else 50.0
+    )
+    neutral_n = max(0, total - bull_count - bear_count)
+    insight = expert_tendency_insight(
+        bull_count, bear_count, neutral_n, headlines, avg_for_news
+    )
+    lines.append(f"\n\U0001f9e0 *Agent insight (expert):*\n{insight}")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
     return "\n".join(lines)
@@ -1369,7 +1368,7 @@ def cmd_ta(ticker: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Command: /research <TICKER> — Full AI research
+# Command: /research <TICKER> — TA + news (finance-agent expert, no LLM)
 # ---------------------------------------------------------------------------
 def cmd_research(ticker: str) -> str:
     ticker = ticker.upper().strip() or "BTC"
@@ -1382,7 +1381,6 @@ def cmd_research(ticker: str) -> str:
 
     # 2. Fetch news
     headlines = fetch_news(ticker)
-    news_text = "\n".join(f"- {h}" for h in headlines[:5]) if headlines else "No recent news."
 
     # 3. Price from tickers
     tickers = bybit_tickers()
@@ -1391,50 +1389,9 @@ def cmd_research(ticker: str) -> str:
     change_24h = float(pair_data.get("price24hPcnt", 0)) * 100
     vol_24h = float(pair_data.get("turnover24h", 0))
 
-    # 4. Build prompt for Claude with strategy context
-    ta_summary = "No TA data available."
-    strat_summary = ""
-    if ind:
-        ta_summary = (
-            f"Price: ${ind['price']:.4g}, Trend: {ind['trend']}, "
-            f"RSI14: {ind['rsi']:.1f} ({ind['rsi_signal']}), RSI3: {ind['rsi3']:.0f}, "
-            f"MACD: {ind['macd_signal_text']} (hist: {ind['macd_hist']:.4g}), "
-            f"BB position: {ind['bb_position']}, "
-            f"Williams%%R: {ind['willr']:.0f}, StochRSI: {ind['stochrsi_k']:.0f}, "
-            f"Aroon U/D: {ind['aroonu']:.0f}/{ind['aroond']:.0f}, CMF: {ind['cmf']:.3f}, "
-            f"Support: {ind['support']:.4g}, Resistance: {ind['resistance']:.4g}, "
-            f"Volume: {ind['vol_ratio']:.1f}x average"
-        )
-        entry_str = ", ".join(sig["entries"]) if sig["entries"] else "None"
-        strat_summary = (
-            f"\nSTRATEGY CONTEXT:\n"
-            f"- TA Score: {sig['ta_score']}/100 ({_format_score_label(sig['ta_score'])})\n"
-            f"- Active Signals: {entry_str}\n"
-            f"- Leverage Tier: {sig['leverage']:.0f}x (ATR {sig['atr_pct']:.1f}%)\n"
-            f"- Swing Failure: {'SF Long' if ind.get('sf_long') else 'SF Short' if ind.get('sf_short') else 'None'}"
-        )
-
-    prompt = f"""You are a crypto research analyst for the Sygnif trading bot. Provide a concise research report for {ticker}.
-
-CURRENT DATA:
-- Price: ${price:.4g} (24h: {change_24h:+.1f}%)
-- 24h Volume: ${vol_24h/1e6:.1f}M
-- Technical Analysis: {ta_summary}
-{strat_summary}
-
-RECENT NEWS:
-{news_text}
-
-Write a concise research report in Markdown with these sections:
-1. **Market Status** (2 sentences: price action + trend)
-2. **Technical Outlook** (3-4 bullet points: key indicator signals including strategy TA score)
-3. **Strategy View** (2 bullet points: what signals are active, would the bot enter/exit?)
-4. **News & Sentiment** (2-3 bullet points: what headlines suggest)
-5. **Verdict** (1 paragraph: bullish/bearish/neutral with reasoning and key levels)
-
-Keep it under 350 words. Be specific with numbers. No disclaimers."""
-
-    analysis = llm_analyze(prompt)
+    analysis = expert_research_markdown(
+        ticker, ind or {}, sig, price, change_24h, vol_24h, headlines
+    )
 
     msg = (
         f"*Research Report: {ticker}*\n"
@@ -1447,7 +1404,7 @@ Keep it under 350 words. Be specific with numbers. No disclaimers."""
 
 
 # ---------------------------------------------------------------------------
-# Command: /plays — AI investment opportunities (strategy-aware)
+# Command: /plays — Strategy-aligned opportunities (finance-agent expert)
 # ---------------------------------------------------------------------------
 def cmd_plays() -> str:
 
@@ -1482,6 +1439,10 @@ def cmd_plays() -> str:
         df = bybit_kline(f"{p['sym']}USDT", "60", 200)
         ind = calc_indicators(df) if not df.empty else {}
         sig = detect_signals(ind, p["sym"])
+        p["_ta_score"] = sig["ta_score"]
+        p["_entries"] = list(sig.get("entries") or [])
+        p["_ind"] = ind
+        p["_sig"] = sig
         signal_str = sig["entries"][0] if sig["entries"] else "no_signal"
         market_ctx += (
             f"  {p['sym']}: ${p['price']:.4g} ({p['change']:+.1f}%) "
@@ -1507,35 +1468,11 @@ def cmd_plays() -> str:
             f"TA Score: {btc_sig['ta_score']}/100"
         )
 
-    prompt = f"""You are a crypto strategist for the Sygnif trading bot. Based on market data AND strategy signals, provide exactly 3 actionable plays.
-
-IMPORTANT: The bot uses these entry types:
-- strong_ta (long): TA score >= 65 + volume > 1.2x avg
-- strong_ta_short: TA score <= 25
-- claude_sentiment (long): TA 40-70, news sentiment pushes combined >= 55
-- claude_sentiment_short: TA 30-60, news sentiment pushes combined <= 40
-- swing_failure: price wicks past 48-bar S/R then closes back
-
-Plays should align with what the bot would actually trade. Prioritize coins with active signals.
-
-MARKET DATA:
-{market_ctx}
-{btc_ctx}
-
-For each play, use this format:
-**Play #N: TICKER — [Name]**
-Type: strong_ta | claude_sentiment | swing_failure | mean_reversion
-Side: Long | Short
-Risk: Low/Medium/High
-- *Thesis:* Why this opportunity exists (1-2 sentences)
-- *Entry:* Specific price or condition
-- *TP:* Target price and expected %
-- *SL:* Stop loss price and %
-- *Timeframe:* Hours/Days
-
-Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total under 400 words."""
-
-    analysis = llm_analyze(prompt, max_tokens=2000)
+    analysis = expert_plays_from_scan(
+        top_by_vol, btc_ind, btc_sig, not btc_df.empty
+    )
+    if btc_ctx:
+        analysis = f"{btc_ctx}\n\n{analysis}"
 
     # Save plays for trade overseer
     try:
@@ -1587,7 +1524,7 @@ def cmd_signals() -> str:
             shorts.append(row + f"`{sig_name}` ({detail})")
         elif "ambiguous_long" in entries or "ambiguous_short" in entries:
             zone = "40-70" if "ambiguous_long" in entries else "30-60"
-            ambiguous.append(row + f"claude zone ({zone})")
+            ambiguous.append(row + f"ambiguous ({zone})")
 
     lines = ["*Active Strategy Signals*\n"]
     if longs:
@@ -1597,7 +1534,7 @@ def cmd_signals() -> str:
         lines.append("\nSHORT:")
         lines.extend(shorts)
     if ambiguous:
-        lines.append("\nAMBIGUOUS (Claude sentiment zone):")
+        lines.append("\nAMBIGUOUS (sentiment / expert zone):")
         lines.extend(ambiguous)
     if not longs and not shorts and not ambiguous:
         lines.append("_No active signals across top pairs._")
@@ -1607,7 +1544,7 @@ def cmd_signals() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Command: /scan — Deep opportunity scanner (TA + news + Claude ranking)
+# Command: /scan — Opportunity scanner (TA + news + expert ranking)
 # ---------------------------------------------------------------------------
 def cmd_scan() -> str:
     tickers = bybit_tickers()
@@ -1641,42 +1578,35 @@ def cmd_scan() -> str:
 
     # 2. Fetch news for top signal pairs (max 6)
     scan_pairs = signal_pairs[:6]
-    data_lines = []
+    scan_rows = []
     for sp in scan_pairs:
         sym = sp["sym"]
         ind = sp["ind"]
         sig = sp["sig"]
         entry = sig["entries"][0]
-        side = "Short" if "short" in entry else "Long"
 
         headlines = fetch_news(sym, max_items=2)
         news_str = headlines[0].split(" — ")[0] if headlines else "No recent news"
 
-        data_lines.append(
-            f"{sym}: ${ind['price']:.4g} {ind['trend']} "
-            f"TA:{sig['ta_score']} {entry} RSI:{ind['rsi']:.0f} "
-            f"WR:{ind['willr']:.0f} Lev:{sig['leverage']:.0f}x "
-            f"| News: \"{news_str}\""
+        scan_rows.append(
+            {
+                "sym": sym,
+                "price": ind["price"],
+                "trend": ind["trend"],
+                "ta_score": sig["ta_score"],
+                "entry": entry,
+                "rsi": ind["rsi"],
+                "willr": ind["willr"],
+                "lev": sig["leverage"],
+                "news_str": news_str,
+            }
         )
 
-    data_block = "\n".join(data_lines)
-
-    # 3. Claude ranking
-    prompt = f"""Rank these crypto opportunities by conviction (best first).
-Each has strategy TA signals + recent news.
-
-{data_block}
-
-For each, output one line:
-#N PAIR Side — key reason (max 10 words)
-
-Side is Long or Short. Skip weak opportunities. Max 6 lines. Be specific with numbers."""
-
-    ranking = llm_analyze(prompt, max_tokens=400)
+    ranking = expert_scan_ranking_rows(scan_rows)
 
     now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
     lines = [f"*Scan* | {now_str}\n"]
-    lines.append(ranking)
+    lines.append(ranking or "_No ranked rows._")
     lines.append(f"\n_Scanned {len(top)} pairs, {len(signal_pairs)} with signals_")
 
     return "\n".join(lines)
@@ -1854,7 +1784,7 @@ def cmd_deduce(args: str) -> str:
             "Nutze: `/deduce <These oder Frage>`\n"
             "Beispiel: `/deduce Wenn BTC die Woche bullisch bleibt, welche Alts passen zu Sygnif swing tags?`"
         )
-    prompt = f"""You are a trading research assistant for Sygnif (Freqtrade, Bybit, TA score 0–100, tags like strong_ta, claude_s*, swing_failure, claude_swing).
+    prompt = f"""You are a trading research assistant for Sygnif (Freqtrade, Bybit, TA score 0–100, tags like strong_ta, fa_s*, swing_failure, fa_swing).
 
 Task: answer using explicit DEDUCTIVE reasoning.
 
@@ -1980,7 +1910,7 @@ def cmd_finance_agent(args: str) -> str:
             lines.append("")
         lines.append("*Active Ops Modules:*")
         lines.append("- BTC dependency gating for alts")
-        lines.append("- Strategy comparison baseline: `claude_s0`")
+        lines.append("- Strategy comparison baseline: `fa_s0`")
         lines.append("- Futures shorts module with squeeze-risk filter")
         return "\n".join(lines).strip()
 
@@ -2070,32 +2000,7 @@ def cmd_evaluate() -> str:
             f"signal:{entry} exit:{exit_s}"
         )
 
-    # 3. Build trade lines for Claude
-    trade_lines = []
-    for t in sorted(trades, key=lambda x: x["profit_pct"]):
-        pair = t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
-        inst = t["instance"][0]
-        tag = t.get("enter_tag", "") or "?"
-        trade_lines.append(
-            f"{pair}[{inst}] {t['profit_pct']:+.2f}% ${t['current_rate']:.4g} {tag}"
-        )
-
-    # 4. Claude: get action per trade (compact JSON)
-    ta_block = "\n".join(ta_context) if ta_context else "No TA data"
-    trades_block = "\n".join(trade_lines)
-
-    prompt = f"""Classify each trade. TA data then trades.
-
-{ta_block}
-
-{trades_block}
-
-Reply ONLY with one line per trade, format: PAIR ACTION reason
-ACTION is HOLD, TRAIL, or CUT. Reason max 6 words. Example:
-ETH HOLD RSI:50 uptrend intact
-FHE CUT RSI:26 broke support"""
-
-    raw = llm_analyze(prompt, max_tokens=400)
+    raw = expert_evaluate_lines(trades, ta_map)
 
     # 5. Parse actions into lookup
     actions = {}
@@ -2169,7 +2074,7 @@ FHE CUT RSI:26 broke support"""
 # ---------------------------------------------------------------------------
 _PLAYS_AGENT_HINT = """
 (Format-Ziel für /plays: genau 3 umsetzbare Plays im Sygnif-Stil — Entry-Typen: strong_ta, strong_ta_short,
-claude_sentiment*, swing_failure. Pro Play: Thesis, Entry, TP, SL, Timeframe, Risk.)
+fa_s*/fa_short_s*, swing_failure. Pro Play: Thesis, Entry, TP, SL, Timeframe, Risk.)
 """
 
 
@@ -2530,7 +2435,7 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
             if not a:
                 return "(Nutzer: /deduce ohne Text — kurz erklären: `/deduce <Frage>`)"
             return (
-                "Deduktive Aufgabe (Sygnif: Freqtrade, Bybit, TA 0–100, Tags wie strong_ta, claude_s*, swing_failure):\n"
+                "Deduktive Aufgabe (Sygnif: Freqtrade, Bybit, TA 0–100, Tags wie strong_ta, fa_s*, swing_failure):\n"
                 f"{a}"
             )
         if cmd in ("/ask", "/chat"):
@@ -2652,7 +2557,42 @@ def handle_command(text: str, chat_id: str) -> tuple[str, object, str] | None:
 # HTTP server for overseer integration (:8091)
 # ---------------------------------------------------------------------------
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
 import json as _json
+
+
+FINANCE_AGENT_HTTP_HOST = os.environ.get("FINANCE_AGENT_HTTP_HOST", "127.0.0.1").strip()
+FINANCE_AGENT_HTTP_PORT = int(os.environ.get("FINANCE_AGENT_HTTP_PORT", "8091"))
+
+
+def sygnif_sentiment_http_handler(data: dict) -> dict:
+    """POST /sygnif/sentiment — rule-based score for Freqtrade (no LLM / no Haiku)."""
+    token = (data.get("token") or "").strip().upper()
+    if not token:
+        return {"ok": False, "error": "missing_token"}
+
+    try:
+        ta_score = float(data.get("ta_score", 50))
+    except (TypeError, ValueError):
+        ta_score = 50.0
+
+    headlines = data.get("headlines")
+    if headlines is None:
+        headlines = fetch_news(token, max_items=7)
+    if not isinstance(headlines, list):
+        headlines = []
+
+    live_raw = ""
+    if data.get("include_live", True):
+        try:
+            import live_market_snapshot as _lms
+
+            live_raw = (_lms.fetch_finance_agent_market_context(token) or "").strip()
+        except Exception as e:
+            logger.warning("sygnif_sentiment: live_market_snapshot: %s", e)
+
+    score, reason = expert_sygnif_sentiment_score(token, ta_score, headlines, live_raw)
+    return {"ok": True, "score": score, "reason": reason}
 
 
 def _briefing(symbols: list[str] | None = None) -> str:
@@ -2704,13 +2644,48 @@ def _briefing(symbols: list[str] | None = None) -> str:
     return "\n".join(lines) if lines else "No data"
 
 
+def _build_local_overseer_commentary(prompt: str) -> str:
+    """Deterministic trade_overseer lines (no LLM)."""
+    lines_out = []
+    seen = set()
+    for raw in (prompt or "").splitlines():
+        m = re.search(r"\b([A-Z0-9]+)\[([sf])\]\s+([+-]?\d+(?:\.\d+)?)%", raw)
+        if not m:
+            continue
+        sym, inst, pct_s = m.group(1), m.group(2), m.group(3)
+        key = (sym, inst)
+        if key in seen:
+            continue
+        seen.add(key)
+        pct = float(pct_s)
+        if pct <= -2.0:
+            action, reason = "CUT", "loss beyond tolerance"
+        elif pct >= 3.0:
+            action, reason = "TRAIL", "lock gains, trend extension"
+        else:
+            action, reason = "HOLD", "no decisive trigger"
+        lines_out.append(f"{sym}{inst} {pct:+.2f}%: {action} — {reason}")
+
+    if not lines_out:
+        return "No actionable trades."
+    return "\n".join(lines_out[:12])
+
+
 class _BriefingHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _send_json(self, status: int, payload: dict):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        path = urlparse(self.path).path.rstrip("/") or "/"
         if self.path.startswith("/briefing"):
-            # Parse ?symbols=BTC,ETH,SOL from query
             syms = None
             if "?" in self.path:
                 qs = self.path.split("?", 1)[1]
@@ -2722,7 +2697,7 @@ class _BriefingHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(body.encode())
-        elif self.path == "/health":
+        elif path == "/health":
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
@@ -2730,12 +2705,51 @@ class _BriefingHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        ln = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(ln) if ln > 0 else b"{}"
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self._send_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        if path == "/sygnif/sentiment":
+            out = sygnif_sentiment_http_handler(data if isinstance(data, dict) else {})
+            status = 200 if out.get("ok") else 422
+            self._send_json(status, out)
+            return
+
+        if path == "/overseer/commentary":
+            # Same contract as trade_overseer/llm_client.py → OVERSEER_AGENT_URL (rules-only, no LLM).
+            prompt = (data.get("prompt") or "").strip() if isinstance(data, dict) else ""
+            if not prompt:
+                self._send_json(400, {"ok": False, "error": "missing_prompt", "commentary": ""})
+                return
+            commentary = _build_local_overseer_commentary(prompt)
+            self._send_json(200, {"ok": True, "commentary": commentary})
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
+
+def start_finance_agent_http_server(*, block: bool = False) -> None:
+    """Listen on FINANCE_AGENT_HTTP_HOST:FINANCE_AGENT_HTTP_PORT (default 127.0.0.1:8091)."""
+    addr = (FINANCE_AGENT_HTTP_HOST, FINANCE_AGENT_HTTP_PORT)
+    server = HTTPServer(addr, _BriefingHandler)
+    if block:
+        logger.info("Finance agent HTTP on %s:%s (foreground)", addr[0], addr[1])
+        server.serve_forever()
+    else:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        logger.info("Finance agent HTTP on %s:%s (background thread)", addr[0], addr[1])
+
 
 def _start_http():
-    server = HTTPServer(("127.0.0.1", 8091), _BriefingHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    logger.info("Briefing HTTP server on :8091")
+    start_finance_agent_http_server(block=False)
 
 
 def main():
