@@ -29,10 +29,10 @@ DEFAULTS: dict[str, Any] = {
     "doom_cooldown_secs": 14400,
     "strong_ta_min_score": 65,
     "strong_ta_short_max_score": 25,
-    "claude_long_score_low": 40,
-    "claude_long_score_high": 64,
-    "claude_short_score_low": 30,
-    "claude_short_score_high": 60,
+    "fa_long_score_low": 40,
+    "fa_long_score_high": 64,
+    "fa_short_score_low": 30,
+    "fa_short_score_high": 60,
     "vol_strong_mult": 1.2,
     # Failure swing (Heavy91-style) — see .cursor/rules/sygnif-swing-tuning.mdc
     "sf_lookback_bars": 48,
@@ -56,10 +56,10 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "doom_cooldown_secs": (3600, 86400),
     "strong_ta_min_score": (58, 78),
     "strong_ta_short_max_score": (15, 35),
-    "claude_long_score_low": (35, 50),
-    "claude_long_score_high": (55, 75),
-    "claude_short_score_low": (22, 42),
-    "claude_short_score_high": (52, 68),
+    "fa_long_score_low": (35, 50),
+    "fa_long_score_high": (55, 75),
+    "fa_short_score_low": (22, 42),
+    "fa_short_score_high": (52, 68),
     "vol_strong_mult": (1.0, 2.0),
     "sf_lookback_bars": (24, 96),
     "sf_vol_filter_min": (0.015, 0.10),
@@ -97,26 +97,38 @@ def _clamp(key: str, value: Any) -> Any | None:
         return None
 
 
+_LEGACY_ADAPT_KEYS: dict[str, str] = {
+    "claude_long_score_low": "fa_long_score_low",
+    "claude_long_score_high": "fa_long_score_high",
+    "claude_short_score_low": "fa_short_score_low",
+    "claude_short_score_high": "fa_short_score_high",
+}
+
+
 def validate_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     """Return only valid, clamped overrides."""
+    merged = dict(raw)
+    for old_k, new_k in _LEGACY_ADAPT_KEYS.items():
+        if old_k in merged and new_k not in merged:
+            merged[new_k] = merged[old_k]
     out: dict[str, Any] = {}
-    for k, v in raw.items():
+    for k, v in merged.items():
         if k not in DEFAULTS:
             continue
         c = _clamp(k, v)
         if c is not None:
             out[k] = c
-    # Ensure Claude zone ordering
-    lo_l = out.get("claude_long_score_low", DEFAULTS["claude_long_score_low"])
-    hi_l = out.get("claude_long_score_high", DEFAULTS["claude_long_score_high"])
+    # Ensure FA (ambiguous) zone ordering
+    lo_l = out.get("fa_long_score_low", DEFAULTS["fa_long_score_low"])
+    hi_l = out.get("fa_long_score_high", DEFAULTS["fa_long_score_high"])
     if lo_l >= hi_l:
-        out["claude_long_score_low"] = int(DEFAULTS["claude_long_score_low"])
-        out["claude_long_score_high"] = int(DEFAULTS["claude_long_score_high"])
-    lo_s = out.get("claude_short_score_low", DEFAULTS["claude_short_score_low"])
-    hi_s = out.get("claude_short_score_high", DEFAULTS["claude_short_score_high"])
+        out["fa_long_score_low"] = int(DEFAULTS["fa_long_score_low"])
+        out["fa_long_score_high"] = int(DEFAULTS["fa_long_score_high"])
+    lo_s = out.get("fa_short_score_low", DEFAULTS["fa_short_score_low"])
+    hi_s = out.get("fa_short_score_high", DEFAULTS["fa_short_score_high"])
     if lo_s >= hi_s:
-        out["claude_short_score_low"] = int(DEFAULTS["claude_short_score_low"])
-        out["claude_short_score_high"] = int(DEFAULTS["claude_short_score_high"])
+        out["fa_short_score_low"] = int(DEFAULTS["fa_short_score_low"])
+        out["fa_short_score_high"] = int(DEFAULTS["fa_short_score_high"])
     return out
 
 

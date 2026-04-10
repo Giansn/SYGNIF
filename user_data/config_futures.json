@@ -1,5 +1,5 @@
 {
-    "strategy": "SygnifStrategy",
+    "strategy": "MarketStrategy2",
     "can_short": true,
     "trading_mode": "futures",
     "margin_mode": "isolated",

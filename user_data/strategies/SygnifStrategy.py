@@ -14,6 +14,11 @@ Architecture (inspired by NostalgiaForInfinityX7):
 
 Cost: With `SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP=1`, sentiment is **non-LLM** on the node.
   See `SENTIMENT_BACKEND` only if you deliberately disable HTTP and use cloud/Anthropic.
+
+**Backend switch:** Set `SYGNIF_STRATEGY_BACKEND=ms2` (or `marketstrategy2`) so the Freqtrade
+class `SygnifStrategy` inherits **MarketStrategy2** (live snapshot + Haiku loop sentiment)
+while keeping `config["strategy"] = "SygnifStrategy"`. Default unset / `sygnif` = this file's
+HTTP-first **SygnifSentiment** stack (**_SygnifStrategyDefault**).
 """
 
 import logging
@@ -48,6 +53,14 @@ from cursor_cloud_completion import cursor_cloud_completion
 from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
+
+
+def _sygnif_strategy_backend() -> str:
+    """Return ``ms2`` or ``sygnif`` from ``SYGNIF_STRATEGY_BACKEND`` (import-time)."""
+    v = os.environ.get("SYGNIF_STRATEGY_BACKEND", "sygnif").strip().lower()
+    if v in ("ms2", "marketstrategy2", "market_strategy_2"):
+        return "ms2"
+    return "sygnif"
 
 
 # ---------------------------------------------------------------------------
@@ -443,10 +456,10 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
 
 
 # ---------------------------------------------------------------------------
-# Strategy
+# Strategy (default implementation — class SygnifStrategy is bound below)
 # ---------------------------------------------------------------------------
 
-class SygnifStrategy(IStrategy):
+class _SygnifStrategyDefault(IStrategy):
     """
     Sygnif — NFI-Enhanced Freqtrade strategy with AI sentiment analysis.
 
@@ -550,7 +563,7 @@ class SygnifStrategy(IStrategy):
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
     # Claude layer
-    claude = SygnifSentiment()
+    sentiment = SygnifSentiment()
 
     # --- NT risk-based sizing (Lesson 2) ---
     RISK_PCT = 0.02  # 2% of equity risked per trade
@@ -1397,7 +1410,7 @@ class SygnifStrategy(IStrategy):
                 headlines = self.claude.fetch_news(token)
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
 
-                # sentiment=None → API broken, skip claude entry (don't enter blind)
+                # sentiment=None → API broken, skip sentiment entry (don't enter blind)
                 # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07
                 # from "any non-zero" because tier-1 sentiment trades were
                 # over-represented in losers without compensating wins)
@@ -1625,7 +1638,7 @@ class SygnifStrategy(IStrategy):
 
         # Premium-tag slot reservation
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
-        # leaving the top slots available only for high-edge tags (claude_s-5).
+        # leaving the top slots available only for high-edge tags (fa_s-5).
         # Premium tags bypass this cap and may fill up to max_open_trades.
         if tag not in self.PREMIUM_TAGS:
             total_open = len(open_trades)
@@ -1924,4 +1937,61 @@ class SygnifStrategy(IStrategy):
             return 56.0 + offset
         else:
             return 58.0 + offset
+
+
+# ---------------------------------------------------------------------------
+# Freqtrade entrypoint: SygnifStrategy name → default stack or MarketStrategy2
+# ---------------------------------------------------------------------------
+def _import_market_strategy2_class():
+    """Resolve MarketStrategy2 whether this file lives in ``user_data/strategies`` or repo root."""
+    import sys
+    here = Path(__file__).resolve().parent
+    paths = [here]
+    nested = here / "user_data" / "strategies"
+    if (nested / "MarketStrategy2.py").is_file():
+        paths.append(nested)
+    for p in paths:
+        s = str(p)
+        if s not in sys.path:
+            sys.path.insert(0, s)
+    try:
+        from MarketStrategy2 import MarketStrategy2 as ms2  # noqa: E402
+
+        return ms2
+    except ImportError as err:
+        logger.error("MarketStrategy2 import failed (%s)", err)
+        return None
+
+
+_MS2_BASE = None
+if _sygnif_strategy_backend() == "ms2":
+    _MS2_BASE = _import_market_strategy2_class()
+    if _MS2_BASE is None:
+        logger.error(
+            "SYGNIF_STRATEGY_BACKEND=ms2 but MarketStrategy2 is unavailable; "
+            "using default Sygnif stack.",
+        )
+
+if _MS2_BASE is not None:
+    logger.info(
+        "SygnifStrategy: using MarketStrategy2 backend (SYGNIF_STRATEGY_BACKEND=%r)",
+        os.environ.get("SYGNIF_STRATEGY_BACKEND", ""),
+    )
+
+    class SygnifStrategy(_MS2_BASE):
+        """
+        Same as :class:`MarketStrategy2` while keeping config ``strategy: SygnifStrategy``.
+
+        Enable with ``SYGNIF_STRATEGY_BACKEND=ms2`` or ``marketstrategy2`` (e.g. in ``.env`` or
+        compose). Restart Freqtrade after changing — import-time switch.
+        """
+
+        pass
+
+else:
+
+    class SygnifStrategy(_SygnifStrategyDefault):
+        """Default: local HTTP / legacy cloud sentiment (see module docstring)."""
+
+        pass
 

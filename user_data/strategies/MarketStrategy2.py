@@ -685,7 +685,7 @@ class MarketStrategy2(IStrategy):
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
     # Claude layer
-    claude = MarketStrategy2Sentiment()
+    sentiment = MarketStrategy2Sentiment()
 
     # --- NT risk-based sizing (Lesson 2) ---
     RISK_PCT = 0.02  # 2% of equity risked per trade
@@ -1532,7 +1532,7 @@ class MarketStrategy2(IStrategy):
                 headlines = self.claude.fetch_news(token)
                 sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
 
-                # sentiment=None → API broken, skip claude entry (don't enter blind)
+                # sentiment=None → API broken, skip sentiment entry (don't enter blind)
                 # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07
                 # from "any non-zero" because tier-1 sentiment trades were
                 # over-represented in losers without compensating wins)
@@ -1760,7 +1760,7 @@ class MarketStrategy2(IStrategy):
 
         # Premium-tag slot reservation
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
-        # leaving the top slots available only for high-edge tags (claude_s-5).
+        # leaving the top slots available only for high-edge tags (fa_s-5).
         # Premium tags bypass this cap and may fill up to max_open_trades.
         if tag not in self.PREMIUM_TAGS:
             total_open = len(open_trades)

@@ -1,11 +1,55 @@
 ---
+# Inter-service URLs and Docker network name come from `.env` (see `.env.example`).
+# Use default service DNS names (finance-agent, freqtrade, …) on SYGNIF_DOCKER_NETWORK_NAME.
+# Pre-created “Sygnif Network” bridge: merge docker-compose.sygnif-network.yml (see that file).
+# To use a finance-agent already running on the EC2 host, set in .env e.g.
+#   SYGNIF_SENTIMENT_HTTP_URL=http://host.docker.internal:8091/sygnif/sentiment
+#   FINANCE_AGENT_BRIEFING_URL=http://host.docker.internal:8091/briefing
+#   OVERSEER_AGENT_URL=http://host.docker.internal:8091/overseer/commentary
+# and stop the `finance-agent` container if it would bind the same port.
+
+networks:
+  sygnif_backend:
+    # driver omitted so merge with docker-compose.sygnif-network.yml does not keep bridge+external
+    name: ${SYGNIF_DOCKER_NETWORK_NAME:-sygnif_backend}
+
 services:
+  finance-agent:
+    build:
+      context: .
+      dockerfile: "./docker/Dockerfile.finance_agent"
+    restart: unless-stopped
+    container_name: finance-agent
+    env_file:
+      - .env
+    networks:
+      - sygnif_backend
+    ports:
+      - "127.0.0.1:8091:8091"
+    environment:
+      FINANCE_AGENT_HTTP_HOST: "0.0.0.0"
+      FINANCE_AGENT_HTTP_PORT: "8091"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=5)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   freqtrade:
     build:
       context: .
       dockerfile: "./docker/Dockerfile.custom"
     restart: unless-stopped
     container_name: freqtrade
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
@@ -13,8 +57,13 @@ services:
       - .env
     ports:
       - "0.0.0.0:8080:8080"
+    environment:
+      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
     depends_on:
-      - notification-handler
+      finance-agent:
+        condition: service_started
+      notification-handler:
+        condition: service_started
     command: >
       trade
       --logfile /freqtrade/user_data/logs/freqtrade.log
@@ -28,6 +77,10 @@ services:
       dockerfile: "./docker/Dockerfile.custom"
     restart: unless-stopped
     container_name: freqtrade-futures
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
@@ -35,14 +88,18 @@ services:
       - .env
     ports:
       - "0.0.0.0:8081:8081"
+    environment:
+      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
     depends_on:
-      - notification-handler
+      finance-agent:
+        condition: service_started
+      notification-handler:
+        condition: service_started
     command: >
       trade
       --logfile /freqtrade/user_data/logs/freqtrade-futures.log
       --db-url sqlite:////freqtrade/user_data/tradesv3-futures.sqlite
       --config /freqtrade/user_data/config_futures.json
-      --strategy MarketStrategy2
 
   notification-handler:
     build:
@@ -50,6 +107,8 @@ services:
       dockerfile: "./docker/Dockerfile.notifications"
     restart: unless-stopped
     container_name: notification-handler
+    networks:
+      - sygnif_backend
     env_file:
       - .env
     ports:
@@ -64,21 +123,26 @@ services:
       dockerfile: "./trade_overseer/Dockerfile"
     restart: unless-stopped
     container_name: trade-overseer
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
-      FT_SPOT_URL: "http://freqtrade:8080/api/v1"
-      FT_FUTURES_URL: "http://freqtrade-futures:8081/api/v1"
+      FT_SPOT_URL: ${FT_SPOT_URL:-http://freqtrade:8080/api/v1}
+      FT_FUTURES_URL: ${FT_FUTURES_URL:-http://freqtrade-futures:8081/api/v1}
       OVERSEER_HTTP_HOST: "0.0.0.0"
-      # Finance agent on host (Docker Desktop). Linux: set in .env or use extra_hosts.
-      FINANCE_AGENT_BRIEFING_URL: "http://host.docker.internal:8091/briefing"
-      OVERSEER_AGENT_URL: "http://host.docker.internal:8091/overseer/commentary"
+      FINANCE_AGENT_BRIEFING_URL: ${FINANCE_AGENT_BRIEFING_URL:-http://finance-agent:8091/briefing}
+      OVERSEER_AGENT_URL: ${OVERSEER_AGENT_URL:-http://finance-agent:8091/overseer/commentary}
     ports:
       - "127.0.0.1:8090:8090"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
-      - freqtrade
-      - freqtrade-futures
+      finance-agent:
+        condition: service_started
+      freqtrade:
+        condition: service_started
+      freqtrade-futures:
+        condition: service_started
     volumes:
       - "./trade_overseer/data:/app/trade_overseer/data"

@@ -96,7 +96,7 @@ READ gitnexus://repo/{name}/process/{name}
 
 **NFI focus:** tags 1–13, 21–26, 41–53, 61–62, 120 grind; exit helpers; slots; `adjust_trade_position` / DCA.
 
-**Sygnif focus:** `user_data/strategies/SygnifStrategy.py`, `user_data/strategies/MarketStrategy2.py` (MS2 + sentiment; often Docker futures); movers; `SygnifSentiment` / `MarketStrategy2Sentiment`; TA/sentiment bands; failure swing **`sf_*`** (hot-reload via `strategy_adaptation.json`); tag-level SQL (`scripts/merge_backup_trade_analysis.sql`).
+**Sygnif focus:** `user_data/strategies/SygnifStrategy.py` (class **`SygnifStrategy`** = default **`_SygnifStrategyDefault`** or **`MarketStrategy2`** subclass when **`SYGNIF_STRATEGY_BACKEND=ms2`** — import-time); `user_data/strategies/MarketStrategy2.py`; movers; `SygnifSentiment` / `MarketStrategy2Sentiment`; failure swing **`sf_*`** (`strategy_adaptation.json`); tag-level SQL (`scripts/merge_backup_trade_analysis.sql`).
 
 ### 5. Comprehensive research
 
