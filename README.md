@@ -120,6 +120,20 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 | `telemetry.py` | Optional telemetry |
 | `tf_controller.py` / `tf_switch.py` | Timeframe switching utilities |
 
+## Network monorepo (`network/`)
+
+SYGNIF vendors **[Giansn/Network](https://github.com/Giansn/Network)** as a **git submodule** at [`network/`](https://github.com/Giansn/SYGNIF/tree/main/network) (VPC / Client VPN / SSM helpers, OpenVINO edge smoke + split placement + MCP). It is **not** Freqtrade strategy code — keep strategy changes under `user_data/strategies/`.
+
+| In SYGNIF | Upstream |
+|-----------|----------|
+| `network/` submodule | [github.com/Giansn/Network](https://github.com/Giansn/Network) |
+| Update script | `./scripts/update_network_submodule.sh` |
+| Linear workflow env (8093 → 8091 → 8090) | `scripts/linear_workflow.env.example` |
+
+```bash
+git submodule update --init --remote network   # or use scripts/update_network_submodule.sh
+```
+
 ## Quick Start
 
 ```bash
