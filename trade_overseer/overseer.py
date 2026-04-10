@@ -22,6 +22,7 @@ import config
 import ft_client
 import llm_client
 import plays_store
+from event_log import EventLog
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +34,8 @@ logger = logging.getLogger("overseer")
 trade_state: dict[int, dict] = {}  # trade_id -> {pair, instance, last_profit_pct, peak_profit, last_eval_time, stale_alerted}
 last_commentary: str = ""
 last_eval_time: str = ""
+
+event_log = EventLog(instance="overseer")
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +97,8 @@ def check_events(trades: list[dict]) -> list[dict]:
         # New trade
         if tid not in trade_state:
             reasons.append("NEW")
+            event_log.emit("position_change", pair=trade["pair"], trade_id=tid,
+                           data={"action": "open", "instance": trade["instance"]})
 
         # Profit thresholds
         pct = trade["profit_pct"]
@@ -149,6 +154,9 @@ def check_events(trades: list[dict]) -> list[dict]:
                            "profit_pct": closed["last_profit_pct"], "closed": True},
                 "reasons": ["CLOSED"],
             })
+            event_log.emit("position_change", pair=closed["pair"], trade_id=tid,
+                           data={"action": "close", "profit_pct": closed["last_profit_pct"],
+                                 "peak_profit": closed.get("peak_profit")})
 
     return events
 
@@ -379,6 +387,13 @@ def run_evaluation(force: bool = False) -> str:
         n_logged = log_recommendations(commentary, trades)
         if n_logged:
             logger.info(f"Logged {n_logged} overseer recommendations")
+        event_log.emit("overseer_action", data={
+            "type": "evaluation",
+            "n_trades": len(trades),
+            "n_events": len(events),
+            "n_recommendations": n_logged,
+            "forced": force,
+        })
     else:
         msg = build_rules_summary(trades, events)
 
@@ -435,7 +450,6 @@ class OverseerHandler(BaseHTTPRequestHandler):
                 "state": {str(k): v for k, v in trade_state.items()},
                 "ft_instances": [i["name"] for i in config.FT_INSTANCES],
                 "data_dir": config.DATA_DIR,
-                "http_host": config.HTTP_HOST,
                 "http_port": config.HTTP_PORT,
             })
             self.send_response(200)
@@ -493,7 +507,7 @@ def start_http_server():
     server = ThreadingHTTPServer((config.HTTP_HOST, config.HTTP_PORT), OverseerHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info(f"HTTP server on {config.HTTP_HOST}:{config.HTTP_PORT}")
+    logger.info(f"HTTP server on :{config.HTTP_PORT}")
 
 
 # ---------------------------------------------------------------------------
@@ -502,10 +516,9 @@ def start_http_server():
 def main():
     logger.info("Trade Overseer starting...")
     logger.info(
-        "Scope: Freqtrade instances=%s | DATA_DIR=%s | HTTP %s:%s (SYGNIF_OVERSEER_INSTANCE / OVERSEER_HTTP_PORT / OVERSEER_HTTP_HOST)",
+        "Scope: Freqtrade instances=%s | DATA_DIR=%s | HTTP :%s (set SYGNIF_OVERSEER_INSTANCE / OVERSEER_HTTP_PORT to split processes)",
         [i["name"] for i in config.FT_INSTANCES],
         config.DATA_DIR,
-        config.HTTP_HOST,
         config.HTTP_PORT,
     )
 
