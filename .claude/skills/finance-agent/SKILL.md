@@ -129,6 +129,8 @@ The live bot is `finance_agent/bot.py`. When the user’s ask matches a command,
 | Top movers | `/movers` | Gainers/losers |
 | Headlines | `/news` | RSS |
 | Open trades + context | `/overview` | Needs Trade Overseer |
+| Open + closed aggregates | `/finance-agent trades` or `check` | Overseer `/trades` (open list + `/profit` totals; not full closed log) |
+| Network submodule | `/finance-agent network` | [Giansn/Network](https://github.com/Giansn/Network) paths + `network docs` |
 | HOLD/TRAIL/CUT | `/evaluate` | Needs overseer + AI |
 
 ### Sygnif TA score (0–100)

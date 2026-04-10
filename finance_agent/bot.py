@@ -11,6 +11,7 @@ Commands:
   /ta <TICKER>     — Technical analysis with strategy signals
   /research <TICK> — Full research (market + TA + news + AI)
   /finance-agent network [docs] — Network submodule (OpenVINO edge + VPC docs)
+  /finance-agent trades|check — Open positions + closed-trade aggregates (overseer)
   /plays           — AI investment opportunity scan
   /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
@@ -1823,6 +1824,69 @@ def _duration_str(seconds: float) -> str:
     return f"{h}h{m:02d}m" if h else f"{m}m"
 
 
+def cmd_trades_and_history() -> str:
+    """Open trades + Freqtrade profit aggregates (no per-closed-trade list in overseer API)."""
+    try:
+        resp = requests.get(OVERSEER_TRADES, timeout=12)
+        data = resp.json()
+        trades = data.get("trades", [])
+        profits = data.get("profits", [])
+    except Exception as e:
+        return f"*Trades & history*\nOverseer unavailable: `{e}`\n_Check `OVERSEER_URL` and trade-overseer._"
+
+    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    lines: list[str] = [f"*Trades & history* | _{now_str}_\n"]
+
+    lines.append("*History (closed — Freqtrade `/profit` aggregates)*")
+    if not profits:
+        lines.append("_No profit summary from overseer._\n")
+    else:
+        for p in profits:
+            inst = (p.get("instance") or "?").upper()
+            pall = float(p.get("profit_all", 0) or 0)
+            pcl = float(p.get("profit_closed", 0) or 0)
+            wins = int(p.get("winning_trades", 0) or 0)
+            losses = int(p.get("losing_trades", 0) or 0)
+            n = wins + losses
+            wr = f"{wins / n * 100:.0f}%" if n else "—"
+            best = (p.get("best_pair") or "—").replace("/USDT", "")
+            lines.append(
+                f"• `{inst}` P/L all `{pall:+.4f}` USDT | closed `{pcl:+.4f}` | "
+                f"W/L {wins}/{losses} ({wr}) | best `{best}`"
+            )
+
+    lines.append("\n*Current (open — Freqtrade `status` via overseer)*")
+    if not trades:
+        lines.append("_No open trades._")
+    else:
+        spot = [t for t in trades if t.get("instance") == "spot"]
+        fut = [t for t in trades if t.get("instance") == "futures"]
+        for label, group in (("Spot", spot), ("Futures", fut)):
+            if not group:
+                continue
+            lines.append(f"*{label}* ({len(group)})")
+            for t in sorted(group, key=lambda x: float(x.get("profit_pct", 0) or 0), reverse=True):
+                pair = (
+                    (t.get("pair") or "")
+                    .replace("/USDT:USDT", "")
+                    .replace("/USDT", "")
+                )
+                pct = float(t.get("profit_pct", 0) or 0)
+                pnl = float(t.get("profit_abs", 0) or 0)
+                dur = _duration_str(float(t.get("trade_duration", 0) or 0))
+                tag = (t.get("enter_tag") or "")[:18]
+                tid = t.get("trade_id", "?")
+                em = "\U0001f7e2" if pct >= 0 else "\U0001f534"
+                extra = f" _{tag}_" if tag else ""
+                lines.append(f"{em} `{pair}` `{pct:+.1f}%` ({pnl:+.4f}) {dur} id={tid}{extra}")
+
+    lines.append(
+        "\n_Per closed-trade log: Freqtrade UI or `user_data/tradesv3*.sqlite` — "
+        "overseer only forwards open list + `/profit` totals._"
+    )
+    return "\n".join(lines)
+
+
 def cmd_overview() -> str:
     # 1. Fetch trades + profits from overseer
     try:
@@ -2030,6 +2094,7 @@ def cmd_help() -> str:
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
         "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (edge OpenVINO, docs); `network docs` for paths\n"
+        "`/finance-agent trades` / `check` — open positions + closed P/L aggregates (overseer)\n"
         "`/finance-agent <cmd>` — Run specific module\n"
         "`/finance-agent <TICKER>` — Research for ticker\n"
         "`/overview` — Trades + TA + market (full dashboard)\n"
@@ -2118,6 +2183,8 @@ def cmd_finance_agent(args: str) -> str:
     tail = parts[1].strip() if len(parts) > 1 else ""
     if sub == "network":
         return cmd_network_section(tail)
+    if sub in ("trades", "check"):
+        return cmd_trades_and_history()
     subcommands = {
         "market": lambda: cmd_market(),
         "movers": lambda: cmd_movers(),
@@ -2141,7 +2208,7 @@ def cmd_finance_agent(args: str) -> str:
         return subcommands[sub]()
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return cmd_research(sub.upper())
-    return "Unknown /finance-agent command. Use `network|network docs|cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
+    return "Unknown /finance-agent command. Use `trades|check|network|network docs|overview|cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
 
 
 # ---------------------------------------------------------------------------
@@ -2570,6 +2637,12 @@ def _gather_finance_agent_for_agent(args: str) -> str:
             + cmd_network_section(tail)
             + "\n=== END NETWORK ==="
         )
+    if sub in ("trades", "check"):
+        return (
+            "=== TRADES OPEN + HISTORY (aggregate) ===\n"
+            + cmd_trades_and_history()
+            + "\n=== END TRADES ==="
+        )
     if sub == "market":
         return cmd_market()
     if sub == "movers":
@@ -2604,7 +2677,7 @@ def _gather_finance_agent_for_agent(args: str) -> str:
         return _gather_research_for_agent(tail or "BTC")
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return _gather_research_for_agent(sub.upper())
-    return f"Unknown /finance-agent subcommand: {raw} (try `network` or `network docs`)"
+    return f"Unknown /finance-agent subcommand: {raw} (try `trades`, `check`, `network`, `overview`)"
 
 
 def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
