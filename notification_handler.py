@@ -54,6 +54,16 @@ TG_TOKEN_FUTURES = os.environ.get("TELEGRAM_FUTURES_BOT_TOKEN", TG_TOKEN_FUTURES
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", TG_CHAT)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
 
+# Aliases when env_file injects keys used elsewhere on the host (no /app/.env in the image).
+if not (TG_TOKEN or "").strip():
+    TG_TOKEN = os.environ.get("FINANCE_BOT_TOKEN", "").strip()
+if not (TG_CHAT or "").strip():
+    TG_CHAT = (
+        os.environ.get("AGENT_CHAT_ID", "")
+        or os.environ.get("TELEGRAM_FUTURES_CHAT_ID", "")
+        or ""
+    ).strip()
+
 
 # ---------------------------------------------------------------------------
 # Telegram sender
@@ -438,8 +448,10 @@ def main():
     args = parser.parse_args()
 
     if not TG_TOKEN or not TG_CHAT:
-        print("Error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set")
-        sys.exit(1)
+        logger.warning(
+            "TELEGRAM_BOT_TOKEN (or FINANCE_BOT_TOKEN) and TELEGRAM_CHAT_ID (or AGENT_CHAT_ID) "
+            "are unset — webhooks accepted but Telegram sends are skipped until configured."
+        )
     if TG_TOKEN_FUTURES:
         logger.info("Futures bot token loaded — routing futures messages to @sygnifuture_bot")
     else:

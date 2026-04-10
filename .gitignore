@@ -51,8 +51,11 @@ SYGNIF/
 # Optional stray capital-N folder (submodule lives at network/)
 Network
 
-# Auto-generated agent rules (personalized per developer)
-.brainsync/agent-rules.md
+# Auto-generated agent rules / local brain sync (personalized per machine)
+.brainsync/
+
+# Local IDE MCP (machine-specific)
+.vscode/mcp.json
 
 # Auto-generated AI agent exclusions
 .cursorrules

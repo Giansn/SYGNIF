@@ -120,6 +120,14 @@ services:
       - sygnif_backend
     env_file:
       - .env
+    environment:
+      # Explicit passthrough so tokens resolve even when /app/.env is absent in the image.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_FUTURES_BOT_TOKEN: ${TELEGRAM_FUTURES_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      FINANCE_BOT_TOKEN: ${FINANCE_BOT_TOKEN:-}
+      AGENT_CHAT_ID: ${AGENT_CHAT_ID:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "127.0.0.1:8089:8089"
     command: python3 /app/notification_handler.py --port 8089
