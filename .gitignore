@@ -20,7 +20,8 @@ files.zip
 user_data/config.json
 config_claude_bot.json
 .gitnexus
-.claude/
+.claude/*
+!.claude/skills/
 movers_update.log
 user_data/movers_pairlist_futures.json
 user_data_futures/

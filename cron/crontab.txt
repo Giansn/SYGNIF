@@ -1,0 +1,9 @@
+# Sygnif cron jobs — add to ubuntu's crontab with:  crontab cron/crontab.txt
+#
+# Tip: merge with existing crontab:
+#   (crontab -l 2>/dev/null; cat cron/crontab.txt) | sort -u | crontab -
+#
+# All paths assume REPO_DIR=/home/ubuntu/xrp_claude_bot
+
+# Trading success report — every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+0 */6 * * * REPO_DIR=/home/ubuntu/xrp_claude_bot /bin/bash /home/ubuntu/xrp_claude_bot/cron/trading_success_cron.sh >> /home/ubuntu/xrp_claude_bot/user_data/logs/trading_success_cron.log 2>&1
