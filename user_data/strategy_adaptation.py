@@ -34,6 +34,13 @@ DEFAULTS: dict[str, Any] = {
     "claude_short_score_low": 30,
     "claude_short_score_high": 60,
     "vol_strong_mult": 1.2,
+    # Failure swing (Heavy91-style) — see .cursor/rules/sygnif-swing-tuning.mdc
+    "sf_lookback_bars": 48,
+    "sf_vol_filter_min": 0.03,
+    "sf_sl_base": 0.02,
+    "sf_sl_vol_scale": 0.02,
+    "sf_tp_vol_scale": 0.05,
+    "sf_ta_split": 50.0,
 }
 
 # Inclusive min/max per key (safety rails for adaptive tuning).
@@ -54,6 +61,12 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "claude_short_score_low": (22, 42),
     "claude_short_score_high": (52, 68),
     "vol_strong_mult": (1.0, 2.0),
+    "sf_lookback_bars": (24, 96),
+    "sf_vol_filter_min": (0.015, 0.10),
+    "sf_sl_base": (0.01, 0.045),
+    "sf_sl_vol_scale": (0.0, 0.06),
+    "sf_tp_vol_scale": (0.02, 0.12),
+    "sf_ta_split": (40.0, 60.0),
 }
 
 
@@ -69,6 +82,11 @@ def _clamp(key: str, value: Any) -> Any | None:
             "soft_sl_ratio_spot",
             "soft_sl_ratio_futures",
             "vol_strong_mult",
+            "sf_vol_filter_min",
+            "sf_sl_base",
+            "sf_sl_vol_scale",
+            "sf_tp_vol_scale",
+            "sf_ta_split",
         ):
             v = float(value)
             return max(lo, min(hi, v))

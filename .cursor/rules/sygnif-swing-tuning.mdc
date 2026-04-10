@@ -1,0 +1,41 @@
+---
+description: Fine-tune Sygnif failure swing (sf_*) via adaptation bounds and code touchpoints
+globs: user_data/strategy_adaptation.py,user_data/strategy_adaptation.json,user_data/strategies/MarketStrategy2.py,user_data/strategies/SygnifStrategy.py,SygnifStrategy.py
+alwaysApply: false
+---
+
+# Sygnif swing fine-tuning
+
+## Prefer hot-reload JSON first
+
+Edit `user_data/strategy_adaptation.json` → `overrides`. Values are **clamped** in `user_data/strategy_adaptation.py` (`DEFAULTS` / `BOUNDS`). Reload is automatic (~60s) via `bot_loop_start`; restart not required.
+
+### Swing-specific keys (Heavy91-style)
+
+| Key | Role | Typical direction |
+|-----|------|-------------------|
+| `max_slots_swing` | Cap open swing-tagged trades | ↓ fewer concurrent swings |
+| `sf_lookback_bars` | Rolling S/R window on 5m base | ↑ wider structure, fewer touches |
+| `sf_vol_filter_min` | Min \|close−EMA120\|/EMA120 to allow pattern | ↑ stricter (fewer near-EMA entries) |
+| `sf_sl_base` | Base stop distance fraction for `sf_sl_pct` | ↔ risk per trade |
+| `sf_sl_vol_scale` | Volatility term in `sf_sl_pct` | ↑ wider stops in volatile tape |
+| `sf_tp_vol_scale` | How far `sf_tp_ema` sits beyond EMA120 | ↑ larger TP target |
+| `sf_ta_split` | TA score boundary: long `claude_swing` if ≥ split, `swing_failure` if below; short inverted | ↑ more `swing_failure*` vs `claude_swing*` |
+
+Related non-swing keys that still change swing *context*: `strong_ta_min_score`, protections are unchanged in code—tune structure with `sf_*` and slots.
+
+## When to edit Python instead
+
+- Change **ratchet** profit thresholds for swing `custom_stoploss` (+2% / +5%) or exit logic in `_exit_swing_failure` / `custom_exit` tag routing.
+- Add new adaptation keys: extend `DEFAULTS`, `BOUNDS`, and `_clamp` float list in `strategy_adaptation.py`, add class defaults on the strategy, use `self.<name>` in indicators/entries.
+
+## Workflow
+
+1. Adjust JSON overrides; set `reason` + `updated` for audit.
+2. Backtest / dry-run; compare tag mix (`claude_swing*` vs `swing_failure*`) and `exit_sf_*` rates.
+3. See `docs/backtest_live_parity.md` if comparing live vs backtest.
+
+## Do not
+
+- Bypass `BOUNDS` by editing JSON with out-of-range values expecting them to stick (they clamp silently).
+- Tune swing without considering `max_slots_swing` and futures volume bypass for `_swing_tags`.

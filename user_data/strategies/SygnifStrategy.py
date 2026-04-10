@@ -6,11 +6,14 @@ Architecture (inspired by NostalgiaForInfinityX7):
 - BTC correlation: BTC/USDT indicators merged into all pairs
 - NFI-style indicators: RSI_3/14, Aroon, StochRSI, CMF, CCI, ROC, BB, EMA, Williams %R
 - Global protections: Multi-TF cascade prevents buying during crashes
-- Sentiment layer: ambiguous TA zone → news + **Cursor Cloud Agent** (preferred when
-  `CURSOR_*` set) or **Anthropic Haiku** fallback — JSON score -20..+20
+- Sentiment layer: ambiguous TA zone → **local finance-agent HTTP** (`/sygnif/sentiment`)
+  when `SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP=1` or `SYGNIF_SENTIMENT_HTTP_URL` is set — **rule-based**
+  finance-agent expert score (-20..+20), no Haiku. If HTTP is not configured, optional
+  **Cursor Cloud** / **Anthropic** paths remain (not used when HTTP URL is set).
 - NFI-style exit logic: Profit-tiered RSI exits + overbought signals + doom stoploss
 
-Cost: Cursor Cloud task pricing + optional Haiku fallback; see `SENTIMENT_BACKEND` in `.env`.
+Cost: With `SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP=1`, sentiment is **non-LLM** on the node.
+  See `SENTIMENT_BACKEND` only if you deliberately disable HTTP and use cloud/Anthropic.
 """
 
 import logging
@@ -42,6 +45,7 @@ from freqtrade.persistence import Trade
 from pandas import DataFrame
 
 from cursor_cloud_completion import cursor_cloud_completion
+from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +55,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SygnifSentiment:
-    """Sentiment via Cursor Cloud Agent API (primary) or Anthropic Haiku (fallback)."""
+    """Sentiment via local finance-agent HTTP (rule-based expert), or when HTTP is
+    unset, Cursor Cloud Agent or Anthropic (legacy)."""
 
     def __init__(self):
         # auto | cursor_cloud | anthropic — auto prefers Cursor when CURSOR_* are set
@@ -280,7 +285,8 @@ class SygnifSentiment:
         headlines: list[str],
     ) -> float:
         """
-        Cursor Cloud Agent (preferred) or Anthropic Haiku — score -20..+20.
+        Prefer finance-agent HTTP (rule-based expert). Optionally Cursor or Anthropic
+        only when no sentiment HTTP URL is configured.
         """
         self._reset_daily_counter()
 
@@ -288,6 +294,28 @@ class SygnifSentiment:
         if cached is not None:
             logger.info(f"Sentiment (cached) for {token}: {cached}")
             return cached
+
+        http_url = os.environ.get("SYGNIF_SENTIMENT_HTTP_URL", "").strip()
+        if not http_url and os.environ.get(
+            "SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP", ""
+        ).strip().lower() in ("1", "true", "yes", "on"):
+            http_url = "http://127.0.0.1:8091/sygnif/sentiment"
+        if http_url:
+            from sentiment_http_client import post_sygnif_sentiment
+
+            ok, sc, err = post_sygnif_sentiment(
+                http_url, token, current_price, ta_score, headlines
+            )
+            if ok and sc is not None:
+                self.daily_calls += 1
+                self._cache[token] = (time.time(), float(sc))
+                if sc != 0:
+                    self.non_zero_calls += 1
+                logger.info("Sentiment HTTP (%s) for %s: %s", http_url, token, sc)
+                return float(sc)
+            logger.warning("SYGNIF_SENTIMENT_HTTP failed (%s): %s", token, err)
+            # Finance-agent path only — do not fall through to Cursor/Haiku.
+            return None
 
         if self.daily_calls >= self.daily_limit:
             logger.warning("Sentiment daily limit reached, returning neutral")
@@ -303,7 +331,9 @@ class SygnifSentiment:
 
         news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent headlines available."
 
-        prompt = f"""Assess sentiment for trading {token}.
+        prompt = f"""{FINANCE_AGENT_SENTIMENT_INSTRUCTIONS}
+
+Assess sentiment for trading {token}.
 
 Current price: ${current_price:.4f}
 Technical analysis score: {ta_score:.0f}/100 (50 = neutral, >60 = bullish, <40 = bearish)
@@ -503,6 +533,13 @@ class SygnifStrategy(IStrategy):
     claude_short_score_low = 30
     claude_short_score_high = 60
     vol_strong_mult = 1.2
+    # Failure swing (Heavy91-style) — overridden by strategy_adaptation.json
+    sf_lookback_bars = 48
+    sf_vol_filter_min = 0.03
+    sf_sl_base = 0.02
+    sf_sl_vol_scale = 0.02
+    sf_tp_vol_scale = 0.05
+    sf_ta_split = 50.0
     _adaptation_last_load: float = 0.0
     _adaptation_refresh_secs: int = 60
 
@@ -959,17 +996,17 @@ class SygnifStrategy(IStrategy):
                 df[col] = df[col].astype(np.float64).fillna(50.0)
 
         # --- Failure Swing (Stop Hunt) indicators ---
-        # 48-bar S/R levels (4h on 5m TF, shifted: use closed bars only)
-        df["sf_resistance"] = df["high"].shift(1).rolling(48).max()
-        df["sf_support"] = df["low"].shift(1).rolling(48).min()
+        lb = max(8, int(self.sf_lookback_bars))
+        df["sf_resistance"] = df["high"].shift(1).rolling(lb).max()
+        df["sf_support"] = df["low"].shift(1).rolling(lb).min()
         # Stable level check: S/R unchanged for 2 bars (level is established)
         df["sf_resistance_stable"] = df["sf_resistance"] == df["sf_resistance"].shift(1)
         df["sf_support_stable"] = df["sf_support"] == df["sf_support"].shift(1)
         # EMA 120 for TP target
         df["EMA_120"] = pta.ema(df["close"], length=120)
-        # Volatility filter: distance from EMA as % (must exceed 5%)
+        # Volatility filter: distance from EMA as fraction (blocks entries near EMA)
         df["sf_volatility"] = ((df["close"] - df["EMA_120"]).abs() / df["EMA_120"])
-        df["sf_vol_filter"] = df["sf_volatility"] > 0.03
+        df["sf_vol_filter"] = df["sf_volatility"] > float(self.sf_vol_filter_min)
         # Long signal: wick below support but close back above + stable level
         df["sf_long"] = (
             (df["low"] <= df["sf_support"])
@@ -985,8 +1022,11 @@ class SygnifStrategy(IStrategy):
             & df["sf_vol_filter"]
         )
         # Dynamic SL/TP coefficients (Heavy91)
-        df["sf_sl_pct"] = 0.02 + df["sf_volatility"] * 0.02  # base 2% + vol adjustment
-        df["sf_tp_ema"] = df["EMA_120"] * (1 + df["sf_volatility"] * 0.05 * np.sign(df["close"] - df["EMA_120"]))
+        df["sf_sl_pct"] = float(self.sf_sl_base) + df["sf_volatility"] * float(self.sf_sl_vol_scale)
+        df["sf_tp_ema"] = df["EMA_120"] * (
+            1
+            + df["sf_volatility"] * float(self.sf_tp_vol_scale) * np.sign(df["close"] - df["EMA_120"])
+        )
 
         # --- Global protections (NFI-style) ---
         df["protections_long_global"] = self._calc_global_protections(df)
@@ -1376,7 +1416,8 @@ class SygnifStrategy(IStrategy):
 
             if last_prot and last_empty and sf_long:
                 last_score = ta_score.iloc[-1]
-                if last_score >= 50:
+                split = float(self.sf_ta_split)
+                if last_score >= split:
                     # claude_swing: failure swing + TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing"
@@ -1438,7 +1479,8 @@ class SygnifStrategy(IStrategy):
 
             if last_prot_s and last_empty and sf_short:
                 last_score = ta_score.iloc[-1]
-                if last_score <= 50:
+                split = float(self.sf_ta_split)
+                if last_score <= split:
                     # claude_swing short: failure swing + bearish TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing_short"

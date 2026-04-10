@@ -1,14 +1,18 @@
 """
-SygnifStrategy - NFI-Enhanced Trading Bot with AI Sentiment Layer
+MarketStrategy2 — NFI-style stack + AI sentiment (parallel to SygnifStrategy).
 
 Architecture (inspired by NostalgiaForInfinityX7):
-- Multi-timeframe analysis: 5m base + 5m/15m/1h/4h/1d informative
+- Multi-timeframe analysis: 5m base + 15m/1h/4h/1d informative
 - BTC correlation: BTC/USDT indicators merged into all pairs
 - NFI-style indicators: RSI_3/14, Aroon, StochRSI, CMF, CCI, ROC, BB, EMA, Williams %R
 - Global protections: Multi-TF cascade prevents buying during crashes
-- Sentiment layer: ambiguous TA zone → news + **Cursor Cloud Agent** (preferred when
-  `CURSOR_*` set) or **Anthropic Haiku** fallback — JSON score -20..+20
-- NFI-style exit logic: Profit-tiered RSI exits + overbought signals + doom stoploss
+- Failure swing (Heavy91-style): `sf_*` columns; tunables `sf_lookback_bars`, `sf_vol_filter_min`,
+  `sf_sl_base`, `sf_sl_vol_scale`, `sf_tp_vol_scale`, `sf_ta_split`, `max_slots_swing` via
+  **user_data/strategy_adaptation.json** (clamped in strategy_adaptation.py), hot-reload ~60s.
+- Sentiment layer: **MarketStrategy2Sentiment** = live Bybit snapshot + news + LLM
+  (Cursor Cloud if `CURSOR_*` set; else two-step Haiku loop by default).
+- NFI-style exit logic: Profit-tiered RSI exits + Williams %R + doom stoploss; swing tags use
+  `_exit_swing_failure` / on-exchange SL tiers.
 
 Cost: Cursor Cloud task pricing + optional Haiku fallback; see `SENTIMENT_BACKEND` in `.env`.
 """
@@ -42,6 +46,8 @@ from freqtrade.persistence import Trade
 from pandas import DataFrame
 
 from cursor_cloud_completion import cursor_cloud_completion
+from live_market_snapshot import fetch_finance_agent_market_context
+from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class SygnifSentiment:
-    """Sentiment via Cursor Cloud Agent API (primary) or Anthropic Haiku (fallback)."""
+    """Sentiment via Cursor Cloud Agent (primary) or Anthropic Haiku (fallback), with
+    prompts framed to match the /finance-agent skill (implementation-grounded Sygnif).
+
+    Use **MarketStrategy2Sentiment** in Docker futures — adds live Bybit context + optional
+    two-step Haiku loop (`SENTIMENT_MS2_FINANCE_AGENT_LOOP`, default on).
+    """
 
     def __init__(self):
         # auto | cursor_cloud | anthropic — auto prefers Cursor when CURSOR_* are set
@@ -169,6 +180,127 @@ class SygnifSentiment:
             )
             self._consecutive_failures = 0  # reset after opening
 
+    def _live_market_context_for_prompt(self, token: str) -> str:
+        """Override in MarketStrategy2Sentiment to inject real-time Bybit data."""
+        return ""
+
+    def _use_finance_agent_haiku_loop(self) -> bool:
+        """Two Haiku calls: (1) synthesize live tape + news, (2) JSON score. MS2 enables."""
+        return False
+
+    def _anthropic_response_text(self, data: dict) -> str:
+        try:
+            return (data.get("content") or [{}])[0].get("text") or ""
+        except (IndexError, TypeError, AttributeError):
+            return ""
+
+    def _finalize_parsed_score(
+        self, score: Optional[float], text: str, backend: str, token: str
+    ) -> Optional[float]:
+        if score is None:
+            self.parse_errors += 1
+            logger.error("%s sentiment: no JSON in response: %s", backend, text[:200] if text else "")
+            return None
+        reason = ""
+        try:
+            m = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
+            if m:
+                reason = json.loads(m.group(0)).get("reason", "") or ""
+        except Exception:
+            pass
+        if score != 0:
+            self.non_zero_calls += 1
+        logger.info(
+            "%s sentiment for %s: %s — %s [stats: %sc %snz %spe %sae]",
+            backend,
+            token,
+            score,
+            reason,
+            self.daily_calls,
+            self.non_zero_calls,
+            self.parse_errors,
+            self.api_errors,
+        )
+        self._cache[token] = (time.time(), float(score))
+        self._consecutive_failures = 0
+        return float(score)
+
+    def _anthropic_finance_agent_loop(
+        self,
+        token: str,
+        current_price: float,
+        ta_score: float,
+        news_text: str,
+        live_raw: str,
+    ) -> Optional[float]:
+        """Haiku step 1: synthesis. Step 2: JSON score (-20..20). Uses 2 API calls."""
+        live_section = (
+            f"\n--- Live Bybit snapshot (real-time) ---\n{live_raw}\n"
+            if (live_raw or "").strip()
+            else "\n--- Live Bybit snapshot: unavailable ---\n"
+        )
+        step1 = f"""{FINANCE_AGENT_SENTIMENT_INSTRUCTIONS}
+
+MarketStrategy2 / finance-agent loop — STEP 1 of 2 (synthesis only; no JSON).
+
+Token: {token}
+Sygnif TA score (authoritative, from Freqtrade): {ta_score:.0f}/100
+Last close from strategy pipeline: ${current_price:.6f}
+{live_section}
+Headlines:
+{news_text}
+
+Reply with ≤6 short bullets: (1) spot/perp tape vs 24h, (2) BTC context, (3) {token} narrative from headlines, (4) conflicts between tape and news, (5) does news add edge beyond TA?, (6) bull / bear / neutral lean. Plain text only."""
+
+        self.daily_calls += 1
+        resp1 = self._call_api_with_retry(
+            {"model": self.model, "max_tokens": 400, "messages": [{"role": "user", "content": step1}]}
+        )
+        if resp1 is None or not resp1.ok:
+            self.api_errors += 1
+            logger.error("Haiku loop step1 failed for %s", token)
+            return None
+        try:
+            text1 = self._anthropic_response_text(resp1.json())
+        except Exception as e:
+            self.parse_errors += 1
+            logger.error("Haiku loop step1 parse error: %s", e)
+            return None
+        if not text1.strip():
+            self.parse_errors += 1
+            logger.error("Haiku loop step1 empty for %s", token)
+            return None
+
+        step2 = f"""MarketStrategy2 / finance-agent loop — STEP 2 of 2.
+
+Step-1 synthesis:
+{text1}
+
+Sygnif TA score (still authoritative): {ta_score:.0f}/100
+Token: {token}
+
+Output ONLY a JSON object (no markdown):
+{{"score": <integer -20..20>, "reason": "<one sentence linking TA + live tape + news>"}}
+
+The score is ADDED to TA in the strategy. Prefer 0 when there is no edge."""
+
+        self.daily_calls += 1
+        resp2 = self._call_api_with_retry(
+            {"model": self.model, "max_tokens": 150, "messages": [{"role": "user", "content": step2}]}
+        )
+        if resp2 is None or not resp2.ok:
+            self.api_errors += 1
+            logger.error("Haiku loop step2 failed for %s", token)
+            return None
+        try:
+            text2 = self._anthropic_response_text(resp2.json())
+        except Exception as e:
+            self.parse_errors += 1
+            logger.error("Haiku loop step2 parse error: %s", e)
+            return None
+        score = self._parse_sentiment_score(text2)
+        return self._finalize_parsed_score(score, text2, "Haiku-loop", token)
+
     def _reset_daily_counter(self):
         today = datetime.now().date()
         if today > self._last_reset:
@@ -281,6 +413,7 @@ class SygnifSentiment:
     ) -> float:
         """
         Cursor Cloud Agent (preferred) or Anthropic Haiku — score -20..+20.
+        Subclasses may inject live market context and a two-step Haiku loop.
         """
         self._reset_daily_counter()
 
@@ -289,11 +422,34 @@ class SygnifSentiment:
             logger.info(f"Sentiment (cached) for {token}: {cached}")
             return cached
 
+        http_url = os.environ.get("SYGNIF_SENTIMENT_HTTP_URL", "").strip()
+        if http_url:
+            from sentiment_http_client import post_sygnif_sentiment
+
+            ok, sc, err = post_sygnif_sentiment(
+                http_url, token, current_price, ta_score, headlines
+            )
+            if ok and sc is not None:
+                self.daily_calls += 1
+                self._cache[token] = (time.time(), float(sc))
+                if sc != 0:
+                    self.non_zero_calls += 1
+                logger.info("Sentiment HTTP (%s) for %s: %s", http_url, token, sc)
+                return float(sc)
+            logger.warning("SYGNIF_SENTIMENT_HTTP failed (%s): %s", token, err)
+            if os.environ.get("SYGNIF_SENTIMENT_HTTP_ONLY", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                return None
+
         if self.daily_calls >= self.daily_limit:
             logger.warning("Sentiment daily limit reached, returning neutral")
             return 0.0
 
         use_cursor = self._use_cursor_cloud()
+
         if not use_cursor and not self.api_key:
             logger.warning(
                 "Skipping sentiment: set CURSOR_API_KEY + CURSOR_AGENT_REPOSITORY (Cursor) "
@@ -302,12 +458,20 @@ class SygnifSentiment:
             return 0.0
 
         news_text = "\n".join(f"- {h}" for h in headlines) if headlines else "No recent headlines available."
+        live_raw = (self._live_market_context_for_prompt(token) or "").strip()
+        live_block = (
+            f"\n--- Live Bybit snapshot (finance-agent market data) ---\n{live_raw}\n"
+            if live_raw
+            else ""
+        )
 
-        prompt = f"""Assess sentiment for trading {token}.
+        prompt = f"""{FINANCE_AGENT_SENTIMENT_INSTRUCTIONS}
+
+Assess sentiment for trading {token}.
 
 Current price: ${current_price:.4f}
 Technical analysis score: {ta_score:.0f}/100 (50 = neutral, >60 = bullish, <40 = bearish)
-
+{live_block}
 Recent crypto headlines (mix of {token}-specific and general market):
 {news_text}
 
@@ -315,6 +479,7 @@ Provide a sentiment adjustment score combining:
 1. Any {token}-specific news (most weight if present)
 2. General crypto market mood from the headlines
 3. Macro/regulatory context implied by the news
+4. How the live tape (if provided) agrees or disagrees with headlines
 
 Rules:
 - Score between -20 (strongly bearish) and +20 (strongly bullish)
@@ -325,16 +490,14 @@ Rules:
 
 Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"}}"""
 
-        self.daily_calls += 1
-
         if use_cursor:
+            self.daily_calls += 1
             text = cursor_cloud_completion(prompt, label="Sygnif sentiment")
             if text is None:
                 self.api_errors += 1
                 self._consecutive_failures += 1
                 self._maybe_trip_breaker()
                 logger.error(f"Cursor Cloud sentiment for {token}: failed or empty")
-                # auto-fallback to Anthropic if configured
                 if self._sentiment_backend == "auto" and self.api_key:
                     logger.info(f"Falling back to Anthropic Haiku for {token}")
                     use_cursor = False
@@ -343,28 +506,24 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
 
         if use_cursor:
             score = self._parse_sentiment_score(text)
-            if score is None:
-                self.parse_errors += 1
-                logger.error(f"Cursor sentiment: no JSON in response: {text[:200] if text else ''}")
-                return None
-            reason = ""
-            try:
-                m = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
-                if m:
-                    reason = json.loads(m.group(0)).get("reason", "") or ""
-            except Exception:
-                pass
-            if score != 0:
-                self.non_zero_calls += 1
-            logger.info(
-                f"Cursor sentiment for {token}: {score} — {reason} "
-                f"[stats: {self.daily_calls}c {self.non_zero_calls}nz {self.parse_errors}pe {self.api_errors}ae]"
-            )
-            self._cache[token] = (time.time(), score)
-            self._consecutive_failures = 0
-            return float(score)
+            out = self._finalize_parsed_score(score, text, "Cursor", token)
+            return out if out is not None else None
 
-        # Anthropic Haiku path
+        # Anthropic (primary or Cursor auto-fallback): optional two-step finance-agent loop
+        want_loop = self._use_finance_agent_haiku_loop() and bool(self.api_key)
+        if want_loop and self.daily_calls > max(0, self.daily_limit - 2):
+            logger.warning(
+                "Sentiment: finance-agent Haiku loop needs 2 API calls; limit %s/%s — skip",
+                self.daily_calls,
+                self.daily_limit,
+            )
+            return 0.0
+        if want_loop:
+            return self._anthropic_finance_agent_loop(
+                token, current_price, ta_score, news_text, live_raw
+            )
+
+        self.daily_calls += 1
         payload = {
             "model": self.model,
             "max_tokens": 100,
@@ -385,31 +544,35 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
 
         try:
             data = resp.json()
-            text = data["content"][0]["text"]
+            text = self._anthropic_response_text(data)
             score = self._parse_sentiment_score(text)
-            if score is None:
-                self.parse_errors += 1
-                logger.error(f"Claude sentiment: no JSON object found in response: {text[:200]}")
-                return None
-            reason = ""
-            try:
-                m = re.search(r"\{[^{}]*\"score\"[^{}]*\}", text, re.DOTALL)
-                if m:
-                    reason = json.loads(m.group(0)).get("reason", "") or ""
-            except Exception:
-                pass
-            if score != 0:
-                self.non_zero_calls += 1
-            logger.info(
-                f"Claude sentiment for {token}: {score} — {reason} "
-                f"[stats: {self.daily_calls}c {self.non_zero_calls}nz {self.parse_errors}pe {self.api_errors}ae]"
-            )
-            self._cache[token] = (time.time(), score)
-            return score
+            return self._finalize_parsed_score(score, text, "Claude", token)
         except Exception as e:
             self.parse_errors += 1
             logger.error(f"Claude sentiment parse error: {e}")
             return None
+
+
+class MarketStrategy2Sentiment(SygnifSentiment):
+    """Live Bybit snapshot + shorter cache TTL; Haiku uses two-step finance-agent loop by default."""
+
+    def __init__(self):
+        super().__init__()
+        self.cache_ttl = int(os.environ.get("SENTIMENT_MS2_CACHE_SEC", "180"))
+
+    def _live_market_context_for_prompt(self, token: str) -> str:
+        try:
+            return fetch_finance_agent_market_context(token, session=self._session)
+        except Exception as e:
+            logger.warning("MarketStrategy2 live market context failed: %s", e)
+            return ""
+
+    def _use_finance_agent_haiku_loop(self) -> bool:
+        return os.environ.get("SENTIMENT_MS2_FINANCE_AGENT_LOOP", "1").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +589,8 @@ class MarketStrategy2(IStrategy):
     - DCA scale-in for high-conviction entries
     - EventLog observability (SL tier tracking)
     - Global volume regime gate
+    - Sentiment: **MarketStrategy2Sentiment** — live Bybit snapshot + finance-agent Haiku loop
+      (env: `SENTIMENT_MS2_FINANCE_AGENT_LOOP`, `SENTIMENT_MS2_CACHE_SEC`, `SENTIMENT_MS2_LINEAR_TICKER`)
     """
 
     INTERFACE_VERSION = 3
@@ -503,6 +668,13 @@ class MarketStrategy2(IStrategy):
     claude_short_score_low = 30
     claude_short_score_high = 60
     vol_strong_mult = 1.2
+    # Failure swing (Heavy91-style) — overridden by strategy_adaptation.json
+    sf_lookback_bars = 48
+    sf_vol_filter_min = 0.03
+    sf_sl_base = 0.02
+    sf_sl_vol_scale = 0.02
+    sf_tp_vol_scale = 0.05
+    sf_ta_split = 50.0
     _adaptation_last_load: float = 0.0
     _adaptation_refresh_secs: int = 60
 
@@ -513,7 +685,7 @@ class MarketStrategy2(IStrategy):
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
     # Claude layer
-    claude = SygnifSentiment()
+    claude = MarketStrategy2Sentiment()
 
     # --- NT risk-based sizing (Lesson 2) ---
     RISK_PCT = 0.02  # 2% of equity risked per trade
@@ -959,17 +1131,17 @@ class MarketStrategy2(IStrategy):
                 df[col] = df[col].astype(np.float64).fillna(50.0)
 
         # --- Failure Swing (Stop Hunt) indicators ---
-        # 48-bar S/R levels (4h on 5m TF, shifted: use closed bars only)
-        df["sf_resistance"] = df["high"].shift(1).rolling(48).max()
-        df["sf_support"] = df["low"].shift(1).rolling(48).min()
+        lb = max(8, int(self.sf_lookback_bars))
+        df["sf_resistance"] = df["high"].shift(1).rolling(lb).max()
+        df["sf_support"] = df["low"].shift(1).rolling(lb).min()
         # Stable level check: S/R unchanged for 2 bars (level is established)
         df["sf_resistance_stable"] = df["sf_resistance"] == df["sf_resistance"].shift(1)
         df["sf_support_stable"] = df["sf_support"] == df["sf_support"].shift(1)
         # EMA 120 for TP target
         df["EMA_120"] = pta.ema(df["close"], length=120)
-        # Volatility filter: distance from EMA as % (must exceed 5%)
+        # Volatility filter: distance from EMA as fraction (blocks entries near EMA)
         df["sf_volatility"] = ((df["close"] - df["EMA_120"]).abs() / df["EMA_120"])
-        df["sf_vol_filter"] = df["sf_volatility"] > 0.03
+        df["sf_vol_filter"] = df["sf_volatility"] > float(self.sf_vol_filter_min)
         # Long signal: wick below support but close back above + stable level
         df["sf_long"] = (
             (df["low"] <= df["sf_support"])
@@ -985,8 +1157,11 @@ class MarketStrategy2(IStrategy):
             & df["sf_vol_filter"]
         )
         # Dynamic SL/TP coefficients (Heavy91)
-        df["sf_sl_pct"] = 0.02 + df["sf_volatility"] * 0.02  # base 2% + vol adjustment
-        df["sf_tp_ema"] = df["EMA_120"] * (1 + df["sf_volatility"] * 0.05 * np.sign(df["close"] - df["EMA_120"]))
+        df["sf_sl_pct"] = float(self.sf_sl_base) + df["sf_volatility"] * float(self.sf_sl_vol_scale)
+        df["sf_tp_ema"] = df["EMA_120"] * (
+            1
+            + df["sf_volatility"] * float(self.sf_tp_vol_scale) * np.sign(df["close"] - df["EMA_120"])
+        )
 
         # --- Global protections (NFI-style) ---
         df["protections_long_global"] = self._calc_global_protections(df)
@@ -1376,7 +1551,8 @@ class MarketStrategy2(IStrategy):
 
             if last_prot and last_empty and sf_long:
                 last_score = ta_score.iloc[-1]
-                if last_score >= 50:
+                split = float(self.sf_ta_split)
+                if last_score >= split:
                     # claude_swing: failure swing + TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing"
@@ -1438,7 +1614,8 @@ class MarketStrategy2(IStrategy):
 
             if last_prot_s and last_empty and sf_short:
                 last_score = ta_score.iloc[-1]
-                if last_score <= 50:
+                split = float(self.sf_ta_split)
+                if last_score <= split:
                     # claude_swing short: failure swing + bearish TA confluence
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "claude_swing_short"
