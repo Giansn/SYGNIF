@@ -57,8 +57,12 @@ _cc = types.ModuleType("cursor_cloud_completion")
 _cc.cursor_cloud_completion = lambda *args, **kwargs: ""
 sys.modules["cursor_cloud_completion"] = _cc
 
-# Now we can import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Now we can import (repo root first so root SygnifStrategy.py wins over user_data copy)
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _repo_root)
+_strategies = os.path.join(_repo_root, "user_data", "strategies")
+if os.path.isdir(_strategies) and _strategies not in sys.path:
+    sys.path.append(_strategies)  # sentiment_constants, live_market_snapshot, etc.
 
 
 @pytest.fixture
@@ -86,7 +90,14 @@ def strategy():
     s._doom_cooldown_path = os.path.join(tempfile.mkdtemp(), "doom_cooldown.json")
     s.max_slots_sentiment = 6
     s.max_slots_swing = 4
-    s._swing_tags = {"swing_failure", "fa_swing", "swing_failure_short", "fa_swing_short"}
+    s._swing_tags = {
+        "swing_failure",
+        "fa_swing",
+        "claude_swing",
+        "swing_failure_short",
+        "fa_swing_short",
+        "claude_swing_short",
+    }
     s.can_short = False
     s.dp = None
 

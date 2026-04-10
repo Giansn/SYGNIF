@@ -13,7 +13,7 @@ Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment ana
 | `user_data/config_futures.json` | Futures config (port 8081, isolated margin, 2-5x leverage) |
 | `trade_overseer/` | Trade management and analysis system |
 | `notification_handler.py` | Webhook notifications |
-| `docker-compose.yml` | 3 containers: freqtrade, freqtrade-futures, notification-handler |
+| `docker-compose.yml` | Five services: `finance-agent`, `freqtrade`, `freqtrade-futures`, `notification-handler`, `trade-overseer` (merge `docker-compose.sygnif-network.yml` for an external bridge) |
 
 ## Strategy Design
 

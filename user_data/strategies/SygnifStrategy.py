@@ -1407,8 +1407,8 @@ class _SygnifStrategyDefault(IStrategy):
                 token = pair.split("/")[0]
                 price = df.iloc[-1]["close"]
 
-                headlines = self.claude.fetch_news(token)
-                sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
+                headlines = self.sentiment.fetch_news(token)
+                sentiment = self.sentiment.analyze_sentiment(token, price, last_score, headlines)
 
                 # sentiment=None → API broken, skip sentiment entry (don't enter blind)
                 # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07
@@ -1472,8 +1472,8 @@ class _SygnifStrategyDefault(IStrategy):
                 token = pair.split("/")[0]
                 price = df.iloc[-1]["close"]
 
-                headlines = self.claude.fetch_news(token)
-                sentiment = self.claude.analyze_sentiment(token, price, last_score, headlines)
+                headlines = self.sentiment.fetch_news(token)
+                sentiment = self.sentiment.analyze_sentiment(token, price, last_score, headlines)
 
                 # sentiment=None → API broken, skip
                 # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07)

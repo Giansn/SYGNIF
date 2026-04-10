@@ -152,7 +152,7 @@ class TestEntryPaths:
         result = strategy.populate_entry_trend(df, {"pair": "SOL/USDT"})
         last = result.iloc[-1]
         assert last["enter_long"] == 1
-        assert last["enter_tag"] in ("swing_failure", "fa_swing")
+        assert last["enter_tag"] in ("swing_failure", "fa_swing", "claude_swing")
 
     def test_failure_swing_short_entry(self, strategy, make_df):
         strategy.can_short = True
@@ -165,7 +165,12 @@ class TestEntryPaths:
         result = strategy.populate_entry_trend(df, {"pair": "ETH/USDT"})
         last = result.iloc[-1]
         assert last["enter_short"] == 1
-        assert last["enter_tag"] in ("swing_failure_short", "fa_swing_short", "strong_ta_short")
+        assert last["enter_tag"] in (
+            "swing_failure_short",
+            "fa_swing_short",
+            "strong_ta_short",
+            "claude_swing_short",
+        )
 
     def test_strong_ta_short_skips_extreme_4h_oversold(self, strategy, make_df):
         """4h RSI <= 28 blocks strong_ta_short (bounce risk)."""
