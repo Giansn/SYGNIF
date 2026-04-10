@@ -32,6 +32,9 @@ trade_overseer/__pycache__/
 trade_overseer/data/state.json
 trade_overseer/data/plays.json
 
+# Linear workflow local overrides (copy from scripts/linear_workflow.env.example)
+scripts/linear_workflow.env
+
 # finance_agent
 finance_agent/.env
 finance_agent/__pycache__/
