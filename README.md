@@ -128,6 +128,9 @@ git clone --recurse-submodules https://github.com/Giansn/SYGNIF.git
 cd SYGNIF
 # If you already cloned without submodules: git submodule update --init --recursive
 
+# Editor (optional): open the folder in Cursor/VS Code — `.vscode/extensions.json` recommends
+# Python, Docker, GitLens, AWS Toolkit, YAML, and cfn-lint for `network/aws-node-network/` templates.
+
 # Configure
 cp config_claude_bot.example.json user_data/config.json
 # Edit user_data/config.json and user_data/config_futures.json with API keys

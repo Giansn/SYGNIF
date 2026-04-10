@@ -1,0 +1,9 @@
+{
+  "yaml.validate": true,
+  "yaml.completion": true,
+  "files.associations": {
+    "**/network/aws-node-network/**/*.yaml": "yaml",
+    "**/network/aws-node-network/**/*.yml": "yaml",
+    "**/network/aws-node-network/**/*.json": "jsonc"
+  }
+}

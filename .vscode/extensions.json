@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "anysphere.cursorpyright",
+    "ms-azuretools.vscode-docker",
+    "ms-azuretools.vscode-containers",
+    "eamodio.gitlens",
+    "amazonwebservices.aws-toolkit-vscode",
+    "redhat.vscode-yaml",
+    "kddejong.vscode-cfn-lint"
+  ]
+}
