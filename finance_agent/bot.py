@@ -10,6 +10,7 @@ Commands:
   /movers [1h|24h] — Top gainers & losers
   /ta <TICKER>     — Technical analysis with strategy signals
   /research <TICK> — Full research (market + TA + news + AI)
+  /finance-agent network [docs] — Network submodule (OpenVINO edge + VPC docs)
   /plays           — AI investment opportunity scan
   /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
@@ -95,6 +96,63 @@ def _sygnif_repo() -> Path:
     """Freqtrade repo with `user_data/` (strategy_adaptation.json, advisor_state.json)."""
     default = Path.home() / "SYGNIF"
     return Path(os.environ.get("SYGNIF_REPO", str(default))).resolve()
+
+
+def _network_monorepo_root() -> Path:
+    """Git submodule [Giansn/Network](https://github.com/Giansn/Network) at `SYGNIF/network/`."""
+    return _sygnif_repo() / "network"
+
+
+def cmd_network_section(tail: str = "") -> str:
+    """Telegram-facing summary of Network monorepo + edge OpenVINO layout (no OpenVINO import)."""
+    root = _network_monorepo_root()
+    edge = root / "network" / "edge_npu_infer"
+    setup_doc = root / "docs" / "NEURAL_NETWORK_SETUP.md"
+    draft_doc = root / "docs" / "AGENT_NODE_NETWORK_DRAFT.md"
+    lines: list[str] = [
+        "*Network monorepo* (`SYGNIF/network/` → [github.com/Giansn/Network](https://github.com/Giansn/Network))",
+        f"Path: `{root}`",
+    ]
+    if not root.is_dir():
+        return (
+            "\n".join(lines)
+            + f"\n\n_Not found._ Set `SYGNIF_REPO` to your clone, then:\n"
+            "`git submodule update --init --recursive network`"
+        )
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            text=True,
+            timeout=8,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        lines.append(f"Submodule HEAD: `{sha}`")
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        lines.append("Submodule HEAD: _(git not available)_")
+
+    lines.append(f"Edge OpenVINO: `{'ok' if edge.is_dir() else 'missing'}` `{edge}`")
+    lines.append(f"Setup doc: `{'ok' if setup_doc.is_file() else 'missing'}` `{setup_doc.name}`")
+    lines.append(f"Agent-node draft: `{'ok' if draft_doc.is_file() else 'missing'}` `{draft_doc.name}`")
+
+    hint = (
+        "\n*Commands:*\n"
+        "• `/finance-agent network docs` — doc titles + SSM script hint\n"
+        "• Local smoke (on a dev box with OpenVINO): "
+        "`cd network/edge_npu_infer && pip install -r requirements.txt && python run_npu.py --device CPU`"
+    )
+
+    t = (tail or "").strip().lower()
+    if t in ("docs", "help", "?", "setup"):
+        lines.append(
+            "\n*Docs (in submodule):*\n"
+            "• `docs/NEURAL_NETWORK_SETUP.md` — OpenVINO smoke, split `placement.py`, `wire_tensor.py`, EC2 SSM\n"
+            "• `docs/AGENT_NODE_NETWORK_DRAFT.md` — agent-node topology, phased rollout\n"
+            "• `aws-node-network/scripts/Invoke-SsmRunEdgeInfer.ps1` — run `run_npu.py` on instance\n"
+            "• SYGNIF: `./scripts/update_network_submodule.sh` — pull latest `main`"
+        )
+        return "\n".join(lines)
+
+    return "\n".join(lines) + hint
 
 
 def cmd_strategy_analytics() -> str:
@@ -350,6 +408,21 @@ def gather_sygnif_cycle() -> str:
     parts.append(cmd_tendency()[:2500])
     parts.append("\n=== MACRO (snippet) ===\n")
     parts.append(cmd_macro()[:1200])
+    parts.append("\n=== NETWORK (submodule) ===\n")
+    try:
+        nr = _network_monorepo_root()
+        if nr.is_dir():
+            sha = subprocess.check_output(
+                ["git", "-C", str(nr), "rev-parse", "--short", "HEAD"],
+                text=True,
+                timeout=5,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            parts.append(f"path `{nr}`\nHEAD `{sha}`\nTelegram: `/finance-agent network` or `network docs`\n")
+        else:
+            parts.append(f"missing `{nr}` — run `git submodule update --init network` in SYGNIF repo\n")
+    except Exception as e:
+        parts.append(f"network: n/a (`{e}`)\n")
     parts.append(
         "\n---\n_Note:_ Slash-Befehle laufen über `agent_slash_dispatch` → Cursor Cloud (`llm_analyze`). "
         "Freitext nutzt denselben LLM-Pfad mit Chat-Verlauf.\n"
@@ -445,7 +518,7 @@ KEYBOARD = {
         ["/signals", "/scan", "/ta BTC"],
         ["/plays", "/market", "/movers"],
         ["/deduce", "/ask", "/fa_help"],
-        ["/news", "/evaluate", "/finance-agent"],
+        ["/news", "/evaluate", "/finance-agent network"],
         ["/clear"],
     ],
     "resize_keyboard": True,
@@ -1956,6 +2029,7 @@ def cmd_help() -> str:
         "`/sygnif analytics` — Nur Runtime-Overrides (`strategy_adaptation.json`)\n"
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
+        "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (edge OpenVINO, docs); `network docs` for paths\n"
         "`/finance-agent <cmd>` — Run specific module\n"
         "`/finance-agent <TICKER>` — Research for ticker\n"
         "`/overview` — Trades + TA + market (full dashboard)\n"
@@ -2042,6 +2116,8 @@ def cmd_finance_agent(args: str) -> str:
     parts = raw.split(maxsplit=1)
     sub = parts[0].lower().strip()
     tail = parts[1].strip() if len(parts) > 1 else ""
+    if sub == "network":
+        return cmd_network_section(tail)
     subcommands = {
         "market": lambda: cmd_market(),
         "movers": lambda: cmd_movers(),
@@ -2065,7 +2141,7 @@ def cmd_finance_agent(args: str) -> str:
         return subcommands[sub]()
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return cmd_research(sub.upper())
-    return "Unknown /finance-agent command. Use `cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
+    return "Unknown /finance-agent command. Use `network|network docs|cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
 
 
 # ---------------------------------------------------------------------------
@@ -2488,6 +2564,12 @@ def _gather_finance_agent_for_agent(args: str) -> str:
     parts = raw.split(maxsplit=1)
     sub = parts[0].lower().strip()
     tail = parts[1].strip() if len(parts) > 1 else ""
+    if sub == "network":
+        return (
+            "=== NETWORK SUBMODULE (Sygnif → github.com/Giansn/Network) ===\n"
+            + cmd_network_section(tail)
+            + "\n=== END NETWORK ==="
+        )
     if sub == "market":
         return cmd_market()
     if sub == "movers":
@@ -2522,7 +2604,7 @@ def _gather_finance_agent_for_agent(args: str) -> str:
         return _gather_research_for_agent(tail or "BTC")
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return _gather_research_for_agent(sub.upper())
-    return f"Unknown /finance-agent subcommand: {raw}"
+    return f"Unknown /finance-agent subcommand: {raw} (try `network` or `network docs`)"
 
 
 def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
