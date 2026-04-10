@@ -19,6 +19,7 @@ Cost: Cursor Cloud task pricing + optional Haiku fallback; see `SENTIMENT_BACKEN
 
 import logging
 import os
+import sys
 import json
 import re
 import time
@@ -50,6 +51,26 @@ from live_market_snapshot import fetch_finance_agent_market_context
 from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
+
+# Freqtrade may not put this directory on sys.path for dynamic imports inside analyze_sentiment().
+_strategies_dir = str(Path(__file__).resolve().parent)
+if _strategies_dir not in sys.path:
+    sys.path.insert(0, _strategies_dir)
+
+_sentiment_http_mod = None
+
+
+def _get_sentiment_http_client():
+    """Load sibling sentiment_http_client.py by path (avoids ModuleNotFoundError in Freqtrade workers)."""
+    global _sentiment_http_mod
+    if _sentiment_http_mod is None:
+        mod_path = Path(__file__).resolve().parent / "sentiment_http_client.py"
+        spec = importlib.util.spec_from_file_location("_sygnif_sentiment_http_client", mod_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load sentiment_http_client from {mod_path}")
+        _sentiment_http_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_sentiment_http_mod)
+    return _sentiment_http_mod
 
 
 # ---------------------------------------------------------------------------
@@ -424,9 +445,7 @@ The score is ADDED to TA in the strategy. Prefer 0 when there is no edge."""
 
         http_url = os.environ.get("SYGNIF_SENTIMENT_HTTP_URL", "").strip()
         if http_url:
-            from sentiment_http_client import post_sygnif_sentiment
-
-            ok, sc, err = post_sygnif_sentiment(
+            ok, sc, err = _get_sentiment_http_client().post_sygnif_sentiment(
                 http_url, token, current_price, ta_score, headlines
             )
             if ok and sc is not None:
@@ -589,7 +608,7 @@ class MarketStrategy2(IStrategy):
     - DCA scale-in for high-conviction entries
     - EventLog observability (SL tier tracking)
     - Global volume regime gate
-    - Sentiment: **MarketStrategy2Sentiment** — live Bybit snapshot + finance-agent Haiku loop
+    - Sentiment: **MarketStrategy2Sentiment** on `self.claude` — live Bybit snapshot + finance-agent Haiku loop
       (env: `SENTIMENT_MS2_FINANCE_AGENT_LOOP`, `SENTIMENT_MS2_CACHE_SEC`, `SENTIMENT_MS2_LINEAR_TICKER`)
     """
 
@@ -684,8 +703,8 @@ class MarketStrategy2(IStrategy):
     PREMIUM_TAGS = frozenset({"claude_s-5", "claude_swing_short"})
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
-    # Claude layer
-    sentiment = MarketStrategy2Sentiment()
+    # Claude layer (same attr name as SygnifStrategy — populate_entry_trend uses self.claude)
+    claude = MarketStrategy2Sentiment()
 
     # --- NT risk-based sizing (Lesson 2) ---
     RISK_PCT = 0.02  # 2% of equity risked per trade
@@ -1760,7 +1779,7 @@ class MarketStrategy2(IStrategy):
 
         # Premium-tag slot reservation
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
-        # leaving the top slots available only for high-edge tags (fa_s-5).
+        # leaving the top slots available only for high-edge tags (claude_s-5).
         # Premium tags bypass this cap and may fill up to max_open_trades.
         if tag not in self.PREMIUM_TAGS:
             total_open = len(open_trades)

@@ -1,0 +1,8 @@
+# Optional: torch + orthogonium für Jupyter / orthogonale Experimente (nicht im Produktions-venv des finance-agent).
+# Installation im nn-zero-to-hero-venv:
+#   cd ~/nn-zero-to-hero && source .venv/bin/activate && pip install -r ~/SYGNIF/finance_agent/requirements-training.txt
+#
+# Bei exportierten Modellen: Versionen pinnen (wie in der Orthogonium-README).
+
+torch>=2.0.0
+orthogonium>=0.0.4

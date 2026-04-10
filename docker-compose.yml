@@ -24,11 +24,20 @@ services:
       - .env
     networks:
       - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8091:8091"
+    volumes:
+      - "./user_data/finance_agent:/app/finance_agent_models:ro"
     environment:
       FINANCE_AGENT_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_HTTP_PORT: "8091"
+      # Jupyter on the EC2 host (nn-zero-to-hero); enables /training and /training/status probes from the container
+      ORTHOGONAL_TRAINING_HOST: "host.docker.internal"
+      ORTHOGONAL_TRAINING_PORT: "8890"
+      SENTIMENT_MLP_WEIGHTS: /app/finance_agent_models/sentiment_mlp.npz
+      SENTIMENT_MLP_ALPHA: "0.45"
     healthcheck:
       test:
         [

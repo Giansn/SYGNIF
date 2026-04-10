@@ -2557,7 +2557,7 @@ def handle_command(text: str, chat_id: str) -> tuple[str, object, str] | None:
 # HTTP server for overseer integration (:8091)
 # ---------------------------------------------------------------------------
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import json as _json
 
 
@@ -2701,6 +2701,31 @@ class _BriefingHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
+        elif path == "/training/status":
+            from training_hub import training_status_json_bytes
+
+            body = training_status_json_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif path == "/training":
+            from training_hub import training_json_bytes, training_page_html
+
+            qs = parse_qs(urlparse(self.path).query)
+            fmt = (qs.get("format") or ["json"])[0].lower()
+            if fmt == "html":
+                body = training_page_html().encode("utf-8")
+                ctype = "text/html; charset=utf-8"
+            else:
+                body = training_json_bytes()
+                ctype = "application/json; charset=utf-8"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404)
             self.end_headers()

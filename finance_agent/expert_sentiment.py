@@ -1,11 +1,16 @@
 """
 Deterministic Sygnif sentiment adjustment (-20..+20) for /sygnif/sentiment.
 Uses headline + live-tape keyword signals (finance-agent rules) — no LLM.
+
+Optional: SENTIMENT_MLP_WEIGHTS + numpy MLP trained on synthetic market/headline data
+(teacher = this module's rule score). See scripts/train_sentiment_mlp.py.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+
 
 # Longer phrases first so substring checks favor specific events.
 _POSITIVE = sorted(
@@ -103,16 +108,23 @@ def _score_text_block(low: str, weight: float) -> tuple[float, float, int, int]:
     return bull, bear, bh, eh
 
 
-def expert_sygnif_sentiment_score(
+@dataclass(frozen=True)
+class SentimentSignals:
+    bull_t: float
+    bear_t: float
+    total_bh: int
+    total_eh: int
+    n_lines: int
+    net: float
+    has_live: bool
+
+
+def aggregate_sentiment_signals(
     token: str,
-    ta_score: float,
     headlines: list[str],
     live_text: str = "",
-) -> tuple[float, str]:
-    """
-    Map RSS/headlines + optional live snapshot text to a single adjustment score.
-    TA is used only as a light moderator when news and TA strongly disagree.
-    """
+) -> SentimentSignals:
+    """Aggregate headline + live keyword hits (shared by rules + ML features)."""
     token_lc = (token or "").strip().lower()
     bull_t = bear_t = 0.0
     total_bh = total_eh = 0
@@ -130,7 +142,8 @@ def expert_sygnif_sentiment_score(
         total_bh += bh
         total_eh += eh
 
-    if live_text and live_text.strip():
+    has_live = bool(live_text and live_text.strip())
+    if has_live:
         lw = live_text.strip().lower()
         w = 1.25
         b, e, bh, eh = _score_text_block(lw, w)
@@ -140,14 +153,25 @@ def expert_sygnif_sentiment_score(
         total_eh += eh
 
     net = bull_t - bear_t
-    if net == 0.0 and n_lines == 0 and not (live_text or "").strip():
+    return SentimentSignals(
+        bull_t=bull_t,
+        bear_t=bear_t,
+        total_bh=total_bh,
+        total_eh=total_eh,
+        n_lines=n_lines,
+        net=net,
+        has_live=has_live,
+    )
+
+
+def score_from_signals(sig: SentimentSignals, ta_score: float) -> tuple[float, str]:
+    """Rule-only score in [-20, 20] from pre-aggregated signals."""
+    if sig.net == 0.0 and sig.n_lines == 0 and not sig.has_live:
         return 0.0, "Finance-agent expert: no headlines or live context; neutral."
 
-    # Scale net signal into -20..+20 (sublinear so many weak hits don't explode).
-    raw = 6.0 * math.tanh(net / 4.5)
+    raw = 6.0 * math.tanh(sig.net / 4.5)
     score = max(-20.0, min(20.0, raw))
 
-    # Moderate: strong TA vs contrary news — dampen the adjustment slightly.
     if ta_score >= 62 and score < 0:
         score *= 0.72
     elif ta_score <= 38 and score > 0:
@@ -156,7 +180,28 @@ def expert_sygnif_sentiment_score(
     score = max(-20.0, min(20.0, score))
     reason = (
         f"Finance-agent expert: net headline/live signal "
-        f"(~{total_bh} bull / ~{total_eh} bear cues, {n_lines} headlines); "
+        f"(~{sig.total_bh} bull / ~{sig.total_eh} bear cues, {sig.n_lines} headlines); "
         f"TA context {ta_score:.0f}/100."
     )
     return round(score, 2), reason
+
+
+def expert_sygnif_sentiment_score(
+    token: str,
+    ta_score: float,
+    headlines: list[str],
+    live_text: str = "",
+) -> tuple[float, str]:
+    """
+    Map RSS/headlines + optional live snapshot text to a single adjustment score.
+    TA is used only as a light moderator when news and TA strongly disagree.
+    """
+    sig = aggregate_sentiment_signals(token, headlines, live_text)
+    score, reason = score_from_signals(sig, ta_score)
+    try:
+        from sentiment_mlp import optional_mlp_adjust
+
+        score, reason = optional_mlp_adjust(sig, ta_score, score, reason)
+    except Exception:
+        pass
+    return score, reason

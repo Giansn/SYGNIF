@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-HTTP-only Finance Agent for Docker: briefing + Sygnif sentiment + overseer commentary.
+HTTP-only Finance Agent for Docker: briefing + Sygnif sentiment + overseer commentary
++ GET /training (orthogonal / nn-zero-to-hero discovery).
 Does not start Telegram. Binds FINANCE_AGENT_HTTP_HOST:PORT (use 0.0.0.0 in containers).
 
 Usage:

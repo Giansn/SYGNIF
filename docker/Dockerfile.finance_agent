@@ -1,4 +1,4 @@
-# Finance Agent HTTP: /briefing, POST /sygnif/sentiment, POST /overseer/commentary, /health
+# Finance Agent HTTP: /briefing, POST /sygnif/sentiment, POST /overseer/commentary, /health, /training
 FROM python:3.11-slim
 
 WORKDIR /app

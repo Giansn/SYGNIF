@@ -53,6 +53,21 @@ from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
+_sentiment_http_mod = None
+
+
+def _get_sentiment_http_client():
+    """Load sibling sentiment_http_client.py by path (avoids ModuleNotFoundError in Freqtrade workers)."""
+    global _sentiment_http_mod
+    if _sentiment_http_mod is None:
+        mod_path = Path(__file__).resolve().parent / "sentiment_http_client.py"
+        spec = importlib.util.spec_from_file_location("_sygnif_sentiment_http_client", mod_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load sentiment_http_client from {mod_path}")
+        _sentiment_http_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_sentiment_http_mod)
+    return _sentiment_http_mod
+
 
 def _sygnif_strategy_backend() -> str:
     """Return ``ms2`` or ``sygnif`` from ``SYGNIF_STRATEGY_BACKEND`` (import-time)."""
@@ -313,9 +328,7 @@ class SygnifSentiment:
         ).strip().lower() in ("1", "true", "yes", "on"):
             http_url = "http://127.0.0.1:8091/sygnif/sentiment"
         if http_url:
-            from sentiment_http_client import post_sygnif_sentiment
-
-            ok, sc, err = post_sygnif_sentiment(
+            ok, sc, err = _get_sentiment_http_client().post_sygnif_sentiment(
                 http_url, token, current_price, ta_score, headlines
             )
             if ok and sc is not None:
