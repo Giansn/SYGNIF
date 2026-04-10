@@ -8,6 +8,7 @@ services:
     container_name: freqtrade
     volumes:
       - "./user_data:/freqtrade/user_data"
+      - "./trade_overseer:/freqtrade/trade_overseer"
     env_file:
       - .env
     ports:
@@ -29,6 +30,7 @@ services:
     container_name: freqtrade-futures
     volumes:
       - "./user_data:/freqtrade/user_data"
+      - "./trade_overseer:/freqtrade/trade_overseer"
     env_file:
       - .env
     ports:

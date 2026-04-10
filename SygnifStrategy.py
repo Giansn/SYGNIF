@@ -29,8 +29,12 @@ import requests
 import numpy as np
 import pandas as pd
 
-from trade_overseer.event_log import EventLog
-from trade_overseer.risk_manager import RiskManager, RiskEngineConfig
+try:
+    from trade_overseer.event_log import EventLog
+    from trade_overseer.risk_manager import RiskManager, RiskEngineConfig
+    _HAS_OVERSEER = True
+except ImportError:
+    _HAS_OVERSEER = False
 import pandas_ta as pta
 import talib.abstract as ta
 from freqtrade.strategy import IStrategy, merge_informative_pair
@@ -536,15 +540,18 @@ class SygnifStrategy(IStrategy):
         self._refresh_strategy_adaptation(force=True)
 
         # NT Lesson 2+3: risk engine + event log
-        self._risk_manager = RiskManager(RiskEngineConfig(
-            ratchet_tiers=(
-                (0.10, 0.015),
-                (0.05, 0.02),
-            ),
-        ))
-        instance = "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
-        self._event_log = EventLog(instance=instance)
+        self._risk_manager = None
+        self._event_log = None
         self._last_sl_tier: dict[int, str] = {}
+        if _HAS_OVERSEER:
+            self._risk_manager = RiskManager(RiskEngineConfig(
+                ratchet_tiers=(
+                    (0.10, 0.015),
+                    (0.05, 0.02),
+                ),
+            ))
+            instance = "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
+            self._event_log = EventLog(instance=instance)
 
     def _refresh_strategy_adaptation(self, force: bool = False) -> None:
         """Load bounded overrides from user_data/strategy_adaptation.json (hot-reload)."""
@@ -1458,6 +1465,9 @@ class SygnifStrategy(IStrategy):
                             min_stake: Optional[float], max_stake: float,
                             leverage: float, entry_tag: Optional[str],
                             side: str, **kwargs) -> float:
+        if not self._risk_manager:
+            return proposed_stake
+
         equity = None
         if hasattr(self, "wallets") and self.wallets:
             equity = self.wallets.get_free("USDT")
