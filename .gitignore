@@ -47,3 +47,14 @@ SYGNIF/
 
 # Optional stray capital-N folder (submodule lives at network/)
 Network
+
+# Auto-generated agent rules (personalized per developer)
+.brainsync/agent-rules.md
+
+# Auto-generated AI agent exclusions
+.cursorrules
+.clineRules
+.agent/
+.windsurfrules
+.gemini/
+.cline/

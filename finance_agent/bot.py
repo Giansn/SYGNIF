@@ -14,13 +14,14 @@ Commands:
   /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
   /deduce <text>   — Deductive chain (premises → conclusion, Sygnif-aware)
-  /ask <text>      — LLM via Cursor Cloud Agent API (optional: Ollama-Fallback)
+  /ask <text>      — LLM via Cursor Cloud Agent API (fluent chat; optional Ollama if configured)
   Freitext         — Same as chat; context = Telegram-Verlauf (Session)
   /clear           — Chat-Verlauf löschen
   /fa_help         — Show commands
 """
 
 import base64
+import errno
 import importlib.util
 import json
 import logging
@@ -359,6 +360,37 @@ def gather_sygnif_cycle() -> str:
 # Telegram conversational memory (in-process; restart clears). Max messages (user+assistant turns*2).
 TELEGRAM_CHAT_MAX_HISTORY = int(os.environ.get("TELEGRAM_CHAT_MAX_HISTORY", "40"))
 TELEGRAM_CHAT_MAX_CHARS = int(os.environ.get("TELEGRAM_CHAT_MAX_CHARS", "24000"))
+# Fluent chat: show typing indicator; plain text default avoids Telegram Markdown parse errors from models.
+TELEGRAM_CHAT_TYPING = os.environ.get("TELEGRAM_CHAT_TYPING", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+
+
+def _conversational_parse_mode() -> str | None:
+    v = (os.environ.get("TELEGRAM_CONVERSATIONAL_PARSE_MODE") or "plain").strip().lower()
+    if v in ("plain", "none", ""):
+        return None
+    if v in ("markdown", "md"):
+        return "Markdown"
+    if v == "html":
+        return "HTML"
+    return None
+
+
+# System persona for free-text / multi-turn (Ollama messages API + Cursor single prompt).
+CONVERSATIONAL_SYSTEM = """Du bist der Sygnif Finance Agent — ein kompetenter Gesprächspartner zu Crypto,
+Bybit-Spot, Freqtrade und SygnifStrategy (TA-Score 0–100, Tags wie strong_ta, claude_s*, swing_failure).
+
+Verhalten:
+- Führe ein **natürliches, flüssiges Gespräch** wie in einem Chat; beziehe dich auf den bisherigen Verlauf.
+- Antworte **direkt** auf die letzte Nutzernachricht; keine Meta-Erklärungen über „als KI“ oder deine Aufgabe.
+- **Sprache** wie der Nutzer (Deutsch oder Englisch).
+- **Länge**: typisch 2–8 kurze Absätze oder Aufzählungen; mobillesbar; nur bei expliziter Bitte länger.
+- **Fakten**: keine erfundenen Kurse; wenn Live-Daten fehlen, sag es kurz und schlag vor, /ta oder /market zu nutzen.
+- **Format**: lieber klare Sätze; wenn TELEGRAM_MARKDOWN genutzt wird, keine kaputten Unterstriche oder ungeschlossene *."""
 
 # Strategy constants (mirrors SygnifStrategy.py)
 MAJOR_PAIRS = {"BTC", "ETH", "SOL", "XRP"}
@@ -369,17 +401,18 @@ LEVERAGE_DEFAULT = 3.0
 # ---------------------------------------------------------------------------
 # Telegram helpers
 # ---------------------------------------------------------------------------
-def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None = None):
-    """Send a Telegram message, auto-split if too long."""
+def tg_send(text: str, parse_mode: str | None = "Markdown", reply_markup: dict | None = None):
+    """Send a Telegram message, auto-split if too long. Omit parse_mode when None (plain text)."""
     MAX = 4000
     chunks = [text[i : i + MAX] for i in range(0, len(text), MAX)]
     for i, chunk in enumerate(chunks):
         payload = {
             "chat_id": TG_CHAT,
             "text": chunk,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": True,
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         # Attach keyboard only to last chunk
         if reply_markup and i == len(chunks) - 1:
             payload["reply_markup"] = reply_markup
@@ -391,6 +424,18 @@ def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None =
             )
         except Exception as e:
             logger.error(f"tg_send error: {e}")
+
+
+def tg_chat_action(chat_id: str, action: str = "typing") -> None:
+    """Telegram sendChatAction (e.g. typing) while the LLM is working."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendChatAction",
+            json={"chat_id": chat_id, "action": action},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.debug("tg_chat_action: %s", e)
 
 
 # Persistent reply keyboard — shown at bottom of chat
@@ -460,17 +505,13 @@ def _format_chat_history(chat_id: str) -> str:
 
 
 def conversational_reply(user_text: str, chat_id: str) -> str:
-    """Reply using LLM with prior Telegram messages as context (same chat)."""
+    """Reply using LLM with prior Telegram messages as context (same chat).
+
+    Uses ``llm_conversational`` → Cursor Cloud with a clean reply (no task UI) when configured;
+    optional Ollama multi-turn only if ``LLM_BACKEND=ollama`` or Ollama is the only backend.
+    """
     k = str(chat_id)
-    prior = _format_chat_history(k)
-    prompt = (
-        "Du bist Sygnif Finance Agent (Crypto, Bybit, SygnifStrategy). "
-        "Antworte auf die NEUESTE Nutzer-Nachricht unten. Nutze den Telegram-Verlauf nur als Kontext. "
-        "Kurz und mobilfreundlich; Sprache wie der Nutzer (DE/EN). Keine leeren Floskeln.\n\n"
-        f"--- Verlauf (alt → neu) ---\n{prior}\n\n"
-        f"--- Neueste Nachricht ---\n{user_text}"
-    )
-    reply = llm_analyze(prompt, max_tokens=2200)
+    reply = llm_conversational(user_text, chat_id, max_tokens=3200)
     if k not in _chat_histories:
         _chat_histories[k] = []
     _chat_histories[k].append({"role": "user", "text": user_text[:8000]})
@@ -977,16 +1018,24 @@ def _cursor_auth_header() -> str:
 
 
 def _ollama_llm(prompt: str, max_tokens: int) -> str:
+    return _ollama_chat(
+        [{"role": "user", "content": prompt}],
+        max_tokens,
+    )
+
+
+def _ollama_chat(messages: list[dict], max_tokens: int) -> str:
+    """Multi-turn Ollama /api/chat (roles: system, user, assistant)."""
     try:
         resp = requests.post(
             f"{OLLAMA_BASE_URL}/api/chat",
             json={
                 "model": OLLAMA_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "stream": False,
                 "options": {"num_predict": min(max_tokens, 8192)},
             },
-            timeout=120,
+            timeout=180,
         )
         if not resp.ok:
             logger.error(f"Ollama HTTP {resp.status_code}: {resp.text[:500]}")
@@ -1016,12 +1065,26 @@ def _cursor_format_conversation(messages: list[dict]) -> str:
     return "\n\n".join((m.get("text") or "").strip() for m in messages if (m.get("text") or "").strip())
 
 
-def _cursor_cloud_llm(prompt: str, max_tokens: int) -> str:
-    """POST /v0/agents @ api.cursor.com — Sygnif Agent LLM (aligned with Cloud Agent worker)."""
+def _cursor_cloud_llm(
+    prompt: str, max_tokens: int, *, for_telegram_chat: bool = False
+) -> str:
+    """POST /v0/agents @ api.cursor.com — Sygnif Agent LLM (aligned with Cloud Agent worker).
+
+    If ``for_telegram_chat`` is True, return only assistant text (fluent chat); otherwise
+    include task status and link (slash / agent tools).
+    """
     _ = max_tokens
-    wrapped = (
-        "[Sygnif Finance Agent — reply in conversation only; no PR unless asked.]\n\n" + prompt
-    )
+    if for_telegram_chat:
+        wrapped = (
+            "[Sygnif Finance Agent — Telegram chat. Output ONLY your reply to the user. "
+            "No task links, no 'I will browse/search', no repository or PR discussion unless asked. "
+            "Natural, fluent dialogue.]\n\n"
+            + prompt
+        )
+    else:
+        wrapped = (
+            "[Sygnif Finance Agent — reply in conversation only; no PR unless asked.]\n\n" + prompt
+        )
     body: dict = {
         "prompt": {"text": wrapped},
         "source": {"repository": CURSOR_AGENT_REPOSITORY, "ref": CURSOR_AGENT_REF},
@@ -1074,6 +1137,18 @@ def _cursor_cloud_llm(prompt: str, max_tokens: int) -> str:
         if cr.ok:
             msgs = cr.json().get("messages") or []
             conv_text = _cursor_format_conversation(msgs)
+        if for_telegram_chat:
+            text_out = (conv_text or "").strip()
+            if text_out:
+                return text_out
+            if summary and status == "FINISHED" and summary.strip():
+                return summary.strip()
+            if status == "FAILED":
+                return f"_Cursor Task fehlgeschlagen._ [Task]({url})"
+            return (
+                f"_Noch keine Antwort (Status: {status})._ "
+                f"Erhöhe ggf. `CURSOR_AGENT_MAX_WAIT_SEC` oder später erneut fragen.\n[Task]({url})"
+            )
         parts = [f"*Sygnif (Cursor Cloud)* — `{status}`", f"[Task]({url})"]
         if summary:
             parts.append(f"*Summary:*\n{summary}")
@@ -1087,6 +1162,55 @@ def _cursor_cloud_llm(prompt: str, max_tokens: int) -> str:
     except Exception as e:
         logger.error(f"Cursor cloud LLM: {e}")
         return f"_Cursor Cloud Fehler:_ `{e}`"
+
+
+def llm_conversational(user_text: str, chat_id: str, *, max_tokens: int = 3200) -> str:
+    """Free-text / multi-turn path: Cursor chat-style reply, or Ollama multi-turn if configured."""
+    backend = os.environ.get("LLM_BACKEND", "").strip().lower()
+    if backend == "none":
+        return "_LLM aus (`LLM_BACKEND=none`)._"
+
+    k = str(chat_id)
+    prior = _format_chat_history(k)
+    prompt = (
+        f"{CONVERSATIONAL_SYSTEM}\n\n"
+        f"--- bisheriger Verlauf (alt → neu) ---\n{prior}\n\n"
+        f"--- neueste Nutzernachricht ---\n{user_text}"
+    )
+
+    if backend == "ollama":
+        if not OLLAMA_MODEL:
+            return "_OLLAMA_MODEL fehlt._"
+        msgs: list[dict] = [{"role": "system", "content": CONVERSATIONAL_SYSTEM}]
+        for m in _chat_histories.get(k, []):
+            r = m.get("role", "")
+            if r not in ("user", "assistant"):
+                continue
+            msgs.append({"role": r, "content": m.get("text", "")})
+        msgs.append({"role": "user", "content": user_text})
+        return _ollama_chat(msgs, max_tokens)
+
+    if backend in ("cursor", "cursor_cloud"):
+        if not CURSOR_API_KEY or not CURSOR_AGENT_REPOSITORY:
+            return "_CURSOR_API_KEY + CURSOR_AGENT_REPOSITORY in .env (cursor.com/settings)._"
+        return _cursor_cloud_llm(prompt, max_tokens, for_telegram_chat=True)
+
+    if CURSOR_API_KEY and CURSOR_AGENT_REPOSITORY:
+        return _cursor_cloud_llm(prompt, max_tokens, for_telegram_chat=True)
+    if OLLAMA_MODEL:
+        msgs = [{"role": "system", "content": CONVERSATIONAL_SYSTEM}]
+        for m in _chat_histories.get(k, []):
+            r = m.get("role", "")
+            if r not in ("user", "assistant"):
+                continue
+            msgs.append({"role": r, "content": m.get("text", "")})
+        msgs.append({"role": "user", "content": user_text})
+        return _ollama_chat(msgs, max_tokens)
+
+    return (
+        "_Kein LLM._ Setze `CURSOR_API_KEY` + `CURSOR_AGENT_REPOSITORY` (Cursor Cloud Agent). "
+        "Optional: `OLLAMA_MODEL` + `ollama serve` oder `LLM_BACKEND=ollama`."
+    )
 
 
 def llm_analyze(prompt: str, max_tokens: int = 1500) -> str:
@@ -1103,17 +1227,17 @@ def llm_analyze(prompt: str, max_tokens: int = 1500) -> str:
     if backend in ("cursor", "cursor_cloud"):
         if not CURSOR_API_KEY or not CURSOR_AGENT_REPOSITORY:
             return "_CURSOR_API_KEY + CURSOR_AGENT_REPOSITORY in .env (cursor.com/settings)._"
-        return _cursor_cloud_llm(prompt, max_tokens)
+        return _cursor_cloud_llm(prompt, max_tokens, for_telegram_chat=False)
 
     # Default: Cloud if configured (Sygnif Agent = same stack as worker), else Ollama
     if CURSOR_API_KEY and CURSOR_AGENT_REPOSITORY:
-        return _cursor_cloud_llm(prompt, max_tokens)
+        return _cursor_cloud_llm(prompt, max_tokens, for_telegram_chat=False)
     if OLLAMA_MODEL:
         return _ollama_llm(prompt, max_tokens)
 
     return (
-        "_Kein LLM._ Setze `CURSOR_API_KEY` + `CURSOR_AGENT_REPOSITORY` (Cloud Agent) "
-        "oder `OLLAMA_MODEL` + `ollama serve`."
+        "_Kein LLM._ Primär: `CURSOR_API_KEY` + `CURSOR_AGENT_REPOSITORY` (Cursor Cloud Agent). "
+        "Optional: `OLLAMA_MODEL` + `ollama serve`."
     )
 
 
@@ -1809,11 +1933,12 @@ def cmd_ask(args: str) -> str:
     raw = (args or "").strip()
     if not raw:
         return (
-            "*Freier Chat (Cursor Cloud / Ollama)*\n\n"
+            "*Freier Chat (Cursor Cloud Agent)*\n\n"
             "• Nachricht **ohne** `/` schreiben — Kontext = bisheriger Chat.\n"
             "• Oder `/ask` / `/chat` mit Text.\n"
             "• `/clear` — Verlauf löschen.\n"
-            f"• Limit: ca. {TELEGRAM_CHAT_MAX_HISTORY} Nachrichten / {TELEGRAM_CHAT_MAX_CHARS} Zeichen (Session, bei Bot-Neustart leer)."
+            f"• Limit: ca. {TELEGRAM_CHAT_MAX_HISTORY} Nachrichten / {TELEGRAM_CHAT_MAX_CHARS} Zeichen (Session, bei Bot-Neustart leer).\n"
+            "• Optional: `TELEGRAM_CONVERSATIONAL_PARSE_MODE=markdown` wenn du Markdown willst (Standard: plain)."
         )
     return conversational_reply(raw, TG_CHAT)
 
@@ -2773,8 +2898,24 @@ def start_finance_agent_http_server(*, block: bool = False) -> None:
         logger.info("Finance agent HTTP on %s:%s (background thread)", addr[0], addr[1])
 
 
-def _start_http():
-    start_finance_agent_http_server(block=False)
+def _start_http() -> None:
+    """Start briefing HTTP unless skipped or port already bound (e.g. Docker finance-agent)."""
+    skip = os.environ.get("FINANCE_AGENT_SKIP_HTTP", "").strip().lower()
+    if skip in ("1", "true", "yes", "on"):
+        logger.info("Finance agent HTTP disabled (FINANCE_AGENT_SKIP_HTTP=%s).", skip)
+        return
+    try:
+        start_finance_agent_http_server(block=False)
+    except OSError as e:
+        if e.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1)):
+            logger.warning(
+                "Finance agent HTTP not started: %s:%s in use — likely Docker `finance-agent`. "
+                "Telegram polling continues; briefing stays on the container.",
+                FINANCE_AGENT_HTTP_HOST,
+                FINANCE_AGENT_HTTP_PORT,
+            )
+            return
+        raise
 
 
 def main():
@@ -2809,19 +2950,30 @@ def main():
                             tg_send("_Unbekannter Befehl._ Siehe `/fa_help`", reply_markup=KEYBOARD)
                             continue
                     else:
-                        # Freitext: gleicher Kontext wie /ask (Telegram-Verlauf)
+                        # Freitext: fluent chat (Cursor clean reply + optional plain parse_mode)
                         reply = (
-                            "\U0001f4ac Mit Chat-Verlauf...",
+                            "\U0001f4ac …",
                             lambda _a: conversational_reply(stripped, chat_id),
                             "",
+                            _conversational_parse_mode(),
                         )
                     if isinstance(reply, tuple):
-                        # Slow command: (loading_msg, handler, args)
-                        loading, handler_fn, handler_args = reply
+                        # Slow command: (loading_msg, handler, args) or + parse_mode for final send
+                        if len(reply) == 4:
+                            loading, handler_fn, handler_args, final_parse_mode = reply
+                        else:
+                            loading, handler_fn, handler_args = reply
+                            final_parse_mode = "Markdown"
+                        if TELEGRAM_CHAT_TYPING:
+                            tg_chat_action(chat_id)
                         tg_send(loading)
                         try:
                             result = handler_fn(handler_args)
-                            tg_send(result, reply_markup=KEYBOARD)
+                            tg_send(
+                                result,
+                                parse_mode=final_parse_mode,
+                                reply_markup=KEYBOARD,
+                            )
                         except Exception as e:
                             logger.error(f"Slow command error: {traceback.format_exc()}")
                             tg_send(f"Error: {e}", reply_markup=KEYBOARD)
