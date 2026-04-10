@@ -124,6 +124,7 @@
     "bot_name": "Sygnif-Futures",
     "initial_state": "running",
     "force_entry_enable": true,
+    "position_adjustment_enable": true,
     "internals": { "process_throttle_secs": 3 },
 
     "dataformat_ohlcv": "feather",
