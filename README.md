@@ -123,9 +123,10 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/Giansn/SYGNIF.git
+# Clone (includes Network monorepo under network/ via submodule)
+git clone --recurse-submodules https://github.com/Giansn/SYGNIF.git
 cd SYGNIF
+# If you already cloned without submodules: git submodule update --init --recursive
 
 # Configure
 cp config_claude_bot.example.json user_data/config.json

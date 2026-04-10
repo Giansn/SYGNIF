@@ -45,5 +45,5 @@ outputs/
 .tracking_baseline.txt
 SYGNIF/
 
-# Symlink to sibling repo (OpenVINO / edge NPU — not part of SYGNIF tree)
+# Optional stray capital-N folder (submodule lives at network/)
 Network
