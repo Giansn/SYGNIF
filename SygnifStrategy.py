@@ -28,6 +28,9 @@ import feedparser
 import requests
 import numpy as np
 import pandas as pd
+
+from trade_overseer.event_log import EventLog
+from trade_overseer.risk_manager import RiskManager, RiskEngineConfig
 import pandas_ta as pta
 import talib.abstract as ta
 from freqtrade.strategy import IStrategy, merge_informative_pair
@@ -508,6 +511,19 @@ class SygnifStrategy(IStrategy):
     # Claude layer
     claude = SygnifSentiment()
 
+    # --- NT risk-based sizing (Lesson 2) ---
+    RISK_PCT = 0.02  # 2% of equity risked per trade
+
+    # --- DCA scale-in (Lesson 4) ---
+    DCA_ELIGIBLE_TAGS = frozenset({"claude_s-2", "claude_s-5"})
+    DCA_DRAWDOWN_STEP = -0.03
+    DCA_MAX_ENTRIES = 1
+    DCA_SCALE_FACTOR = 0.5
+
+    # --- Volume regime gate (Lesson 5) ---
+    MIN_ACTIVE_VOLUME_PAIRS = 3
+    _active_volume_pairs: int = 999  # default high so gate is open until first scan
+
     # -------------------------------------------------------------------------
     # Enable shorts dynamically for futures mode
     # -------------------------------------------------------------------------
@@ -518,6 +534,17 @@ class SygnifStrategy(IStrategy):
         self._refresh_movers()
         self._refresh_new_pairs()
         self._refresh_strategy_adaptation(force=True)
+
+        # NT Lesson 2+3: risk engine + event log
+        self._risk_manager = RiskManager(RiskEngineConfig(
+            ratchet_tiers=(
+                (0.10, 0.015),
+                (0.05, 0.02),
+            ),
+        ))
+        instance = "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
+        self._event_log = EventLog(instance=instance)
+        self._last_sl_tier: dict[int, str] = {}
 
     def _refresh_strategy_adaptation(self, force: bool = False) -> None:
         """Load bounded overrides from user_data/strategy_adaptation.json (hot-reload)."""
@@ -555,6 +582,18 @@ class SygnifStrategy(IStrategy):
             if pair not in current_wl:
                 current_wl.append(pair)
                 logger.info(f"New pair {pair} added to whitelist")
+
+        # NT Lesson 5: scan volume regime for futures
+        if self.config.get("trading_mode", "") == "futures":
+            count = 0
+            for p in current_wl:
+                try:
+                    df, _ = self.dp.get_analyzed_dataframe(p, self.timeframe)
+                    if len(df) > 0 and df.iloc[-1].get("volume_sma_25", 0) > 50000:
+                        count += 1
+                except Exception:
+                    pass
+            self._active_volume_pairs = count
 
     # -------------------------------------------------------------------------
     # New pairs integration — externally sourced (sentiment scanner, listings)
@@ -1150,37 +1189,66 @@ class SygnifStrategy(IStrategy):
                 df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
                 if len(df) > 0 and "sf_sl_pct" in df.columns:
                     sf_sl = df.iloc[-1].get("sf_sl_pct", 0.02)
-                    # Still apply ratcheting if trade is well in profit
                     if current_profit >= 0.05:
-                        return -0.02
+                        sl_val, tier = -0.02, "sf_ratchet_5pct"
                     elif current_profit >= 0.02:
-                        return -0.03
-                    # Otherwise use the sf-specific dynamic SL (placed on exchange)
-                    return -sf_sl
+                        sl_val, tier = -0.03, "sf_ratchet_2pct"
+                    else:
+                        sl_val, tier = -sf_sl, "sf_dynamic"
+                    self._emit_sl_tier(trade, pair, tier, sl_val, current_profit)
+                    return sl_val
             except Exception:
                 pass
-            # Fallback: 3% if dataframe unavailable
+            self._emit_sl_tier(trade, pair, "sf_fallback", -0.03, current_profit)
             return -0.03
 
         # --- Ratcheting trail: tighten SL as profit grows ---
+        # +1% and +2% tiers removed (NT Lesson 1): they clipped winners at +0.70% avg
+        # while indicator exits capture +7.60%. With risk-based sizing, doom costs
+        # a fixed % of equity so the safety net is the sizing, not the ratchet.
         if current_profit >= 0.10:
-            return -0.015  # -1.5% price trail at 10%+ P&L
+            sl_val, tier = -0.015, "ratchet_10pct"
         elif current_profit >= 0.05:
-            return -0.02   # -2% price trail at 5%+ P&L
-        elif current_profit >= 0.02:
-            return -0.03   # -3% price trail at 2%+ P&L
-        elif current_profit >= 0.01:
-            # Breakeven guard: trade was profitable, don't let it become a doom loss.
-            # -1% price trail → at 5x worst case ~-4% P&L, at 3x ~-2% P&L, at 1x ~0% P&L
-            return -0.01
+            sl_val, tier = -0.02, "ratchet_5pct"
+        else:
+            # Base SL: fixed doom stoploss
+            sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot
+            if is_futures:
+                sl_val = -(sl / leverage)
+            else:
+                sl_val = -sl
+            tier = "doom"
 
-        # --- Base SL: fixed doom stoploss ---
-        sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot  # 0.20
+        self._emit_sl_tier(trade, pair, tier, sl_val, current_profit)
+        return sl_val
 
-        # For futures: SL is price-based, divide by leverage
-        if is_futures:
-            return -(sl / leverage)
-        return -sl
+    def _emit_sl_tier(self, trade: Trade, pair: str, tier: str,
+                      sl_val: float, current_profit: float) -> None:
+        """Emit order_updated event when the active SL tier changes (Lesson 3)."""
+        if not hasattr(self, "_event_log") or self._event_log is None:
+            return
+        trade_id = getattr(trade, "id", None)
+        if trade_id is None:
+            return
+        prev_tier = self._last_sl_tier.get(trade_id)
+        if prev_tier == tier:
+            return
+        self._last_sl_tier[trade_id] = tier
+        try:
+            self._event_log.emit(
+                "order_updated",
+                instrument_id=pair,
+                trade_id=trade_id,
+                data={
+                    "sl_tier": tier,
+                    "sl_value": sl_val,
+                    "current_profit": round(current_profit, 6),
+                    "leverage": trade.leverage or 1.0,
+                    "enter_tag": trade.enter_tag or "",
+                },
+            )
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Calculate vectorized TA score (enhanced with NFI indicators)
@@ -1383,6 +1451,85 @@ class SygnifStrategy(IStrategy):
         return df
 
     # -------------------------------------------------------------------------
+    # NT risk-based position sizing (Lesson 2)
+    # -------------------------------------------------------------------------
+    def custom_stake_amount(self, pair: str, current_time: datetime,
+                            current_rate: float, proposed_stake: float,
+                            min_stake: Optional[float], max_stake: float,
+                            leverage: float, entry_tag: Optional[str],
+                            side: str, **kwargs) -> float:
+        equity = None
+        if hasattr(self, "wallets") and self.wallets:
+            equity = self.wallets.get_free("USDT")
+        if not equity or equity <= 0:
+            return proposed_stake
+
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        doom_sl = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot
+        sl_distance_pct = (doom_sl / leverage) if is_futures else doom_sl
+
+        if self.dp:
+            try:
+                df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                if len(df) > 0:
+                    atr_pct = df.iloc[-1].get("atr_pct", 0)
+                    if atr_pct > 0:
+                        atr_sl = (atr_pct / 100.0) * 2.0
+                        sl_distance_pct = max(sl_distance_pct, atr_sl)
+            except Exception:
+                pass
+
+        if sl_distance_pct <= 0:
+            return proposed_stake
+
+        if side == "long":
+            sl_price = current_rate * (1 - sl_distance_pct)
+        else:
+            sl_price = current_rate * (1 + sl_distance_pct)
+
+        position_size = self._risk_manager.calculate_position_size(
+            equity=equity, entry=current_rate, stop_loss=sl_price,
+            risk_pct=self.RISK_PCT,
+        )
+        stake = (position_size * current_rate) / leverage
+
+        stake = max(min_stake or 0, min(stake, max_stake))
+        logger.info(
+            "NT sizing: %s sl_dist=%.2f%% equity=%.1f → stake=%.2f (proposed=%.2f)",
+            pair, sl_distance_pct * 100, equity, stake, proposed_stake,
+        )
+        return stake
+
+    # -------------------------------------------------------------------------
+    # DCA scale-in for high-conviction entries (Lesson 4)
+    # -------------------------------------------------------------------------
+    def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                              current_rate: float, current_profit: float,
+                              min_stake: Optional[float], max_stake: float,
+                              current_entry_rate: float, current_exit_rate: float,
+                              current_entry_profit: float, current_exit_profit: float,
+                              **kwargs) -> Optional[float]:
+        tag = trade.enter_tag or ""
+        if tag not in self.DCA_ELIGIBLE_TAGS:
+            return None
+
+        filled = trade.nr_of_successful_entries
+        if filled > self.DCA_MAX_ENTRIES:
+            return None
+        if current_profit > self.DCA_DRAWDOWN_STEP:
+            return None
+
+        original_stake = trade.stake_amount / max(filled, 1)
+        dca_stake = original_stake * self.DCA_SCALE_FACTOR
+        dca_stake = max(min_stake or 0, min(dca_stake, max_stake))
+
+        logger.info(
+            "DCA scale-in: %s tag=%s entries=%d profit=%.2f%% → +%.2f USDT",
+            trade.pair, tag, filled, current_profit * 100, dca_stake,
+        )
+        return dca_stake
+
+    # -------------------------------------------------------------------------
     # Doom cooldown — block re-entry after stoploss hit
     # -------------------------------------------------------------------------
     def confirm_trade_entry(self, pair, order_type, amount, rate,
@@ -1437,6 +1584,16 @@ class SygnifStrategy(IStrategy):
                 )
                 return False
 
+        # NT Lesson 5: global volume regime gate (premium tags bypass)
+        if (self.config.get("trading_mode", "") == "futures"
+                and tag not in self.PREMIUM_TAGS
+                and self._active_volume_pairs < self.MIN_ACTIVE_VOLUME_PAIRS):
+            logger.info(
+                "Volume regime: only %d/%d pairs active, blocking %s on %s",
+                self._active_volume_pairs, self.MIN_ACTIVE_VOLUME_PAIRS, tag, pair,
+            )
+            return False
+
         # Futures: minimum average volume gate (filter micro caps, swing bypasses)
         if self.config.get("trading_mode", "") == "futures" and tag not in self._swing_tags and self.dp:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
@@ -1460,11 +1617,35 @@ class SygnifStrategy(IStrategy):
             now = time.time()
             self._doom_cooldown[pair] = now
             self._save_doom_cooldown()
-            # Track consecutive losses for escalated lockout
             losses = self._doom_loss_count.get(pair, [])
-            losses = [t for t in losses if now - t < 86400] + [now]  # keep last 24h
+            losses = [t for t in losses if now - t < 86400] + [now]
             self._doom_loss_count[pair] = losses
             logger.info(f"Doom cooldown set for {pair} after {exit_reason} ({len(losses)} losses in 24h)")
+
+        # NT Lesson 3: emit position_closed with the last active SL tier
+        if hasattr(self, "_event_log") and self._event_log is not None:
+            try:
+                trade_id = getattr(trade, "id", None)
+                last_tier = self._last_sl_tier.pop(trade_id, "unknown") if trade_id else "unknown"
+                leverage = trade.leverage or 1.0
+                realized_pnl = (rate - trade.open_rate) * amount
+                if trade.is_short:
+                    realized_pnl = -realized_pnl
+                self._event_log.emit_position_closed(
+                    instrument_id=pair,
+                    entry_side="short" if trade.is_short else "long",
+                    avg_px_open=trade.open_rate,
+                    avg_px_close=rate,
+                    realized_pnl=realized_pnl,
+                    trade_id=trade_id,
+                    exit_reason=exit_reason,
+                    last_sl_tier=last_tier,
+                    leverage=leverage,
+                    enter_tag=trade.enter_tag or "",
+                )
+            except Exception:
+                pass
+
         return True
 
     # -------------------------------------------------------------------------

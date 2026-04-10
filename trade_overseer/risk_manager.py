@@ -91,11 +91,10 @@ class RiskEngineConfig:
     futures_min_volume: float = 25000
 
     # NT-style ratcheting trail (price-based, on-exchange)
+    # +1% and +2% tiers removed: they clipped winners before indicator exits could fire
     ratchet_tiers: tuple = (
         (0.10, 0.015),
         (0.05, 0.02),
-        (0.02, 0.03),
-        (0.01, 0.01),
     )
 
     swing_ratchet_tiers: tuple = (
