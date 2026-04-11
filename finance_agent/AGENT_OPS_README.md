@@ -4,8 +4,7 @@ This folder centralizes the Cursor Cloud finance-agent operating assets directly
 
 ## Included
 
-- `briefing.md`: **Pipe briefing** contract (HTTP `/briefing`, Telegram) + **neural evaluation nodes** `N1–N9` / `B1–B8` (incl. optional FinancialData.net / FDN separation)
-- `fdn_fundamentals.py`: Optional **FinancialData.net** client for Telegram `/btc` + briefing appendix and `btc_fdn_fundamentals.json` from `pull_btc_context.py`
+- `briefing.md`: **Pipe briefing** contract (HTTP `/briefing`, Telegram) + **neural evaluation nodes** `N1–N8` / `B1–B7`
 - `auto_improvement_workflow.md`: End-to-end **auto improvement** loop (agents, GitNexus nodes, approval gates, mermaid)
 - `cloud-runbook.md`: Cloud system prompt + JSON output contract
 - `futures-agent-prompt.md`: Futures analysis prompt with BTC dependency and strategy-tag comparison

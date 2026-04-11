@@ -570,6 +570,45 @@ class TestSlotCaps:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Sentiment tier gate (|score| >= 3 for sygnif_s* entries)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSentimentTierGate:
+    def test_sentiment_tag_score_abs(self):
+        from sentiment_constants import sentiment_tag_score_abs
+
+        assert sentiment_tag_score_abs("sygnif_s-2") == 2
+        assert sentiment_tag_score_abs("sygnif_s2") == 2
+        assert sentiment_tag_score_abs("sygnif_short_s-3") == 3
+        assert sentiment_tag_score_abs("fa_short_s4") == 4
+        assert sentiment_tag_score_abs("strong_ta") is None
+
+    def test_confirm_blocks_abs_below_min(self, strategy):
+        from freqtrade.persistence import Trade
+
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: [])
+        strategy.config = {"trading_mode": "spot"}
+        assert strategy.confirm_trade_entry(
+            "X/USDT", "limit", 1, 1.0, "GTC", None, "sygnif_s-2", "long",
+        ) is False
+        assert strategy.confirm_trade_entry(
+            "X/USDT", "limit", 1, 1.0, "GTC", None, "sygnif_s2", "long",
+        ) is False
+
+    def test_confirm_allows_abs_at_min(self, strategy):
+        from freqtrade.persistence import Trade
+
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: [])
+        strategy.config = {"trading_mode": "spot"}
+        assert strategy.confirm_trade_entry(
+            "X/USDT", "limit", 1, 1.0, "GTC", None, "sygnif_s-3", "long",
+        ) is True
+        assert strategy.confirm_trade_entry(
+            "X/USDT", "limit", 1, 1.0, "GTC", None, "sygnif_s3", "long",
+        ) is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Info Timeframes config
 # ═══════════════════════════════════════════════════════════════════════
 

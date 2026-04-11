@@ -85,6 +85,7 @@ def strategy():
     s.futures_mode_leverage_majors = 5.0
     s.major_pairs = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
     s.sentiment_threshold_buy = 55.0
+    s.sentiment_entry_min_abs = 3
     s._doom_cooldown = {}
     s.doom_cooldown_secs = 14400
     s._doom_cooldown_path = os.path.join(tempfile.mkdtemp(), "doom_cooldown.json")

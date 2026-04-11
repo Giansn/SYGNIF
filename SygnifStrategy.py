@@ -49,7 +49,10 @@ from freqtrade.persistence import Trade
 from pandas import DataFrame
 
 from cursor_cloud_completion import cursor_cloud_completion
-from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
+from sentiment_constants import (
+    FINANCE_AGENT_SENTIMENT_INSTRUCTIONS,
+    sentiment_tag_score_abs,
+)
 import btc_trend_regime
 
 logger = logging.getLogger(__name__)
@@ -575,6 +578,8 @@ class _SygnifStrategyDefault(IStrategy):
 
     # Sentiment thresholds
     sentiment_threshold_buy = 55.0
+    # Minimum |expert sentiment| for sygnif_s* / sygnif_short_s* entries (populate + confirm).
+    sentiment_entry_min_abs = 3
     sentiment_threshold_sell = 40.0
 
     # Movers tracking — top gainers/losers refreshed every 4h
@@ -1563,11 +1568,9 @@ class _SygnifStrategyDefault(IStrategy):
                 sentiment = self.sentiment.analyze_sentiment(token, price, last_score, headlines)
 
                 # sentiment=None → API broken, skip sentiment entry (don't enter blind)
-                # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07
-                # from "any non-zero" because tier-1 sentiment trades were
-                # over-represented in losers without compensating wins)
-                # |sentiment| >= 2 → real signal, combine with TA
-                if sentiment is not None and abs(sentiment) >= 2:
+                # |sentiment| < sentiment_entry_min_abs → weak / not worth a slot (was 2 until 2026-04)
+                # |sentiment| >= sentiment_entry_min_abs → combine with TA
+                if sentiment is not None and abs(sentiment) >= self.sentiment_entry_min_abs:
                     final_score = last_score + sentiment
                     if final_score >= self.sentiment_threshold_buy:
                         df.iloc[-1, df.columns.get_loc("enter_long")] = 1
@@ -1641,9 +1644,8 @@ class _SygnifStrategyDefault(IStrategy):
                 sentiment = self.sentiment.analyze_sentiment(token, price, last_score, headlines)
 
                 # sentiment=None → API broken, skip
-                # |sentiment| < 2 → noise / weak signal, skip (raised 2026-04-07)
-                # |sentiment| >= 2 → real signal, combine with TA
-                if sentiment is not None and abs(sentiment) >= 2:
+                # |sentiment| < sentiment_entry_min_abs → weak (aligned with long branch)
+                if sentiment is not None and abs(sentiment) >= self.sentiment_entry_min_abs:
                     final_score = last_score + sentiment
                     if final_score <= self.sentiment_threshold_sell:
                         df.iloc[-1, df.columns.get_loc("enter_short")] = 1
@@ -1830,6 +1832,17 @@ class _SygnifStrategyDefault(IStrategy):
         # Slot caps per entry type
         tag = entry_tag or ""
         open_trades = Trade.get_trades_proxy(is_open=True)
+
+        tier_abs = sentiment_tag_score_abs(tag)
+        if tier_abs is not None and tier_abs < int(getattr(self, "sentiment_entry_min_abs", 3)):
+            logger.info(
+                "Sentiment tier gate: |score|=%d < %s, blocking new entry %s (%s)",
+                tier_abs,
+                getattr(self, "sentiment_entry_min_abs", 3),
+                pair,
+                tag,
+            )
+            return False
 
         if tag == "strong_ta":
             count = sum(1 for t in open_trades if (t.enter_tag or "") == "strong_ta")

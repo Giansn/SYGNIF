@@ -1,8 +1,11 @@
 {
-  "generated_utc": "2026-04-11T01:38:36Z",
+  "generated_utc": "2026-04-11T21:28:28Z",
   "symbol": "BTCUSDT",
+  "sygnif_ta_timeframe": "1h",
+  "btc_chart_ohlcv_timeframe": "1h",
+  "btc_daily_timeframe": "1d",
   "interval_note": "same 1h series as btc_1h_ohlcv.json",
-  "ta_score": 54,
+  "ta_score": 49,
   "ta_components": {
     "rsi14": -8,
     "rsi3": 0,
@@ -10,7 +13,7 @@
     "bb": 0,
     "aroon": 0,
     "stochrsi": 0,
-    "cmf": 5,
+    "cmf": 0,
     "volume": 0
   },
   "entries": [
@@ -19,23 +22,23 @@
   ],
   "exits": [],
   "leverage": 5.0,
-  "atr_pct": 0.5289253294040771,
+  "atr_pct": 0.4451281373884485,
   "indicators": {
-    "price": 72857.0,
-    "rsi": 62.48798901853134,
-    "rsi3": 47.50830564784041,
-    "trend": "Uptrend",
-    "macd_signal_text": "Bearish",
-    "willr": -38.90465746355317,
-    "cmf": 0.2463497993507972,
-    "vol_ratio": 0.34546750145507527,
-    "atr_pct": 0.5289253294040771,
-    "mfi": 62.64125521638526,
-    "obv_change_pct": 1.0225734484009097,
+    "price": 73341.7,
+    "rsi": 63.24643694750115,
+    "rsi3": 30.681615945897136,
+    "trend": "Strong Uptrend",
+    "macd_signal_text": "Bullish",
+    "willr": -36.20168848268969,
+    "cmf": 0.1260895642932559,
+    "vol_ratio": 0.4760458372829628,
+    "atr_pct": 0.4451281373884485,
+    "mfi": 69.31728440471183,
+    "obv_change_pct": 0.6206451596832308,
     "sf_long": false,
     "sf_short": false,
     "ema_bull": 1.0,
     "ema_cross": 0.0,
-    "bb_position": "62%"
+    "bb_position": "82%"
   }
 }

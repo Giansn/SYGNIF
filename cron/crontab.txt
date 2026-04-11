@@ -13,6 +13,9 @@
 # MS3 metrics bundle (NT perf + tag families + trading success) — daily 06:15 UTC
 15 6 * * * /home/ubuntu/SYGNIF/scripts/cron_wrap_tg.sh "MS3 metrics feed" /home/ubuntu/.local/share/sygnif-agent/ms3_metrics.log /usr/bin/python3 /home/ubuntu/SYGNIF/scripts/collect_ms3_metrics.py
 
+# Sentiment layer health — every 20m (Telegram only on urgent; log always)
+*/20 * * * * /usr/bin/python3 /home/ubuntu/SYGNIF/scripts/sentiment_health_watch.py >> /home/ubuntu/.local/share/sygnif-agent/sentiment_watch.log 2>&1
+
 # Trading success + strategy paths — every 6h at :30 UTC (offset from NFI)
 30 */6 * * * /home/ubuntu/SYGNIF/scripts/cron_wrap_tg.sh "trading success + paths" /home/ubuntu/SYGNIF/user_data/logs/trading_success_cron.log /bin/bash /home/ubuntu/SYGNIF/scripts/cron_trading_success.sh
 

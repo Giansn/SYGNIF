@@ -143,6 +143,24 @@ crontab -e
 0 */4 * * * cd /home/ubuntu/SYGNIF && /usr/bin/python3 update_movers.py >> movers_update.log 2>&1
 ```
 
+## 7b. Crypto market data + finance-agent / Cursor dashboard (optional daily cron)
+
+Runs once per day: (1) fetch all [crypto-market-data](https://github.com/ErcinDedeoglu/crypto-market-data) README `data/daily/*.json` + `crypto_market_data_daily_analysis.md`, (2) regenerate `finance_agent/btc_specialist/data/btc_specialist_dashboard.json` using the same **`llm_analyze` + finance-agent KB** path as Telegram `/finance-agent` when `CRYPTO_CONTEXT_LLM` is not disabled.
+
+- **Script:** `scripts/cron_finance_agent_btc_context.sh` (log: `user_data/logs/finance_agent_btc_context.log`).
+- **Secrets:** `CURSOR_API_KEY` (and related `CURSOR_*`) in `~/SYGNIF/.env`, `~/finance_agent/.env`, or `~/xrp_claude_bot/.env` — same chain as `pull_btc_context.py`.
+- **Skip LLM** (heuristic only): set `CRYPTO_CONTEXT_LLM=0` in `.env`.
+- **Align with `cursor-agent-worker`**: `llm_analyze` uses the same Cursor Cloud repo as the worker (`CURSOR_AGENT_REPOSITORY`). Optional `CRYPTO_CONTEXT_REQUIRE_WORKER=1` skips LLM when `http://127.0.0.1:8093/healthz` is not OK (cron then uses heuristics).
+- **Legacy deploy tree:** if the dashboard reads JSON from another clone, set `BTC_CONTEXT_SYNC_TARGET=/home/ubuntu/xrp_claude_bot/finance_agent/btc_specialist/data` so the script copies the refreshed files after success.
+
+Schedule (00:00 **Europe/Berlin**, DST-safe on a UTC host — same pattern as `scripts/cron_crypto_market_data_daily.sh`):
+
+```bash
+crontab -e
+# Add:
+0 * * * * [ "$(TZ=Europe/Berlin date +\%H)" = "00" ] && /home/ubuntu/SYGNIF/scripts/cron_finance_agent_btc_context.sh
+```
+
 ## 8. Verify Everything
 
 ```bash

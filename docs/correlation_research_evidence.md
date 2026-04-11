@@ -63,7 +63,7 @@ GitNexus reports **multiple** `btc_informative_indicators` definitions (root vs 
 | NewHedge API reference | https://docs.newhedge.io/api | `GET /api/v2/metrics/:chart_slug/:metric_name?api_token=…` |
 | Sygnif client | `finance_agent/newhedge_client.py` | Implements `altcoins-correlation/altcoins_price_usd` + Telegram summary |
 
-**Proof contract:** responses are **not** Sygnif TA and **not** Bybit; label them in any model rubric (see `finance_agent/briefing.md` FDN-style separation).
+**Proof contract:** responses are **not** Sygnif TA and **not** Bybit; label them in any model rubric (see `finance_agent/briefing.md` third-party separation).
 
 ---
 
@@ -87,7 +87,7 @@ These are **independent** repositories (not vendored in SYGNIF). Cite for method
 
 ## 4. Optional evaluation nodes
 
-When an LLM cites **NewHedge** or **rolling corr** outputs next to **Sygnif TA**, extend the briefing / BTC specialist rubric with a node analogous to **N9 (FDN separation):** third-party correlation series must not be labeled as `calc_ta_score` / `detect_signals` / Bybit live unless the source line says so.
+When an LLM cites **NewHedge** or **rolling corr** outputs next to **Sygnif TA**, treat third-party correlation series like other non-briefing context: they must not be labeled as `calc_ta_score` / `detect_signals` / Bybit live unless the source line says so.
 
 ---
 

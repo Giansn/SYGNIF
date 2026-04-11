@@ -80,6 +80,7 @@ flowchart LR
 | **Weekly (Sun 06:00 UTC)** | `weekly_strategy_analysis.py` | `strategy_adaptation_weekly.json` (+ `ms3_metrics`) + Telegram/log |
 | **Daily (06:15 UTC)** | `collect_ms3_metrics.py` | `market_strategy_3_metrics.json` + JSONL + entry_perf log |
 | **Every 6h (:30 UTC)** | `cron_trading_success.sh` | `trading_success` Telegram + `strategy_paths` + logs |
+| **Every 20m** | `scripts/sentiment_health_watch.py` | Log always; **@sygnif_agent_bot** if sentiment/HTTP urgent **or** any `enter_tag` has **5 consecutive losing** closes (`close_profit < 0`) in spot/futures DB (see `.cursor/rules/sygnif-sentiment-layer.mdc`) |
 | **On demand** | `/sygnif`, `/finance-agent cycle`, Cursor task | LLM + raw bundle |
 | **Before code edits** | GitNexus impact / query | Safer refactors |
 

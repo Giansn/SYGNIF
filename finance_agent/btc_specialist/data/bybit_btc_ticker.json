@@ -1,15 +1,15 @@
 {
   "symbol": "BTCUSDT",
-  "bid1Price": "72856.8",
-  "bid1Size": "0.198747",
-  "ask1Price": "72856.9",
-  "ask1Size": "0.656735",
-  "lastPrice": "72857",
-  "prevPrice24h": "72331.9",
-  "price24hPcnt": "0.0073",
-  "highPrice24h": "73460.1",
-  "lowPrice24h": "71432.9",
-  "turnover24h": "830294786.64300293",
-  "volume24h": "11447.098852",
-  "usdIndexPrice": "72903.067007"
+  "bid1Price": "73341.7",
+  "bid1Size": "0.736848",
+  "ask1Price": "73341.8",
+  "ask1Size": "0.527595",
+  "lastPrice": "73341.7",
+  "prevPrice24h": "73115.8",
+  "price24hPcnt": "0.0031",
+  "highPrice24h": "73809.1",
+  "lowPrice24h": "72518",
+  "turnover24h": "417647604.1730225",
+  "volume24h": "5719.859816",
+  "usdIndexPrice": "73366.368023"
 }

@@ -1,0 +1,18 @@
+---
+description: Sentiment layer — worker checks, health, and urgent Telegram path
+alwaysApply: true
+---
+
+# Sygnif sentiment layer (worker / agent)
+
+When editing or debugging **sentiment** (HTTP to finance-agent, `SygnifSentiment`, `MarketStrategy2Sentiment`, `sentiment_entry_min_abs`, tags `sygnif_s*` / `sygnif_short_s*`):
+
+1. **Contract** — Ambiguous-zone entries use `POST /sygnif/sentiment` when `SYGNIF_USE_LOCAL_FINANCE_AGENT_HTTP=1` or `SYGNIF_SENTIMENT_HTTP_URL` is set (default base `http://127.0.0.1:8091`). Strategy logs failures as `SYGNIF_SENTIMENT_HTTP failed`.
+
+2. **After changes** — Run `python3 scripts/sentiment_health_watch.py` once (needs Docker for log scan + `.env` for HTTP/Telegram). Confirm `GET /health` and probe POST succeed when local HTTP is enabled.
+
+3. **Ops** — `scripts/sentiment_health_watch.py` runs on cron (~20m). **Urgent** issues go to **@sygnif_agent_bot** via `AGENT_BOT_TOKEN` + `AGENT_CHAT_ID` (same as `cron_tg_notify.py`). Cooldown: `SENTIMENT_WATCH_ALERT_COOLDOWN_SEC` (default 4h). **Entry tags:** same job alerts when a tag’s **last 5 closes** are **all** `close_profit < 0` (per spot/futures DB); cooldown `TAG_STREAK_ALERT_COOLDOWN_SEC` (default 24h per instance+tag).
+
+4. **Evidence** — Cross-check `user_data/market_strategy_3_metrics.json` (`entry_tag_families`, `perf_nt`) for sentiment-family volume vs. expectations; optional `SYGNIF_SHORT_DIAG=1` on selected pairs for live gates.
+
+5. **Do not** move sentiment HTTP calls out of Freqtrade hot path into the Cursor worker; the worker **monitors and patches**, it does not replace `populate_entry_trend`.
