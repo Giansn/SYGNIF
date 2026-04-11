@@ -30,9 +30,12 @@ services:
       - "127.0.0.1:8091:8091"
     volumes:
       - "./user_data/finance_agent:/app/finance_agent_models:ro"
+      # Fused Cursor/Telegram KB for `/finance-agent` LLM (see `load_finance_agent_kb` in bot.py)
+      - "./.cursor/agents/finance-agent.md:/app/kb/finance-agent.md:ro"
     environment:
       FINANCE_AGENT_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_HTTP_PORT: "8091"
+      FINANCE_AGENT_KB_FILE: "/app/kb/finance-agent.md"
       # Jupyter on the EC2 host (nn-zero-to-hero); enables /training and /training/status probes from the container
       ORTHOGONAL_TRAINING_HOST: "host.docker.internal"
       ORTHOGONAL_TRAINING_PORT: "8890"
@@ -149,6 +152,12 @@ services:
     environment:
       FT_SPOT_URL: ${FT_SPOT_URL:-http://freqtrade:8080/api/v1}
       FT_FUTURES_URL: ${FT_FUTURES_URL:-http://freqtrade-futures:8081/api/v1}
+      FT_SPOT_USER: ${FT_SPOT_USER:-freqtrader}
+      FT_SPOT_PASS: ${FT_SPOT_PASS:-}
+      FT_FUTURES_USER: ${FT_FUTURES_USER:-freqtrader}
+      FT_FUTURES_PASS: ${FT_FUTURES_PASS:-}
+      API_PASSWORD: ${API_PASSWORD:-}
+      FREQTRADE_API_PASSWORD: ${FREQTRADE_API_PASSWORD:-}
       OVERSEER_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_BRIEFING_URL: ${FINANCE_AGENT_BRIEFING_URL:-http://finance-agent:8091/briefing}
       OVERSEER_AGENT_URL: ${OVERSEER_AGENT_URL:-http://finance-agent:8091/overseer/commentary}
@@ -163,3 +172,6 @@ services:
         condition: service_started
     volumes:
       - "./trade_overseer/data:/app/trade_overseer/data"
+      # Read-only API passwords for overseer when .env has no FT_* / API_PASSWORD (same files as traders).
+      - "./user_data/config.json:/ro/ft_spot_config.json:ro"
+      - "./user_data/config_futures.json:/ro/ft_futures_config.json:ro"

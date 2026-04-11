@@ -1,0 +1,20 @@
+[Unit]
+Description=nn-zero-to-hero Jupyter Lab (orthogonal training; finance-agent /training/status probe)
+Documentation=file:///home/ubuntu/nn-zero-to-hero/start-jupyter.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/nn-zero-to-hero
+Environment=JUPYTER_BIND_IP=0.0.0.0
+Environment=JUPYTER_PORT=8890
+ExecStart=/home/ubuntu/nn-zero-to-hero/start-jupyter.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

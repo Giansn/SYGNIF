@@ -3,14 +3,16 @@
 Sygnif Finance Agent — Telegram bot for crypto research & analysis.
 Combines market scanning, technical analysis, and AI-powered insights.
 Strategy-aware: computes the same TA score and detects entry/exit signals
-as SygnifStrategy.py so research aligns with live bot behavior.
+as SygnifStrategy.py so research aligns with live bot behavior. Indicators include
+MFI(14) and OBV (optional pandas_ta for exact parity with the strategy; pandas fallback otherwise).
 
 Commands:
   /market          — Top 10 crypto overview
   /movers [1h|24h] — Top gainers & losers
   /ta <TICKER>     — Technical analysis with strategy signals
+  /btc             — Same as /ta BTC + snapshot footer + optional FDN + optional NewHedge BTC–alts corr.
   /research <TICK> — Full research (market + TA + news + AI)
-  /finance-agent network [docs] — Network submodule (OpenVINO edge + VPC docs)
+  /finance-agent network [docs|nodes|nn] — Network submodule; nodes+NN topology + OpenVINO stack
   /finance-agent trades|check — Open positions + closed-trade aggregates (overseer)
   /plays           — AI investment opportunity scan
   /signals         — Quick scan: active entry signals across top pairs
@@ -20,6 +22,10 @@ Commands:
   Freitext         — Same as chat; context = Telegram-Verlauf (Session)
   /clear           — Chat-Verlauf löschen
   /fa_help         — Show commands
+
+Env:
+  TELEGRAM_SLASH_TOOL_FIRST — default `1`: preset slash commands use finance-agent `cmd_*`
+  analysis output directly; set `0` to always summarize via Cursor/Ollama (legacy).
 """
 
 import base64
@@ -42,6 +48,11 @@ import numpy as np
 import pandas as pd
 import requests
 
+try:
+    import pandas_ta as pta  # type: ignore[import-untyped]
+except ImportError:  # optional: aligns with SygnifStrategy when installed (freqtrade image)
+    pta = None  # type: ignore[assignment]
+
 from expert_sentiment import expert_sygnif_sentiment_score
 from finance_agent_expert import (
     expert_evaluate_lines,
@@ -60,7 +71,7 @@ logger = logging.getLogger("finance_agent")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-# Telegram: Sygnif Agent bot (@Sygnif_Agent_Bot) — AGENT_* in .env; legacy fallbacks.
+# Telegram: @sygnif_agent_bot — AGENT_* in .env; legacy fallbacks.
 TG_TOKEN = (
     os.environ.get("AGENT_BOT_TOKEN", "").strip()
     or os.environ.get("SYGNIF_HEDGE_BOT_TOKEN", "").strip()
@@ -99,9 +110,135 @@ def _sygnif_repo() -> Path:
     return Path(os.environ.get("SYGNIF_REPO", str(default))).resolve()
 
 
+_FINANCE_AGENT_KB_CACHE: tuple[str, float, str] | None = None  # resolved path, mtime, full text
+
+
+def _strip_markdown_yaml_frontmatter(md: str) -> str:
+    t = (md or "").lstrip("\ufeff")
+    if not t.startswith("---"):
+        return t
+    end = t.find("\n---", 4)
+    if end == -1:
+        return t
+    return t[end + 4 :].lstrip("\n")
+
+
+def load_finance_agent_kb(*, max_chars: int = 26000) -> str:
+    """Fused finance-agent KB: `FINANCE_AGENT_KB_FILE` (Docker), else `.cursor/agents/` in `SYGNIF_REPO`."""
+    global _FINANCE_AGENT_KB_CACHE
+    explicit = (os.environ.get("FINANCE_AGENT_KB_FILE") or "").strip()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit))
+    repo = _sygnif_repo()
+    candidates.extend(
+        [
+            repo / ".cursor/agents/finance-agent.md",
+            repo / ".cursor/skills/finance-agent/SKILL.md",
+        ]
+    )
+    for p in candidates:
+        try:
+            if not p.is_file():
+                continue
+            st = p.stat()
+            resolved = str(p.resolve())
+        except OSError:
+            continue
+        if _FINANCE_AGENT_KB_CACHE and (
+            _FINANCE_AGENT_KB_CACHE[0] == resolved and _FINANCE_AGENT_KB_CACHE[1] == st.st_mtime
+        ):
+            return _FINANCE_AGENT_KB_CACHE[2][:max_chars]
+        raw = p.read_text(encoding="utf-8", errors="replace")
+        text = _strip_markdown_yaml_frontmatter(raw)
+        _FINANCE_AGENT_KB_CACHE = (resolved, st.st_mtime, text)
+        return text[:max_chars]
+    return ""
+
+
 def _network_monorepo_root() -> Path:
     """Git submodule [Giansn/Network](https://github.com/Giansn/Network) at `SYGNIF/network/`."""
     return _sygnif_repo() / "network"
+
+
+def _network_markdown_h2_titles(path: Path, *, limit: int = 15) -> list[str]:
+    """First `##` headings from a markdown file (for agent context, no LLM)."""
+    if not path.is_file():
+        return []
+    out: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            out.append(line[3:].strip())
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _gather_network_nodes_and_nn(*, max_chars: int | None = None) -> str:
+    """Logical nodes + NN stack from Network submodule (reads docs; optional HTTP status URL)."""
+    root = _network_monorepo_root()
+    draft = root / "docs" / "AGENT_NODE_NETWORK_DRAFT.md"
+    setup = root / "docs" / "NEURAL_NETWORK_SETUP.md"
+    lines: list[str] = [
+        "=== NETWORK NODES + NN (Giansn/Network — non-LLM OpenVINO split) ===",
+        "",
+    ]
+    if not root.is_dir():
+        lines.append("Submodule missing: `git submodule update --init --recursive network` in SYGNIF.")
+        s = "\n".join(lines)
+        if max_chars and len(s) > max_chars:
+            return s[:max_chars].rstrip() + "\n…(truncated)"
+        return s
+
+    h2 = _network_markdown_h2_titles(draft, limit=14)
+    if h2:
+        lines.append("Agent-node draft — section titles:")
+        for t in h2:
+            lines.append(f"  • {t}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "Topologies (logical): SINGLE_NPU — full ov.Model on one device; "
+            "SPLIT_EDGE_GATEWAY — stage A near edge, narrow activation over the wire, stage B gateway/cloud.",
+            "NN modules (`network/edge_npu_infer/`):",
+            "  • run_npu.py — device smoke, optional IR `--xml`, timing",
+            "  • placement.py — SplitStage, run_split_pipeline, inject send_tensor/recv_tensor",
+            "  • wire_tensor.py — pack_tensor / unpack_tensor / make_wire_pair (bytes between nodes)",
+            "  • mcp_npu_server.py — Cursor MCP (devices, IR infer)",
+            "",
+            "Physical / ops: aws-node-network/ (VPC, Client VPN); "
+            "Invoke-SsmRunEdgeInfer.ps1 — remote run_npu.py on EC2 via SSM.",
+            "",
+        ]
+    )
+    if setup.is_file():
+        lines.append(f"Install & expand: `{setup.relative_to(root)}`")
+    else:
+        lines.append("Setup doc: docs/NEURAL_NETWORK_SETUP.md _(missing in checkout)_")
+
+    status_url = os.environ.get("NETWORK_NN_STATUS_URL", "").strip()
+    if status_url:
+        lines.append("")
+        try:
+            r = requests.get(status_url, timeout=4)
+            snippet = (r.text or "").strip()[:900]
+            lines.append(f"NETWORK_NN_STATUS_URL GET {r.status_code}:")
+            lines.append(snippet or "(empty body)")
+        except Exception as e:
+            lines.append(f"NETWORK_NN_STATUS_URL error: {e}")
+
+    lines.append("")
+    lines.append("Telegram: `/finance-agent network` (short) · `/finance-agent network nodes` (this block)")
+
+    s = "\n".join(lines)
+    if max_chars and len(s) > max_chars:
+        return s[:max_chars].rstrip() + "\n…(truncated)"
+    return s
 
 
 def cmd_network_section(tail: str = "") -> str:
@@ -137,12 +274,15 @@ def cmd_network_section(tail: str = "") -> str:
 
     hint = (
         "\n*Commands:*\n"
+        "• `/finance-agent network nodes` (or `nn`) — topology + NN modules + optional `NETWORK_NN_STATUS_URL`\n"
         "• `/finance-agent network docs` — doc titles + SSM script hint\n"
         "• Local smoke (on a dev box with OpenVINO): "
         "`cd network/edge_npu_infer && pip install -r requirements.txt && python run_npu.py --device CPU`"
     )
 
     t = (tail or "").strip().lower()
+    if t in ("nodes", "nn", "node", "topology", "split", "npu", "openvino"):
+        return _gather_network_nodes_and_nn()
     if t in ("docs", "help", "?", "setup"):
         lines.append(
             "\n*Docs (in submodule):*\n"
@@ -153,6 +293,10 @@ def cmd_network_section(tail: str = "") -> str:
         )
         return "\n".join(lines)
 
+    lines.append(
+        "\n*Nodes + NN (summary):* `SINGLE_NPU` vs `SPLIT_EDGE_GATEWAY` — narrow tensors via `wire_tensor` "
+        "between stages; see `placement.py` / `run_npu.py`. Full dump: `/finance-agent network nodes`."
+    )
     return "\n".join(lines) + hint
 
 
@@ -419,7 +563,9 @@ def gather_sygnif_cycle() -> str:
                 timeout=5,
                 stderr=subprocess.DEVNULL,
             ).strip()
-            parts.append(f"path `{nr}`\nHEAD `{sha}`\nTelegram: `/finance-agent network` or `network docs`\n")
+            parts.append(f"path `{nr}`\nHEAD `{sha}`\n")
+            parts.append(_gather_network_nodes_and_nn(max_chars=2600))
+            parts.append("")
         else:
             parts.append(f"missing `{nr}` — run `git submodule update --init network` in SYGNIF repo\n")
     except Exception as e:
@@ -463,7 +609,7 @@ Verhalten:
 - Antworte **direkt** auf die letzte Nutzernachricht; keine Meta-Erklärungen über „als KI“ oder deine Aufgabe.
 - **Sprache** wie der Nutzer (Deutsch oder Englisch).
 - **Länge**: typisch 2–8 kurze Absätze oder Aufzählungen; mobillesbar; nur bei expliziter Bitte länger.
-- **Fakten**: keine erfundenen Kurse; wenn Live-Daten fehlen, sag es kurz und schlag vor, /ta oder /market zu nutzen.
+- **Fakten**: keine erfundenen Kurse; wenn Live-Daten fehlen, sag es kurz und schlag vor, `/ta`, `/btc` oder `/market` zu nutzen.
 - **Format**: lieber klare Sätze; wenn TELEGRAM_MARKDOWN genutzt wird, keine kaputten Unterstriche oder ungeschlossene *."""
 
 # Strategy constants (mirrors SygnifStrategy.py)
@@ -516,10 +662,11 @@ def tg_chat_action(chat_id: str, action: str = "typing") -> None:
 KEYBOARD = {
     "keyboard": [
         ["/sygnif", "/overview", "/tendency"],
-        ["/signals", "/scan", "/ta BTC"],
+        ["/signals", "/scan", "/ta BTC", "/btc"],
         ["/plays", "/market", "/movers"],
         ["/deduce", "/ask", "/fa_help"],
-        ["/news", "/evaluate", "/finance-agent network"],
+        ["/news", "/evaluate"],
+        ["/finance-agent network", "/finance-agent network nodes"],
         ["/clear"],
     ],
     "resize_keyboard": True,
@@ -723,6 +870,27 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series,
     return tr.ewm(span=period, adjust=False).mean()
 
 
+def _mfi_pandas(
+    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, period: int = 14
+) -> pd.Series:
+    """Money Flow Index (TA-Lib / pandas-ta semantics). Used when pandas_ta is not installed."""
+    tp = (high + low + close) / 3.0
+    rmf = tp * volume
+    d = tp.diff()
+    pos = np.where(d > 0, rmf, 0.0)
+    neg = np.where(d < 0, rmf, 0.0)
+    pos_sum = pd.Series(pos, index=tp.index).rolling(period, min_periods=period).sum()
+    neg_sum = pd.Series(neg, index=tp.index).rolling(period, min_periods=period).sum()
+    mfr = pos_sum / neg_sum.replace(0, np.nan)
+    return 100.0 - (100.0 / (1.0 + mfr))
+
+
+def _obv_pandas(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume (cumulative)."""
+    direction = np.sign(close.diff().fillna(0.0))
+    return (direction * volume).cumsum()
+
+
 # ---------------------------------------------------------------------------
 # TA: Calculate indicators from OHLCV DataFrame
 # ---------------------------------------------------------------------------
@@ -771,6 +939,20 @@ def calc_indicators(df: pd.DataFrame) -> dict:
     roc9 = close.pct_change(9) * 100
     atr14 = _atr(high, low, close, 14)
 
+    # Volume / flow (SygnifStrategy populate_indicators — ML-dataset style, optional pta)
+    if pta is not None:
+        try:
+            mfi14 = pta.mfi(high, low, close, volume, length=14)
+            obv_s = pta.obv(close, volume)
+        except Exception as e:
+            logger.warning("pandas_ta MFI/OBV failed, using pandas fallback: %s", e)
+            mfi14 = _mfi_pandas(high, low, close, volume, 14)
+            obv_s = _obv_pandas(close, volume)
+    else:
+        mfi14 = _mfi_pandas(high, low, close, volume, 14)
+        obv_s = _obv_pandas(close, volume)
+    obv_chg = obv_s.pct_change() * 100.0
+
     # Swing Failure (SF) levels — 48-bar S/R
     sf_resistance = high.shift(1).rolling(48).max()
     sf_support = low.shift(1).rolling(48).min()
@@ -818,6 +1000,9 @@ def calc_indicators(df: pd.DataFrame) -> dict:
         "roc9": roc9.iloc[-1],
         "atr": atr14.iloc[-1],
         "atr_pct": (atr14.iloc[-1] / last * 100) if last > 0 else 0,
+        "mfi": float(mfi14.iloc[-1]) if pd.notna(mfi14.iloc[-1]) else float("nan"),
+        "obv": float(obv_s.iloc[-1]) if pd.notna(obv_s.iloc[-1]) else float("nan"),
+        "obv_change_pct": float(obv_chg.iloc[-1]) if pd.notna(obv_chg.iloc[-1]) else float("nan"),
         # Swing failure
         "sf_support": sf_support.iloc[-1],
         "sf_resistance": sf_resistance.iloc[-1],
@@ -879,6 +1064,18 @@ def calc_indicators(df: pd.DataFrame) -> dict:
         result["macd_signal_text"] = "Bullish"
     else:
         result["macd_signal_text"] = "Bearish"
+
+    # MFI zones (symmetric to RSI-style labels for /ta display)
+    mfi = result.get("mfi", float("nan"))
+    if not np.isnan(mfi):
+        if mfi > 80:
+            result["mfi_signal"] = "Overbought"
+        elif mfi < 20:
+            result["mfi_signal"] = "Oversold"
+        else:
+            result["mfi_signal"] = "Neutral"
+    else:
+        result["mfi_signal"] = "N/A"
 
     # BB position
     bb_range = result["bb_upper"] - result["bb_lower"]
@@ -1315,6 +1512,35 @@ def llm_analyze(prompt: str, max_tokens: int = 1500) -> str:
     )
 
 
+def _llm_available() -> bool:
+    """True if llm_analyze can reach Cursor Cloud or Ollama (not stub / none)."""
+    backend = os.environ.get("LLM_BACKEND", "").strip().lower()
+    if backend == "none":
+        return False
+    if backend == "ollama":
+        return bool(OLLAMA_MODEL)
+    if backend in ("cursor", "cursor_cloud"):
+        return bool(CURSOR_API_KEY and CURSOR_AGENT_REPOSITORY)
+    if CURSOR_API_KEY and CURSOR_AGENT_REPOSITORY:
+        return True
+    if OLLAMA_MODEL:
+        return True
+    return False
+
+
+def _format_slash_no_llm(raw: str, ctx: str) -> str:
+    """Telegram reply when no LLM: show gathered context instead of only an error line."""
+    head = (
+        "_Kein LLM aktiv_ (`LLM_BACKEND=none` oder Cursor/Ollama nicht konfiguriert). "
+        "**Rohdaten** statt Zusammenfassung:\n\n"
+    )
+    body = (ctx or "").strip()
+    max_len = 3800
+    if len(body) > max_len:
+        body = body[:max_len].rstrip() + "\n\n_(gekürzt)_"
+    return head + body + f"\n\n_Befehl:_ `{raw}`"
+
+
 # ---------------------------------------------------------------------------
 # Pair filtering helper
 # ---------------------------------------------------------------------------
@@ -1489,6 +1715,109 @@ def cmd_movers() -> str:
     return "\n".join(lines)
 
 
+def _fdn_telegram_btc_fundamentals_block() -> str:
+    """Optional FinancialData.net BTC profile (Standard tier); empty if no key / error."""
+    try:
+        from fdn_fundamentals import format_telegram_btc_fundamentals_block
+    except ImportError:
+        return ""
+    return format_telegram_btc_fundamentals_block()
+
+
+def _fdn_telegram_btc_fundamentals_one_line() -> str:
+    try:
+        from fdn_fundamentals import format_telegram_btc_fundamentals_one_line
+    except ImportError:
+        return ""
+    return format_telegram_btc_fundamentals_one_line()
+
+
+def _fdn_telegram_briefing_equity_proxy() -> str:
+    """Optional equity proxy (e.g. MSFT) when FDN_BRIEFING_EQUITY_PROXY is set."""
+    proxy = os.environ.get("FDN_BRIEFING_EQUITY_PROXY", "").strip()
+    if not proxy:
+        return ""
+    try:
+        from fdn_fundamentals import format_telegram_equity_proxy_line
+    except ImportError:
+        return ""
+    return format_telegram_equity_proxy_line(proxy)
+
+
+def _newhedge_telegram_altcoins_correlation_block() -> str:
+    """Optional NewHedge BTC–altcoin correlation line (Telegram only; not in HTTP ``/briefing`` pipe)."""
+    try:
+        from newhedge_client import format_telegram_altcoins_correlation_block
+    except ImportError:
+        return ""
+    return format_telegram_altcoins_correlation_block()
+
+
+def _btc_specialist_snapshot_footer() -> str:
+    """One-line hint for Telegram /btc — offline bundle under finance_agent/btc_specialist/data/."""
+    manifest = Path(__file__).resolve().parent / "btc_specialist" / "data" / "manifest.json"
+    if not manifest.is_file():
+        return (
+            "_BTC specialist data: no `btc_specialist/data/manifest.json` — run "
+            "`python3 finance_agent/btc_specialist/scripts/pull_btc_context.py` from repo root._"
+        )
+    try:
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        ts = m.get("generated_utc", "?")
+        return f"_BTC specialist offline bundle: `manifest.json` @ {ts} (`finance_agent/btc_specialist/data/`)._"
+    except Exception:
+        return "_BTC specialist: manifest unreadable — re-run pull script._"
+
+
+def cmd_btc() -> str:
+    """Telegram /btc — parity with /ta BTC plus snapshot footer for the BTC specialist agent."""
+    parts = [cmd_ta("BTC").rstrip(), "", _btc_specialist_snapshot_footer()]
+    fdn = _fdn_telegram_btc_fundamentals_block()
+    if fdn:
+        parts.extend(["", fdn])
+    nh = _newhedge_telegram_altcoins_correlation_block()
+    if nh:
+        parts.extend(["", nh])
+    return "\n".join(parts).strip()
+
+
+def cmd_btc_specialist() -> str:
+    """Deep BTC: `cmd_btc()` plus offline bundle (`btc_specialist/report.py`)."""
+    try:
+        from btc_specialist import report as _btc_rep
+
+        extra = _btc_rep.build_btc_specialist_report(max_chars=4000)
+    except Exception as e:
+        logger.error("btc_specialist report: %s", e)
+        extra = f"_Bundle report:_ `{e}`"
+    return f"*BTC specialist (deep)*\n\n{cmd_btc()}\n\n---\n\n{extra}".strip()
+
+
+def cmd_briefing() -> str:
+    """Telegram / finance-agent: HTTP-parity pipe body + optional FDN lines + HTTP hint + BTC specialist footer.
+
+    Raw `GET /briefing` stays pipe-only for overseer/LLM consumers; Telegram adds fundamentals when configured.
+    Optional NewHedge BTC–alts correlation line when ``NEWHEDGE_API_KEY`` is set (same as ``/btc``).
+    """
+    body = _briefing(None)
+    host = FINANCE_AGENT_HTTP_HOST
+    port = FINANCE_AGENT_HTTP_PORT
+    fdn_bits = [_fdn_telegram_btc_fundamentals_one_line(), _fdn_telegram_briefing_equity_proxy()]
+    fdn_block = "\n".join(x for x in fdn_bits if x).strip()
+    fdn_section = f"{fdn_block}\n\n" if fdn_block else ""
+    nh = _newhedge_telegram_altcoins_correlation_block()
+    nh_section = f"{nh}\n\n" if nh else ""
+    return (
+        f"*Briefing* (pipe lines = `GET /briefing` contract)\n\n"
+        f"```\n{body}\n```\n\n"
+        f"{fdn_section}"
+        f"{nh_section}"
+        f"_HTTP:_ `http://{host}:{port}/briefing?symbols=BTC,ETH`\n"
+        f"{_btc_specialist_snapshot_footer()}\n"
+        f"_{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
+    ).strip()
+
+
 # ---------------------------------------------------------------------------
 # Command: /ta <TICKER> — Technical analysis + strategy signals
 # ---------------------------------------------------------------------------
@@ -1532,6 +1861,17 @@ def cmd_ta(ticker: str) -> str:
     else:
         sf_status = "No active pattern"
 
+    mf = ind.get("mfi")
+    if mf is None or (isinstance(mf, float) and np.isnan(mf)):
+        mfi_line = "  MFI(14): `N/A`\n"
+    else:
+        mfi_line = f"  MFI(14): `{mf:.1f}` — {ind.get('mfi_signal', '')}\n"
+    obd = ind.get("obv_change_pct")
+    if obd is None or (isinstance(obd, float) and np.isnan(obd)):
+        obv_line = "  OBV Δ: `N/A`\n"
+    else:
+        obv_line = f"  OBV Δ: `{obd:+.2f}%` (cumulative OBV in strategy)\n"
+
     msg = (
         f"*Technical Analysis: {ticker}*\n"
         f"*Price:* `{pf}`\n\n"
@@ -1554,6 +1894,8 @@ def cmd_ta(ticker: str) -> str:
         f"  Williams %R: `{ind['willr']:.0f}`\n"
         f"  StochRSI: `{ind['stochrsi_k']:.0f}`\n"
         f"  CCI: `{ind['cci']:.0f}` | CMF: `{ind['cmf']:.3f}`\n"
+        f"{mfi_line}"
+        f"{obv_line}"
         f"  Aroon U/D: `{ind['aroonu']:.0f}/{ind['aroond']:.0f}`\n\n"
         f"*Bollinger:* `{ind['bb_position']}` "
         f"(`{ind['bb_lower']:.4g}` — `{ind['bb_upper']:.4g}`)\n\n"
@@ -1877,7 +2219,8 @@ def cmd_trades_and_history() -> str:
                 tag = (t.get("enter_tag") or "")[:18]
                 tid = t.get("trade_id", "?")
                 em = "\U0001f7e2" if pct >= 0 else "\U0001f534"
-                extra = f" _{tag}_" if tag else ""
+                # Code span — legacy Markdown _{tag}_ breaks on underscores (claude_s*, strong_ta).
+                extra = f" `{tag}`" if tag else ""
                 lines.append(f"{em} `{pair}` `{pct:+.1f}%` ({pnl:+.4f}) {dur} id={tid}{extra}")
 
     lines.append(
@@ -1944,7 +2287,7 @@ def cmd_overview() -> str:
 
                 line = f"{emoji} *{pair}* `{pct:+.1f}%` ({pnl:+.4f}) {dur}"
                 if tag:
-                    line += f" _{tag}_"
+                    line += f" `{tag}`"
                 lines.append(line)
 
                 # TA context
@@ -2065,9 +2408,10 @@ Keep total under ~900 words. Prefer precise terms over hype. No generic disclaim
 # ---------------------------------------------------------------------------
 # Command: /ask and /chat — free-form LLM dialogue (stateless turns)
 # ---------------------------------------------------------------------------
-def cmd_ask(args: str) -> str:
+def cmd_ask(args: str, chat_id: str | None = None) -> str:
     """Open-ended chat with LLM; same memory as plain-text messages (Telegram-Verlauf)."""
     raw = (args or "").strip()
+    cid = str(chat_id) if chat_id is not None else str(TG_CHAT)
     if not raw:
         return (
             "*Freier Chat (Cursor Cloud Agent)*\n\n"
@@ -2077,7 +2421,7 @@ def cmd_ask(args: str) -> str:
             f"• Limit: ca. {TELEGRAM_CHAT_MAX_HISTORY} Nachrichten / {TELEGRAM_CHAT_MAX_CHARS} Zeichen (Session, bei Bot-Neustart leer).\n"
             "• Optional: `TELEGRAM_CONVERSATIONAL_PARSE_MODE=markdown` wenn du Markdown willst (Standard: plain)."
         )
-    return conversational_reply(raw, TG_CHAT)
+    return conversational_reply(raw, cid)
 
 
 # ---------------------------------------------------------------------------
@@ -2093,7 +2437,10 @@ def cmd_help() -> str:
         "`/sygnif analytics` — Nur Runtime-Overrides (`strategy_adaptation.json`)\n"
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
-        "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (edge OpenVINO, docs); `network docs` for paths\n"
+        "`/finance-agent briefing` — Pipe briefing (same as HTTP `GET /briefing`; Telegram adds optional FDN lines)\n"
+        "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (short + nodes/NN summary)\n"
+        "`/finance-agent network nodes` — topology + `run_npu` / `placement` / `wire_tensor` + optional `NETWORK_NN_STATUS_URL`\n"
+        "`/finance-agent network docs` — doc index + SSM hint\n"
         "`/finance-agent trades` / `check` — open positions + closed P/L aggregates (overseer)\n"
         "`/finance-agent <cmd>` — Run specific module\n"
         "`/finance-agent <TICKER>` — Research for ticker\n"
@@ -2104,6 +2451,7 @@ def cmd_help() -> str:
         "`/market` — Top 15 crypto overview\n"
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
+        "`/btc` — TA + strategy signals (BTC) + `btc_specialist` snapshot + optional FDN + optional NewHedge corr.\n"
         "`/research ETH` — Full AI research report\n"
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
@@ -2155,8 +2503,9 @@ def cmd_macro() -> str:
 # ---------------------------------------------------------------------------
 # Command: /finance-agent — umbrella router
 # ---------------------------------------------------------------------------
-def cmd_finance_agent(args: str) -> str:
+def cmd_finance_agent(args: str, chat_id: str | None = None) -> str:
     raw = (args or "").strip()
+    cid = str(chat_id) if chat_id is not None else str(TG_CHAT)
     if not raw:
         sections = [
             ("Tendency", cmd_tendency()),
@@ -2199,16 +2548,26 @@ def cmd_finance_agent(args: str) -> str:
         "analytics": lambda: cmd_strategy_analytics(),
         "help": lambda: cmd_help(),
         "deduce": lambda: cmd_deduce(tail),
-        "ask": lambda: cmd_ask(tail),
-        "chat": lambda: cmd_ask(tail),
+        "ask": lambda: cmd_ask(tail, cid),
+        "chat": lambda: cmd_ask(tail, cid),
         "ta": lambda: cmd_ta(tail or "BTC"),
+        "btc": lambda: cmd_btc(),
+        "briefing": lambda: cmd_briefing(),
         "research": lambda: cmd_research(tail or "BTC"),
+        "btc": lambda: cmd_btc(),
+        "btc-specialist": lambda: cmd_btc_specialist(),
     }
     if sub in subcommands:
         return subcommands[sub]()
     if sub.isalpha() and 2 <= len(sub) <= 10:
-        return cmd_research(sub.upper())
-    return "Unknown /finance-agent command. Use `trades|check|network|network docs|overview|cycle|analytics|market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
+        if not tail:
+            return cmd_research(sub.upper())
+        return (
+            f"*Finance agent*\nMehrteilige Eingabe — `{sub}` wird hier *nicht* als Ticker gelesen. "
+            f"Bitte `/ask …`, `/finance-agent deduce …`, oder einen festen Unterbefehl (`overview`, `trades`).\n"
+            f"Rohtext: `{raw}`"
+        )
+    return "Unknown /finance-agent command. Use `trades|check|network|network nodes|network docs|overview|cycle|analytics|market|movers|ta <TICK>|btc|briefing|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
 
 
 # ---------------------------------------------------------------------------
@@ -2338,7 +2697,8 @@ def cmd_evaluate() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Slash commands → single LLM reply (no hand-written cmd_* output as final message)
+# Slash commands: prefer finance-agent `cmd_*` tool output (see TELEGRAM_SLASH_TOOL_FIRST);
+# optional LLM summarization for /sygnif, /deduce, /ask, etc.
 # ---------------------------------------------------------------------------
 _PLAYS_AGENT_HINT = """
 (Format-Ziel für /plays: genau 3 umsetzbare Plays im Sygnif-Stil — Entry-Typen: strong_ta, strong_ta_short,
@@ -2673,11 +3033,25 @@ def _gather_finance_agent_for_agent(args: str) -> str:
         return _gather_slash_context(f"/{sub}", tail, raw)
     if sub == "ta":
         return cmd_ta(tail or "BTC")
+    if sub == "btc":
+        return cmd_btc()
+    if sub == "briefing":
+        return cmd_briefing()
     if sub == "research":
         return _gather_research_for_agent(tail or "BTC")
+    if sub == "btc":
+        return cmd_btc()
+    if sub == "btc-specialist":
+        return cmd_btc_specialist()
     if sub.isalpha() and 2 <= len(sub) <= 10:
-        return _gather_research_for_agent(sub.upper())
-    return f"Unknown /finance-agent subcommand: {raw} (try `trades`, `check`, `network`, `overview`)"
+        if not tail:
+            return _gather_research_for_agent(sub.upper())
+        return (
+            "Ad-hoc /finance-agent request (first token is not a known subcommand; "
+            "do not treat it as a spot ticker):\n"
+            f"{raw}"
+        )
+    return f"Unknown /finance-agent subcommand: {raw} (try `trades`, `check`, `network`, `network nodes`, `overview`)"
 
 
 def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
@@ -2688,6 +3062,10 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
             return cmd_movers()
         if cmd == "/ta":
             return cmd_ta(args or "BTC")
+        if cmd == "/btc":
+            return cmd_btc()
+        if cmd == "/btc-specialist":
+            return cmd_btc_specialist()
         if cmd == "/news":
             return cmd_news(args)
         if cmd == "/signals":
@@ -2764,6 +3142,100 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
     return f"(Unbekannter Befehl {cmd} — keine Rohdaten; ggf. /fa_help.)"
 
 
+def _telegram_slash_tool_first_enabled() -> bool:
+    v = (os.environ.get("TELEGRAM_SLASH_TOOL_FIRST") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def _slash_tools_first_body(cmd: str, args: str, raw: str, chat_id: str) -> str | None:
+    """Return deterministic finance-agent Telegram body, or None → LLM / gather path."""
+    cmd_n = cmd.lower().split("@")[0]
+    args = args or ""
+
+    if cmd_n == "/finance-agent":
+        rest = args.strip()
+        if not rest:
+            return cmd_finance_agent("", chat_id)
+        head = rest.split(maxsplit=1)[0].strip().lower()
+        if head in ("deduce", "ask", "chat"):
+            return None
+        return cmd_finance_agent(rest, chat_id)
+
+    if cmd_n in ("/deduce", "/ask", "/chat"):
+        return None
+
+    if cmd_n in ("/sygnif", "/cursor"):
+        a = args.strip()
+        if not a:
+            return None
+        first, _, rest = a.partition(" ")
+        sub = first.lower().split("@")[0]
+        if sub in ("ask", "chat", "deduce"):
+            return None
+        if sub == "help":
+            return cmd_help()
+        if sub == "analytics":
+            return cmd_strategy_analytics()
+        if sub == "tendency":
+            return cmd_tendency()
+        if sub == "signals":
+            return cmd_signals()
+        if sub == "macro":
+            return cmd_macro()
+        if sub == "finance":
+            rr = rest.strip()
+            if not rr:
+                return cmd_finance_agent("", chat_id)
+            h2 = rr.split(maxsplit=1)[0].strip().lower()
+            if h2 in ("deduce", "ask", "chat"):
+                return None
+            return cmd_finance_agent(rr, chat_id)
+        return None
+
+    dispatch: dict[str, object] = {
+        "/market": cmd_market,
+        "/movers": cmd_movers,
+        "/signals": cmd_signals,
+        "/overview": cmd_overview,
+        "/macro": cmd_macro,
+        "/overseer": cmd_overseer,
+        "/fa_help": cmd_help,
+        "/tendency": cmd_tendency,
+        "/plays": cmd_plays,
+        "/scan": cmd_scan,
+        "/evaluate": cmd_evaluate,
+        "/btc": cmd_btc,
+        "/btc-specialist": cmd_btc_specialist,
+    }
+    fn = dispatch.get(cmd_n)
+    if fn is not None:
+        try:
+            return fn()  # type: ignore[misc]
+        except Exception as e:
+            logger.error("_slash_tools_first_body %s: %s", cmd_n, e)
+            return f"_Tool error:_ `{e}`"
+
+    if cmd_n == "/ta":
+        try:
+            return cmd_ta((args or "BTC").strip() or "BTC")
+        except Exception as e:
+            logger.error("_slash_tools_first_body /ta: %s", e)
+            return f"_Tool error:_ `{e}`"
+    if cmd_n == "/news":
+        try:
+            return cmd_news(args)
+        except Exception as e:
+            logger.error("_slash_tools_first_body /news: %s", e)
+            return f"_Tool error:_ `{e}`"
+    if cmd_n == "/research":
+        try:
+            return cmd_research((args or "BTC").strip() or "BTC")
+        except Exception as e:
+            logger.error("_slash_tools_first_body /research: %s", e)
+            return f"_Tool error:_ `{e}`"
+    return None
+
+
 def agent_generate_slash_reply(full_text: str, chat_id: str) -> str:
     raw = full_text.strip()
     parts = raw.split(maxsplit=1)
@@ -2772,22 +3244,59 @@ def agent_generate_slash_reply(full_text: str, chat_id: str) -> str:
 
     if cmd == "/clear":
         clear_chat_history(chat_id)
-        ctx = (
-            "Der Chat-Verlauf wurde geleert. Bestätige kurz (1–2 Sätze) und verweise optional auf /fa_help."
-        )
-    else:
-        ctx = _gather_slash_context(cmd, args, raw)
+        return "Chat-Verlauf geleert. `/fa_help` zeigt Befehle."
+
+    if cmd in ("/ask", "/chat"):
+        a = (args or "").strip()
+        if not a:
+            return cmd_ask("", chat_id)
+        return conversational_reply(a, str(chat_id))
+    if cmd == "/deduce":
+        return cmd_deduce(args or "")
+
+    if cmd == "/finance-agent":
+        rest = (args or "").strip()
+        if rest:
+            head = rest.split(maxsplit=1)[0].strip().lower()
+            tail = rest.split(maxsplit=1)[1].strip() if " " in rest else ""
+            if head == "ask":
+                if not tail:
+                    return cmd_ask("", chat_id)
+                return conversational_reply(tail, str(chat_id))
+            if head == "chat":
+                if not tail:
+                    return cmd_ask("", chat_id)
+                return conversational_reply(tail, str(chat_id))
+            if head == "deduce":
+                return cmd_deduce(tail)
+
+    if _telegram_slash_tool_first_enabled():
+        direct = _slash_tools_first_body(cmd, args, raw, str(chat_id))
+        if direct is not None:
+            return direct
+
+    ctx = _gather_slash_context(cmd, args, raw)
+    if not _llm_available():
+        return _format_slash_no_llm(raw, ctx)
 
     hist = _format_chat_history(chat_id)
+    kb = load_finance_agent_kb(max_chars=24000) if cmd == "/finance-agent" else ""
+    kb_block = (
+        f"\n\n--- FINANCE_AGENT_CANONICAL_KB (Cursor subagent + skill parity) ---\n{kb}\n--- END_KB ---\n\n"
+        if kb
+        else ""
+    )
     prompt = (
         "Du bist Sygnif Finance Agent (Telegram, Markdown). "
-        "Slash-Befehle laufen zentral über denselben LLM-Pfad wie der Cursor-Agent (Cursor Cloud API). "
+        "Slash-Befehle laufen zentral über denselben LLM-Pfad wie der Cursor-Agent (Cursor Cloud API, sofern konfiguriert). "
         "Erzeuge die *vollständige* Antwort auf den Slash-Befehl — eigenständig formuliert, "
         "mobilfreundlich. Nutze SERVER-KONTEXT nur als Fakten; keine erfundenen Kurse.\n\n"
         f"--- Bisheriger Chat ---\n{hist}\n\n"
-        f"--- SERVER-KONTEXT ---\n{ctx}\n\n"
+        f"--- SERVER-KONTEXT ---\n{ctx}{kb_block}"
         f"--- BEFEHL ---\n{raw}\n\n"
-        "Antwort in Markdown. Sprache wie der Nutzer (DE/EN)."
+        "Antwort in Markdown. Sprache wie der Nutzer (DE/EN). "
+        "Wenn FINANCE_AGENT_CANONICAL_KB gesetzt ist: halte dich an Tag-/Exit-Semantik, Pfade und Telegram-Parität dort; "
+        "widerspreche dem KB nicht ohne expliziten Verweis auf aktuelleren Repo-Code."
     )
     return llm_analyze(prompt, max_tokens=2800)
 
