@@ -14,7 +14,9 @@ A **repeatable loop** that improves *analysis quality* and *bounded strategy tun
 | **Finance Agent** (`finance_agent/bot.py`, Telegram) | Market/TA/research, `/sygnif` cycle bundle, LLM synthesis; **analysis-only** for trades. |
 | **Trade Overseer** (`trade-overseer`, :8090) | Open-trade monitoring, LLM commentary, `/overview` + `/trades` for feedback. |
 | **Advisor observer** (`scripts/sygnif_advisor_observer.py`) | Scheduled state + optional **heuristic** pending rows in `advisor_pending.json`. |
-| **Weekly cron** (`scripts/weekly_strategy_analysis.py`) | Horizon snapshot + 7d trade stats → `strategy_adaptation_weekly.json` (sidecar). |
+| **Weekly cron** (`scripts/weekly_strategy_analysis.py`) | Horizon snapshot + 7d trade stats → `strategy_adaptation_weekly.json` (sidecar) + embedded **`ms3_metrics`** (NT perf + tag families + trading success bundle). |
+| **Daily cron** (`scripts/collect_ms3_metrics.py`) | Writes `user_data/market_strategy_3_metrics.json` + JSONL + appends `entry_performance.jsonl` — see `docs/market_strategy_3.md` §9. |
+| **6h cron** (`scripts/cron_trading_success.sh`) | Telegram trading success (1d) + strategy path tracker; 7d variants log-only. |
 
 ## GitNexus “nodes” (when to use)
 
@@ -75,7 +77,9 @@ flowchart LR
 | Trigger | What runs | Output |
 |---------|-----------|--------|
 | **On a schedule** | `ADVISOR_BG_INTERVAL_SEC` → observer | `advisor_state.json`, optional `advisor_pending.json` |
-| **Weekly (Sun 06:00 UTC)** | `weekly_strategy_analysis.py` | `strategy_adaptation_weekly.json` + Telegram/log |
+| **Weekly (Sun 06:00 UTC)** | `weekly_strategy_analysis.py` | `strategy_adaptation_weekly.json` (+ `ms3_metrics`) + Telegram/log |
+| **Daily (06:15 UTC)** | `collect_ms3_metrics.py` | `market_strategy_3_metrics.json` + JSONL + entry_perf log |
+| **Every 6h (:30 UTC)** | `cron_trading_success.sh` | `trading_success` Telegram + `strategy_paths` + logs |
 | **On demand** | `/sygnif`, `/finance-agent cycle`, Cursor task | LLM + raw bundle |
 | **Before code edits** | GitNexus impact / query | Safer refactors |
 

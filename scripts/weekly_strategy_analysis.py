@@ -21,6 +21,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+SCRIPTS = REPO / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 HORIZON = REPO / "scripts" / "prediction_horizon_check.py"
 DATA_DIR = Path.home() / ".local/share/sygnif-agent/predictions"
 WEEKLY_PATH = REPO / "user_data" / "strategy_adaptation_weekly.json"
@@ -135,6 +138,15 @@ def main() -> int:
         "horizon_save_ok": True,
         "trades_7d": {"spot": stats_spot, "futures": stats_fut},
     }
+
+    try:
+        from ms3_metrics_feed import build_ms3_metrics_bundle
+
+        report["ms3_metrics"] = build_ms3_metrics_bundle(
+            REPO, append_entry_perf_log=False
+        )
+    except Exception as e:
+        report["ms3_metrics"] = {"error": str(e)}
 
     WEEKLY_PATH.parent.mkdir(parents=True, exist_ok=True)
     WEEKLY_PATH.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

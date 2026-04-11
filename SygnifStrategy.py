@@ -1667,6 +1667,38 @@ class _SygnifStrategyDefault(IStrategy):
                     df.iloc[-1, df.columns.get_loc("enter_short")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "swing_failure_short"
 
+        # Optional: log short/long protection snapshot for selected pairs (throttled: once per pair per candle).
+        # Enable: SYGNIF_SHORT_DIAG=1  (optional SYGNIF_SHORT_DIAG_PAIRS="BTC/USDT:USDT,ETH/USDT:USDT")
+        _diag = os.environ.get("SYGNIF_SHORT_DIAG", "").strip().lower()
+        if _diag in ("1", "true", "yes") and len(df) > 0:
+            raw = os.environ.get(
+                "SYGNIF_SHORT_DIAG_PAIRS",
+                "BTC/USDT:USDT,ETH/USDT:USDT",
+            )
+            allowed = {p.strip() for p in raw.split(",") if p.strip()}
+            pair = metadata.get("pair", "")
+            if pair in allowed:
+                last = df.iloc[-1]
+                btc4 = float(last.get("btc_RSI_14_4h", float("nan")))
+                btc1h3 = float(last.get("btc_RSI_3_1h", float("nan")))
+                ps = bool(prot_short.iloc[-1]) if hasattr(prot_short, "iloc") else True
+                pl = bool(prot.iloc[-1]) if hasattr(prot, "iloc") else True
+                ts = float(ta_score.iloc[-1])
+                es = int(last.get("enter_short", 0) or 0)
+                el = int(last.get("enter_long", 0) or 0)
+                logger.info(
+                    "[SHORT_DIAG] pair=%s ta=%.0f prot_long=%s prot_short=%s "
+                    "btc_RSI_14_4h=%.1f btc_RSI_3_1h=%.1f enter_long=%d enter_short=%d",
+                    pair,
+                    ts,
+                    pl,
+                    ps,
+                    btc4,
+                    btc1h3,
+                    el,
+                    es,
+                )
+
         return df
 
     # -------------------------------------------------------------------------

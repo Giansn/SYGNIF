@@ -10,6 +10,7 @@ user_data/notebooks/
 user_data/freqaimodels/
 user_data/doom_cooldown.json
 user_data/strategy_adaptation_weekly.json
+user_data/market_strategy_3_metrics.json
 user_data/advisor_state.json
 user_data/advisor_pending.json
 __pycache__/
@@ -73,3 +74,7 @@ Network
 
 # Cursor local debug logs
 .cursor/debug*.log
+
+AGENT.md
+CLAUDE.md
+.agent-mem/

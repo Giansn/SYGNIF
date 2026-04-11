@@ -2,6 +2,8 @@
 
 Three additional features identified from ai-hedge-fund analysis that complement the existing plan.
 
+**See also:** [Market Strategy 3 (MS3) — regime layer & gap register](market_strategy_3.md) for bear/risk-off design, living gap table, and evidence log (orthogonal to the items below unless explicitly merged later).
+
 ---
 
 ## 1. Volume Acceleration (Linear Regression Slope on Volume)
