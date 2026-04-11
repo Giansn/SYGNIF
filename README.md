@@ -114,11 +114,65 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 | `dashboard_futures_full.html` | Futures dashboard (adds Side/Leverage columns) |
 | `dashboard_server.py` | Serves spot dashboard on :8888 |
 | `dashboard_server_futures.py` | Serves futures dashboard on :8889 |
+| `prediction_agent/btc_predict_runner.py` | BTC prediction runner (RF + XGB + LogReg) |
+| `prediction_agent/prediction_code_extracted.py` | Consolidated upstream prediction library |
 | `status_patch.py` / `status_patch_v2.py` | Compact `/status` Telegram command |
 | `fill_patch.py` | Order fill notification patch |
 | `config_claude_bot.example.json` | Example config |
 | `telemetry.py` | Optional telemetry |
 | `tf_controller.py` / `tf_switch.py` | Timeframe switching utilities |
+
+## Prediction Agent (`prediction_agent/`)
+
+Local ML-based BTC price and direction forecasting — **no API keys, no cloud, all free**.
+
+Extracted and consolidated from [BitVision](https://github.com/shobrook/BitVision) (MIT) and [CryptoPredictions](https://github.com/alimohammadiamirhossein/CryptoPredictions), then wired to live Bybit OHLCV data from `finance_agent/btc_specialist/data/`.
+
+### Models
+
+| Model | Type | Library | Output |
+|-------|------|---------|--------|
+| RandomForest | Regression | scikit-learn | Next-bar mean price |
+| XGBoost | Regression | xgboost | Next-bar mean price |
+| Logistic Regression | Classification | scikit-learn | Direction (UP/DOWN) + confidence |
+
+All three vote on a **consensus** signal (BULLISH / BEARISH / MIXED).
+
+### Usage
+
+```bash
+# 1h candles (default)
+python3 prediction_agent/btc_predict_runner.py
+
+# Daily candles
+python3 prediction_agent/btc_predict_runner.py --timeframe daily
+
+# Custom look-back window
+python3 prediction_agent/btc_predict_runner.py --window 10 --timeframe 1h
+```
+
+Output: console summary + `prediction_agent/btc_prediction_output.json`.
+
+### Backtest Metrics (sample)
+
+| Model | Timeframe | MAE | MAPE | Direction Acc |
+|-------|-----------|-----|------|---------------|
+| RandomForest | 1h | $733 | 1.00% | 51.4% |
+| XGBoost | 1h | $706 | 0.97% | 54.3% |
+| LogReg direction | 1h | — | — | 65.7% (F1 68.4%) |
+| RandomForest | daily | $639 | 0.92% | 92.3% |
+| XGBoost | daily | $1,515 | 2.18% | 84.6% |
+| LogReg direction | daily | — | — | 84.6% (F1 90.0%) |
+
+### Reference library
+
+`prediction_agent/prediction_code_extracted.py` contains the full consolidated prediction code from both upstream repos (30+ indicators, 9 model backends, metrics, backtest strategies). See `prediction_agent/SOURCES.md` for attribution and upstream commits.
+
+### Dependencies
+
+```bash
+pip3 install scikit-learn xgboost statsmodels  # only these three needed for the runner
+```
 
 ## Network monorepo (`network/`)
 
