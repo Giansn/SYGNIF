@@ -665,7 +665,7 @@ KEYBOARD = {
         ["/signals", "/scan", "/ta BTC", "/btc"],
         ["/plays", "/market", "/movers"],
         ["/deduce", "/ask", "/fa_help"],
-        ["/news", "/evaluate"],
+        ["/news", "/evaluate", "/btc-specialist"],
         ["/finance-agent network", "/finance-agent network nodes"],
         ["/clear"],
     ],
@@ -2452,6 +2452,7 @@ def cmd_help() -> str:
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
         "`/btc` — TA + strategy signals (BTC) + `btc_specialist` snapshot + optional FDN + optional NewHedge corr.\n"
+        "`/btc-specialist` — `/btc` plus offline bundle report (`btc_specialist/report.py`)\n"
         "`/research ETH` — Full AI research report\n"
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"

@@ -1,14 +1,17 @@
 {
   "version": 1,
-  "updated": "2026-04-09T00:45:00Z",
-  "source": "sygnif_agent_week1",
-  "reason": "Week-1 experiment: fewer marginal entries — TA 67, vol 1.25x, tighter ambiguous-long ceiling, sentiment buy 56, short zone floor 32; code adds 1h/4h HTF filters + 50k futures vol gate.",
+  "updated": "2026-04-10T23:31:03Z",
+  "source": "cursor_sygnif_agent",
+  "reason": "Enable session ORB entries live (BTC/ETH 5m): orb_entry_enabled=1; max_slots_orb=2, orb_range_minutes=30 at defaults within BOUNDS. Prior week-1 TA/sentiment overrides retained.",
   "overrides": {
     "claude_long_score_low": 42,
     "claude_long_score_high": 60,
     "strong_ta_min_score": 67,
     "sentiment_threshold_buy": 56.0,
     "vol_strong_mult": 1.25,
-    "claude_short_score_low": 32
+    "claude_short_score_low": 32,
+    "orb_entry_enabled": 1,
+    "max_slots_orb": 2,
+    "orb_range_minutes": 30
   }
 }

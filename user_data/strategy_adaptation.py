@@ -41,6 +41,11 @@ DEFAULTS: dict[str, Any] = {
     "sf_sl_vol_scale": 0.02,
     "sf_tp_vol_scale": 0.05,
     "sf_ta_split": 50.0,
+    # Session ORB (BTC/ETH, 5m) — see user_data/strategies/market_sessions_orb.py
+    "orb_entry_enabled": 0,
+    "max_slots_orb": 2,
+    "orb_range_minutes": 30,
+    "orb_min_range_pct": 0.05,
 }
 
 # Inclusive min/max per key (safety rails for adaptive tuning).
@@ -67,6 +72,10 @@ BOUNDS: dict[str, tuple[float, float]] = {
     "sf_sl_vol_scale": (0.0, 0.06),
     "sf_tp_vol_scale": (0.02, 0.12),
     "sf_ta_split": (40.0, 60.0),
+    "orb_entry_enabled": (0, 1),
+    "max_slots_orb": (0, 4),
+    "orb_range_minutes": (15, 120),
+    "orb_min_range_pct": (0.01, 0.20),
 }
 
 
@@ -87,6 +96,7 @@ def _clamp(key: str, value: Any) -> Any | None:
             "sf_sl_vol_scale",
             "sf_tp_vol_scale",
             "sf_ta_split",
+            "orb_min_range_pct",
         ):
             v = float(value)
             return max(lo, min(hi, v))

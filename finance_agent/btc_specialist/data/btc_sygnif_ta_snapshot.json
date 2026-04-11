@@ -1,0 +1,41 @@
+{
+  "generated_utc": "2026-04-11T01:38:36Z",
+  "symbol": "BTCUSDT",
+  "interval_note": "same 1h series as btc_1h_ohlcv.json",
+  "ta_score": 54,
+  "ta_components": {
+    "rsi14": -8,
+    "rsi3": 0,
+    "ema": 7,
+    "bb": 0,
+    "aroon": 0,
+    "stochrsi": 0,
+    "cmf": 5,
+    "volume": 0
+  },
+  "entries": [
+    "ambiguous_long",
+    "ambiguous_short"
+  ],
+  "exits": [],
+  "leverage": 5.0,
+  "atr_pct": 0.5289253294040771,
+  "indicators": {
+    "price": 72857.0,
+    "rsi": 62.48798901853134,
+    "rsi3": 47.50830564784041,
+    "trend": "Uptrend",
+    "macd_signal_text": "Bearish",
+    "willr": -38.90465746355317,
+    "cmf": 0.2463497993507972,
+    "vol_ratio": 0.34546750145507527,
+    "atr_pct": 0.5289253294040771,
+    "mfi": 62.64125521638526,
+    "obv_change_pct": 1.0225734484009097,
+    "sf_long": false,
+    "sf_short": false,
+    "ema_bull": 1.0,
+    "ema_cross": 0.0,
+    "bb_position": "62%"
+  }
+}

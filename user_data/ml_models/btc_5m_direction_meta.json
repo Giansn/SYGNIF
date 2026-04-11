@@ -1,0 +1,20 @@
+{
+  "kind": "numpy_logistic",
+  "path": "/home/ubuntu/SYGNIF/user_data/ml_models/btc_5m_direction.npz",
+  "feature_cols": [
+    "RSI_14",
+    "RSI_3",
+    "ADX_14",
+    "DMP_14",
+    "DMN_14",
+    "WILLR_14",
+    "CMF_20",
+    "STOCHRSIk_14_14_3_3",
+    "BBP_20_2.0",
+    "AROONU_14",
+    "AROOND_14",
+    "change_pct",
+    "ATR_14",
+    "cdl_net_bullish"
+  ]
+}

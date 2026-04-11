@@ -5,6 +5,8 @@ Used by Telegram commands instead of Haiku.
 
 from __future__ import annotations
 
+import math
+
 from expert_sentiment import expert_sygnif_sentiment_score
 
 
@@ -56,6 +58,11 @@ def expert_research_markdown(
 
     news_bullets = "\n".join(f"- {h}" for h in (headlines or [])[:5]) or "- _No recent headlines._"
 
+    mf = ind.get("mfi")
+    mfi_txt = f"{mf:.1f}" if mf is not None and isinstance(mf, (int, float)) and not math.isnan(mf) else "N/A"
+    obd = ind.get("obv_change_pct")
+    obv_txt = f"{obd:+.2f}%" if obd is not None and isinstance(obd, (int, float)) and not math.isnan(obd) else "N/A"
+
     verdict = "Neutral"
     if score >= 62 and sent >= 0:
         verdict = "Lean bullish (TA + headline tilt agree)"
@@ -71,7 +78,7 @@ Price `${price:.4g}` ({change_24h:+.1f}% 24h), volume ~`${vol_24h/1e6:.1f}M` USD
 
 **2. Technical outlook**
 - RSI14 `{ind.get('rsi', 0):.1f}` ({ind.get('rsi_signal', '')}), Williams %R `{ind.get('willr', 0):.0f}`
-- MACD: {ind.get('macd_signal_text', '?')}, CMF `{ind.get('cmf', 0):.3f}`
+- MACD: {ind.get('macd_signal_text', '?')}, CMF `{ind.get('cmf', 0):.3f}`, MFI(14) `{mfi_txt}` ({ind.get('mfi_signal', 'N/A')}), OBV Δ `{obv_txt}`
 - Support `{ind.get('support', 0):.4g}` / Resistance `{ind.get('resistance', 0):.4g}`
 - BB: {ind.get('bb_position', '?')}
 

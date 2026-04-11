@@ -50,10 +50,60 @@ from pandas import DataFrame
 
 from cursor_cloud_completion import cursor_cloud_completion
 from sentiment_constants import FINANCE_AGENT_SENTIMENT_INSTRUCTIONS
+import btc_trend_regime
 
 logger = logging.getLogger(__name__)
 
 _sentiment_http_mod = None
+_mso_mod = None
+_adx_cdl_mod = None
+_vsd_mod = None
+_smc_mod = None
+_ml_mod = None
+
+
+def _get_market_sessions_orb():
+    """Lazy-load sibling ``market_sessions_orb`` (same pattern as sentiment_http_client)."""
+    global _mso_mod
+    if _mso_mod is None:
+        mod_path = Path(__file__).resolve().parent / "market_sessions_orb.py"
+        spec = importlib.util.spec_from_file_location("_sygnif_market_sessions_orb", mod_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load market_sessions_orb from {mod_path}")
+        _mso_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_mso_mod)
+    return _mso_mod
+
+
+def _lazy_load_sibling(mod_name: str, cache_attr: str):
+    """Generic lazy-loader for sibling strategy modules."""
+    g = globals()
+    if g.get(cache_attr) is not None:
+        return g[cache_attr]
+    mod_path = Path(__file__).resolve().parent / f"{mod_name}.py"
+    spec = importlib.util.spec_from_file_location(f"_sygnif_{mod_name}", mod_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {mod_name} from {mod_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    g[cache_attr] = mod
+    return mod
+
+
+def _get_adx_cdl():
+    return _lazy_load_sibling("adx_candlestick", "_adx_cdl_mod")
+
+
+def _get_vsd():
+    return _lazy_load_sibling("volume_sd_zones", "_vsd_mod")
+
+
+def _get_smc():
+    return _lazy_load_sibling("smc_indicators", "_smc_mod")
+
+
+def _get_ml():
+    return _lazy_load_sibling("ml_signal_ensemble", "_ml_mod")
 
 
 def _get_sentiment_http_client():
@@ -576,6 +626,12 @@ class _SygnifStrategyDefault(IStrategy):
     sf_sl_vol_scale = 0.02
     sf_tp_vol_scale = 0.05
     sf_ta_split = 50.0
+    # Session ORB (BTC/ETH, 5m) — ``market_sessions_orb.attach_orb_columns``; toggles via adaptation
+    orb_entry_enabled = 0
+    max_slots_orb = 2
+    max_slots_btc_trend = 2  # SYGNIF_PROFILE=btc_trend — tag btc_trend_long
+    orb_range_minutes = 30
+    orb_min_range_pct = 0.05
     _adaptation_last_load: float = 0.0
     _adaptation_refresh_secs: int = 60
 
@@ -673,7 +729,7 @@ class _SygnifStrategyDefault(IStrategy):
             for p in current_wl:
                 try:
                     df, _ = self.dp.get_analyzed_dataframe(p, self.timeframe)
-                    if len(df) > 0 and df.iloc[-1].get("volume_sma_25", 0) > 50000:
+                    if len(df) > 0 and self._futures_volume_gate_passes(df):
                         count += 1
                 except Exception:
                     pass
@@ -1076,6 +1132,53 @@ class _SygnifStrategyDefault(IStrategy):
         if self.dp.runmode.value in ("live", "dry_run"):
             df["live_data_ok"] = df["volume"].rolling(window=72, min_periods=72).min() > 0
 
+        # --- Session ORB (BTC/ETH spot+futures; optional, adaptation ``orb_entry_enabled``) ---
+        if int(getattr(self, "orb_entry_enabled", 0)):
+            try:
+                tf = str(getattr(self, "timeframe", "5m") or "5m")
+                tfm = int("".join(ch for ch in tf if ch.isdigit()) or "5")
+                _mso = _get_market_sessions_orb()
+                _mso.attach_orb_columns(
+                    df,
+                    metadata_pair=metadata.get("pair", ""),
+                    timeframe_minutes=tfm,
+                    orb_minutes=int(getattr(self, "orb_range_minutes", 30)),
+                    min_range_pct=float(getattr(self, "orb_min_range_pct", 0.05)),
+                )
+            except Exception as e:
+                logger.warning("[%s] ORB columns skipped: %s", metadata.get("pair"), e)
+
+        # --- P1: ADX trend strength ---
+        try:
+            _get_adx_cdl().attach_adx(df, length=14)
+        except Exception as e:
+            logger.debug("[%s] ADX skipped: %s", metadata.get("pair"), e)
+
+        # --- P2: Candlestick patterns (top 6) ---
+        try:
+            _get_adx_cdl().attach_candlestick_patterns(df)
+            df["cdl_net_bullish"] = _get_adx_cdl().candlestick_bullish_score(df)
+        except Exception as e:
+            logger.debug("[%s] CDL patterns skipped: %s", metadata.get("pair"), e)
+
+        # --- P3: Smart Money Concepts ---
+        try:
+            _get_smc().attach_smc_indicators(df, swing_length=10)
+        except Exception as e:
+            logger.debug("[%s] SMC skipped: %s", metadata.get("pair"), e)
+
+        # --- P4: Volume S/D Zones (Heavy91 port) ---
+        try:
+            _get_vsd().attach_volume_sd_zones(df)
+        except Exception as e:
+            logger.debug("[%s] VSD zones skipped: %s", metadata.get("pair"), e)
+
+        # --- P5: ML Signal Ensemble ---
+        try:
+            _get_ml().attach_ml_signal(df)
+        except Exception as e:
+            logger.debug("[%s] ML signal skipped: %s", metadata.get("pair"), e)
+
         tok = time.perf_counter()
         logger.debug(f"[{metadata['pair']}] populate_indicators took: {tok - tik:0.4f}s")
         return df
@@ -1390,6 +1493,12 @@ class _SygnifStrategyDefault(IStrategy):
         vol_ratio = np.where(df["volume_sma_25"] > 0, df["volume"] / df["volume_sma_25"], 1.0)
         score += np.where((vol_ratio > 1.5) & (score > 50), 3, np.where((vol_ratio > 1.5) & (score < 50), -3, 0))
 
+        # ADX trend strength (-5 to +5)
+        try:
+            score += _get_adx_cdl().adx_ta_score_component(df)
+        except Exception:
+            pass
+
         return score.clip(0, 100)
 
     # -------------------------------------------------------------------------
@@ -1400,6 +1509,22 @@ class _SygnifStrategyDefault(IStrategy):
         df.loc[:, "enter_tag"] = ""
         if "RSI_14" not in df.columns:
             df.loc[:, "enter_short"] = 0
+            return df
+
+        # --- BTC trend profile: single rule, long-only on BTC (no sentiment / swing / ORB stack) ---
+        if btc_trend_regime.sygnif_profile() == "btc_trend" and btc_trend_regime.is_btc_pair(
+            metadata.get("pair", "")
+        ):
+            df.loc[:, "enter_short"] = 0
+            if len(df) > 0:
+                prot = df.get("protections_long_global", pd.Series(True, index=df.index))
+                empty_ok = df.get("num_empty_288", pd.Series(0, index=df.index)).fillna(0) <= 60
+                last_prot = prot.iloc[-1] if hasattr(prot, "iloc") else True
+                last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, "iloc") else True
+                last = df.iloc[-1]
+                if last_prot and last_empty and btc_trend_regime.btc_trend_long_row(last):
+                    df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                    df.iloc[-1, df.columns.get_loc("enter_tag")] = "btc_trend_long"
             return df
 
         # Global protections
@@ -1466,6 +1591,19 @@ class _SygnifStrategyDefault(IStrategy):
                     df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                     df.iloc[-1, df.columns.get_loc("enter_tag")] = "swing_failure"
 
+        # --- Session ORB long (BTC/ETH, last candle; uses ``orb_*`` columns when enabled) ---
+        if len(df) > 0 and int(getattr(self, "orb_entry_enabled", 0)) and not df.iloc[-1].get("enter_long", 0):
+            try:
+                _mso = _get_market_sessions_orb()
+                pair = metadata.get("pair", "")
+                if _mso.is_orb_pair(pair) and "orb_break_long" in df.columns:
+                    last_prot = prot.iloc[-1] if hasattr(prot, "iloc") else True
+                    last_empty = empty_ok.iloc[-1] if hasattr(empty_ok, "iloc") else True
+                    if last_prot and last_empty and bool(df.iloc[-1].get("orb_break_long")):
+                        df.iloc[-1, df.columns.get_loc("enter_long")] = 1
+                        df.iloc[-1, df.columns.get_loc("enter_tag")] = "orb_long"
+            except Exception as e:
+                logger.warning("[%s] ORB entry skipped: %s", metadata.get("pair"), e)
 
         # =====================================================================
         # SHORT ENTRIES (futures only — guarded by can_short in config)
@@ -1592,6 +1730,24 @@ class _SygnifStrategyDefault(IStrategy):
         )
         return stake
 
+    def _futures_volume_gate_passes(self, df: DataFrame) -> bool:
+        """Micro-cap filter for futures entries.
+
+        Raw ``volume_sma_25`` vs 50k works for high–base-volume alts; BTC/ETH use small
+        base units per bar, so also allow ``vol_sma * close`` (≈ quote notional) ≥ $50k.
+        """
+        if len(df) == 0 or "volume_sma_25" not in df.columns:
+            return True
+        last = df.iloc[-1]
+        vol_avg = float(last.get("volume_sma_25", 0) or 0)
+        close = float(last.get("close", 0) or 0)
+        quote_vol = vol_avg * close
+        if quote_vol >= 50_000:
+            return True
+        if vol_avg >= 50_000:
+            return True
+        return False
+
     # -------------------------------------------------------------------------
     # DCA scale-in for high-conviction entries (Lesson 4)
     # -------------------------------------------------------------------------
@@ -1663,6 +1819,28 @@ class _SygnifStrategyDefault(IStrategy):
                 logger.info(f"Swing slot cap: {count}/{self.max_slots_swing}, skipping {pair} ({tag})")
                 return False
 
+        if tag == "orb_long":
+            count = sum(1 for t in open_trades if (t.enter_tag or "") == "orb_long")
+            if count >= int(getattr(self, "max_slots_orb", 2)):
+                logger.info(
+                    "ORB slot cap: %d/%s, skipping %s",
+                    count,
+                    getattr(self, "max_slots_orb", 2),
+                    pair,
+                )
+                return False
+
+        if tag == "btc_trend_long":
+            count = sum(1 for t in open_trades if (t.enter_tag or "") == "btc_trend_long")
+            if count >= int(getattr(self, "max_slots_btc_trend", 2)):
+                logger.info(
+                    "BTC trend slot cap: %d/%s, skipping %s",
+                    count,
+                    getattr(self, "max_slots_btc_trend", 2),
+                    pair,
+                )
+                return False
+
         # Premium-tag slot reservation
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
         # leaving the top slots available only for high-edge tags (e.g. sygnif_s-5).
@@ -1689,11 +1867,17 @@ class _SygnifStrategyDefault(IStrategy):
         # Futures: minimum average volume gate (filter micro caps, swing bypasses)
         if self.config.get("trading_mode", "") == "futures" and tag not in self._swing_tags and self.dp:
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-            if len(df) > 0 and "volume_sma_25" in df.columns:
-                vol_avg = df.iloc[-1].get("volume_sma_25", 0)
-                if vol_avg < 50000:
-                    logger.info(f"Futures volume gate: {pair} vol_sma_25={vol_avg:.0f} < 50k, skipping")
-                    return False
+            if len(df) > 0 and not self._futures_volume_gate_passes(df):
+                last = df.iloc[-1]
+                vol_avg = float(last.get("volume_sma_25", 0) or 0)
+                close = float(last.get("close", 0) or 0)
+                logger.info(
+                    "Futures volume gate: %s vol_sma_25=%.0f quote~%.0f USDT below threshold, skipping",
+                    pair,
+                    vol_avg,
+                    vol_avg * close,
+                )
+                return False
 
         return True
 

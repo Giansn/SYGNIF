@@ -64,3 +64,12 @@ Network
 .windsurfrules
 .gemini/
 .cline/
+
+# Auto-generated agent rules (personalized per developer)
+.brainsync/agent-rules.md
+
+# Local Python venv (repo root)
+.venv/
+
+# Cursor local debug logs
+.cursor/debug*.log

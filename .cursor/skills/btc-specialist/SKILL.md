@@ -32,6 +32,7 @@ description: >-
 | **`finance_agent/fdn_fundamentals.py`** | Optional FDN metadata (`FINANCIALDATA_API_KEY`); not Bybit price |
 | **`docs/correlation_research_evidence.md`** | ORB / NewHedge / methodology references |
 | **`scripts/market_open_context_report.py`** | UTC session + Bybit BTC/ETH snapshot (+ optional NewHedge probe) |
+| **`scripts/train_btc_5m_direction.py`** | **Research-only:** next **5m bar** direction model (Bybit spot OHLCV + same indicator features as **`scripts/train_ml_ensemble.py`**). Train → `user_data/ml_models/`; **not** live trading, **not** `/btc` parity — optional experiment alongside **`pull_btc_context`**. |
 
 ## Bybit v5 (spot `BTCUSDT`)
 
@@ -52,7 +53,8 @@ Align narratives with **`detect_signals`** in `finance_agent/bot.py` (not generi
 
 1. Read `manifest.json` (+ `btc_sygnif_ta_snapshot.json` if present).
 2. If stale or user wants live: Bybit ticker/klines or run **`pull_btc_context.py`** from repo root.
-3. For “what would Telegram show?” or multi-coin → attach **finance-agent**, not this skill alone.
+3. For **ML / next-bar research** on **5m** BTC (same feature set as ensemble trainer): **`python3 scripts/train_btc_5m_direction.py train|predict`** — see script docstring; keep labels **research-only**, not Sygnif live tags.
+4. For “what would Telegram show?” or multi-coin → attach **finance-agent**, not this skill alone.
 
 ## Deeper TA math
 

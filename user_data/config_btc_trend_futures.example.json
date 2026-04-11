@@ -1,0 +1,73 @@
+{
+    "_comment": "Example: BTC-only futures backtest/live with SYGNIF_PROFILE=btc_trend. Copy to config_btc_trend_futures.json and set exchange keys / api_server secrets.",
+    "strategy": "SygnifStrategy",
+    "can_short": false,
+    "trading_mode": "futures",
+    "margin_mode": "isolated",
+    "max_open_trades": 2,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.8,
+    "fiat_display_currency": "USD",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    "timeframe": "5m",
+    "use_exit_signal": true,
+    "exit_profit_only": false,
+    "ignore_roi_if_entry_signal": true,
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": { "enabled": false, "bids_to_ask_delta": 1 }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0
+    },
+    "exchange": {
+        "name": "bybit",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {},
+        "ccxt_async_config": {},
+        "pair_whitelist": ["BTC/USDT:USDT"],
+        "pair_blacklist": []
+    },
+    "order_types": {
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_exit": "market",
+        "force_entry": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": true,
+        "stoploss_on_exchange_interval": 60,
+        "stoploss_on_exchange_limit_ratio": 0.99
+    },
+    "order_time_in_force": { "entry": "GTC", "exit": "GTC" },
+    "liquidation_buffer_ratio": 0.05,
+    "pairlists": [{ "method": "StaticPairList" }],
+    "telegram": { "enabled": false, "token": "", "chat_id": "" },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "127.0.0.1",
+        "listen_port": 8082,
+        "verbosity": "error",
+        "enable_openapi": true,
+        "jwt_secret_key": "change-me",
+        "CORS_origins": [],
+        "username": "freqtrader",
+        "password": "change-me"
+    },
+    "bot_name": "Sygnif-btc-trend",
+    "initial_state": "running",
+    "force_entry_enable": false,
+    "position_adjustment_enable": false,
+    "internals": { "process_throttle_secs": 3 },
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather"
+}

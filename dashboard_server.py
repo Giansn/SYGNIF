@@ -3,7 +3,10 @@
 import base64
 import http.server
 import os
+import socketserver
 import urllib.request
+
+_CLIENT_SOCK_TIMEOUT = 120  # seconds; frees a worker if the client never completes a request
 
 PORT = 8888
 API = "http://localhost:8080"
@@ -38,6 +41,21 @@ def _basic_b64() -> bytes:
 
 def _inject_api_auth(html: bytes) -> bytes:
     return html.replace(_PLACEHOLDER, _basic_b64())
+
+
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """One thread per client so one slow /api proxy cannot block the whole dashboard."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+    request_queue_size = 128
+
+    def process_request_thread(self, request, client_address):
+        try:
+            request.settimeout(_CLIENT_SOCK_TIMEOUT)
+        except OSError:
+            pass
+        super().process_request_thread(request, client_address)
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -117,5 +135,5 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-print(f"Dashboard running on http://0.0.0.0:{PORT} → API {API}")
-http.server.HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+print(f"Dashboard running on http://0.0.0.0:{PORT} → API {API} (threaded)")
+ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

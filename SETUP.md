@@ -132,7 +132,7 @@ Or use **Claude Code Desktop/Web** with remote SSH connection.
 | **`SYGNIF_CONTEXT.md`** | Project root | Strategy / ops narrative |
 | **`AGENTS.md`** | Project root | GitNexus impact / graph rules |
 | GitNexus MCP | Global config | Code intelligence — query, context, impact, rename |
-| Finance Agent | `~/.claude/skills/finance-agent/` | Market research, TA, news, plays, strategy exploration |
+| Finance Agent (Cursor skill) | `.cursor/skills/finance-agent/SKILL.md` | Market research, TA, Telegram bot parity, strategy — attach in Cursor workspace |
 | GitNexus Skills | `.claude/skills/gitnexus/` | Exploring, debugging, refactoring, impact analysis |
 | Pre/PostToolUse Hooks | `~/.claude/settings.json` | Auto-enriches searches with graph context, detects stale index |
 | Auto-memory | `~/.claude/projects/` | Persists user prefs and project context across sessions |
@@ -316,13 +316,11 @@ These require no manual setup -- they activate automatically for any Claude Code
 
 ## 8. Finance Agent
 
-A Claude Code skill at `~/.claude/skills/finance-agent/` that orchestrates market research with parallel subagents.
+Cursor skill at **`.cursor/skills/finance-agent/SKILL.md`** (in this repo): unified Sygnif domain + **`finance_agent/bot.py`** Telegram command parity. BTC-only analysis tooling lives under **`finance_agent/btc_specialist/`** with skill **`.cursor/skills/btc-specialist/SKILL.md`**.
 
-### Trigger with
+### Trigger in Cursor
 
-```
-/finance-agent
-```
+Attach the **finance-agent** skill (or invoke your client’s slash if configured). Legacy Claude Code **`/finance-agent`** referred to the same content when mirrored globally; canonical copy is the repo **`.cursor/skills/`** file.
 
 ### Modes
 

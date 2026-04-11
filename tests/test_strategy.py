@@ -539,7 +539,9 @@ class TestSlotCaps:
     def test_futures_volume_gate_blocks_below_50k(self, strategy, make_df):
         strategy.config = {"trading_mode": "futures"}
         df = make_df()
-        df.loc[df.index[-1], "volume_sma_25"] = 40000.0
+        # Below both raw 50k and quote (vol_sma * close) $50k — thin book
+        df.loc[df.index[-1], "volume_sma_25"] = 400.0
+        df.loc[df.index[-1], "close"] = 100.0
         strategy.dp = type("DP", (), {
             "get_analyzed_dataframe": lambda self, pair, tf: (df, None)
         })()

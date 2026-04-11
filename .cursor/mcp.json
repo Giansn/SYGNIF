@@ -1,31 +1,62 @@
 {
   "mcpServers": {
+    "gitnexus": {
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-npx.mjs",
+        "-y",
+        "gitnexus@latest",
+        "mcp"
+      ]
+    },
     "linear": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-npx.mjs",
+        "-y",
+        "mcp-remote",
+        "https://mcp.linear.app/mcp"
+      ]
     },
     "aws-docs": {
-      "command": "uvx",
-      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-uvx.mjs",
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       }
     },
     "aws-iac": {
-      "command": "uvx",
-      "args": ["awslabs.iac-mcp-server@latest"],
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-uvx.mjs",
+        "awslabs.iac-mcp-server@latest"
+      ],
       "env": {
         "AWS_PROFILE": "default",
         "AWS_REGION": "eu-central-1"
       }
     },
     "aws-serverless": {
-      "command": "uvx",
-      "args": ["awslabs.aws-serverless-mcp-server@latest"],
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-uvx.mjs",
+        "awslabs.aws-serverless-mcp-server@latest"
+      ],
       "env": {
         "AWS_PROFILE": "default",
         "AWS_REGION": "eu-central-1"
       }
+    },
+    "edge-npu": {
+      "command": "node",
+      "args": ["scripts/mcp/run-edge-npu.mjs"]
+    },
+    "brainsync": {
+      "command": "node",
+      "args": ["scripts/mcp/run-brainsync.mjs"]
     }
   }
 }

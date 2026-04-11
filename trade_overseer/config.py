@@ -1,7 +1,57 @@
 """Trade Overseer configuration."""
+import json
 import os
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _api_password_from_config(path: str) -> str:
+    """Read api_server.password from a Freqtrade config JSON (optional Docker mount)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        return (cfg.get("api_server") or {}).get("password") or ""
+    except OSError:
+        return ""
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return ""
+
+
+def _shared_api_password() -> str:
+    """Match .env.example: FT_*_PASS, or shared API_PASSWORD / FREQTRADE_API_PASSWORD."""
+    return (
+        os.environ.get("FT_SPOT_PASS")
+        or os.environ.get("API_PASSWORD")
+        or os.environ.get("FREQTRADE_API_PASSWORD")
+        or ""
+    )
+
+
+def _spot_password() -> str:
+    for candidate in (os.environ.get("FT_SPOT_PASS"), _shared_api_password()):
+        if candidate:
+            return candidate
+    p = os.environ.get("OVERSEER_FT_SPOT_CONFIG", "/ro/ft_spot_config.json")
+    got = _api_password_from_config(p)
+    if got:
+        return got
+    return "CHANGE_ME"
+
+
+def _futures_password() -> str:
+    for candidate in (
+        os.environ.get("FT_FUTURES_PASS"),
+        os.environ.get("FT_SPOT_PASS"),
+        _shared_api_password(),
+    ):
+        if candidate:
+            return candidate
+    p = os.environ.get("OVERSEER_FT_FUTURES_CONFIG", "/ro/ft_futures_config.json")
+    got = _api_password_from_config(p)
+    if got:
+        return got
+    return "CHANGE_ME"
+
 
 # Full Freqtrade instance list (filtered by SYGNIF_OVERSEER_INSTANCE when set).
 _ALL_FT_INSTANCES = [
@@ -9,13 +59,13 @@ _ALL_FT_INSTANCES = [
         "name": "spot",
         "url": os.environ.get("FT_SPOT_URL", "http://127.0.0.1:8080/api/v1"),
         "user": os.environ.get("FT_SPOT_USER", "freqtrader"),
-        "pass": os.environ.get("FT_SPOT_PASS", "CHANGE_ME"),
+        "pass": _spot_password(),
     },
     {
         "name": "futures",
         "url": os.environ.get("FT_FUTURES_URL", "http://127.0.0.1:8081/api/v1"),
         "user": os.environ.get("FT_FUTURES_USER") or os.environ.get("FT_SPOT_USER", "freqtrader"),
-        "pass": os.environ.get("FT_FUTURES_PASS") or os.environ.get("FT_SPOT_PASS", "CHANGE_ME"),
+        "pass": _futures_password(),
     },
 ]
 
