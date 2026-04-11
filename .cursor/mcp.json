@@ -57,6 +57,14 @@
     "brainsync": {
       "command": "node",
       "args": ["scripts/mcp/run-brainsync.mjs"]
+    },
+    "defillama": {
+      "command": "node",
+      "args": [
+        "scripts/mcp/run-with-npx.mjs",
+        "-y",
+        "@nic0xflamel/defillama-mcp-server"
+      ]
     }
   }
 }

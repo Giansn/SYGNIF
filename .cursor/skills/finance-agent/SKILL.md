@@ -25,4 +25,4 @@ allowed-tools:
 
 That file is the **fused** skill + Cursor **subagent** prompt and is loaded by **`finance_agent/bot.py`** (`load_finance_agent_kb`) for Telegram **`/finance-agent`** LLM replies so Cursor and Telegram stay aligned.
 
-**Telegram implementation:** `finance_agent/bot.py` only. **BTC-only tools:** `finance_agent/btc_specialist/` + **btc-specialist** skill.
+**Telegram implementation:** `finance_agent/bot.py` only. **BTC-only tools:** `finance_agent/btc_specialist/` + **btc-specialist** skill. **Daily BTC on-chain/derivatives (CC BY 4.0):** `finance_agent/crypto_market_data.py` — all README daily JSONs; `run_crypto_market_data_daily.py` (1×/day cron) or `pull_btc_context.py` → `crypto_market_data_daily_analysis.md` + bundle; `/finance-agent crypto-daily`; compact pipe in `GET /briefing`.

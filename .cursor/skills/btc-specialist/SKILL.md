@@ -29,6 +29,7 @@ description: >-
 | **`user_data/strategies/SygnifStrategy.py`** / **`MarketStrategy2.py`** | How BTC entries/exits behave live (tags, protections, ORB on BTC) |
 | **`user_data/strategies/market_sessions_orb.py`** | Session ORB columns; **`orb_long`** is **BTC/ETH** — relevant when the question is BTC breakout context |
 | **`finance_agent/newhedge_client.py`** | Optional BTC–alts correlation metric (`NEWHEDGE_API_KEY`); not Sygnif TA |
+| **`finance_agent/crypto_market_data.py`** | All README `data/daily` JSONs (**`ALL_README_DAILY_PATHS`**); **`run_crypto_market_data_daily.py`** (cron) or **`pull_btc_context.py`** → `btc_crypto_market_data.json` + **`crypto_market_data_daily_analysis.md`**; **`/finance-agent crypto-daily`**; not Sygnif TA / not Bybit OHLC |
 | **`finance_agent/fdn_fundamentals.py`** | Optional FDN metadata (`FINANCIALDATA_API_KEY`); not Bybit price |
 | **`docs/correlation_research_evidence.md`** | ORB / NewHedge / methodology references |
 | **`scripts/market_open_context_report.py`** | UTC session + Bybit BTC/ETH snapshot (+ optional NewHedge probe) |
@@ -44,6 +45,8 @@ description: >-
 - **`manifest.json`**: last pull time (UTC); not a live quote.
 - **`btc_sygnif_ta_snapshot.json`**: optional; built when `bot` imports during pull — re-run pull after TA/bot changes.
 - **`btc_fdn_fundamentals.json`** / **`btc_newhedge_altcoins_correlation.json`**: optional third-party; never label as Sygnif score or Bybit OHLC.
+- **`btc_crypto_market_data.json`**: optional full README daily JSON bundle; **CC BY 4.0**; daily granularity only.
+- **`crypto_market_data_daily_analysis.md`**: optional markdown pass over all README daily series; refresh via **`run_crypto_market_data_daily.py`** (cron) or **`pull_btc_context.py`**.
 
 ## TA / signal semantics (BTC)
 
@@ -51,7 +54,7 @@ Align narratives with **`detect_signals`** in `finance_agent/bot.py` (not generi
 
 ## Sub-agent workflow
 
-1. Read `manifest.json` (+ `btc_sygnif_ta_snapshot.json` if present).
+1. Read `manifest.json` (+ `btc_sygnif_ta_snapshot.json` if present). For on-chain/derivatives context: prefer **`crypto_market_data_daily_analysis.md`**, else **`btc_crypto_market_data.json`**.
 2. If stale or user wants live: Bybit ticker/klines or run **`pull_btc_context.py`** from repo root.
 3. For **ML / next-bar research** on **5m** BTC (same feature set as ensemble trainer): **`python3 scripts/train_btc_5m_direction.py train|predict`** — see script docstring; keep labels **research-only**, not Sygnif live tags.
 4. For “what would Telegram show?” or multi-coin → attach **finance-agent**, not this skill alone.

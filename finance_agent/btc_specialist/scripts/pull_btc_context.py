@@ -18,6 +18,37 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FINANCE_AGENT_DIR = REPO_ROOT / "finance_agent"
 
 
+def _write_crypto_market_data_bundle(utc: str) -> bool:
+    """All README daily JSONs + markdown analysis (CC BY 4.0); not Sygnif TA."""
+    sys.path.insert(0, str(FINANCE_AGENT_DIR))
+    try:
+        from crypto_market_data import (
+            ALL_README_DAILY_PATHS,
+            build_daily_analysis_markdown,
+            fetch_remote_bundle,
+            write_bundle_json,
+        )
+    except Exception:
+        return False
+    try:
+        bundle = fetch_remote_bundle(
+            paths=ALL_README_DAILY_PATHS,
+            timeout_per=15.0,
+        )
+        ds = bundle.get("datasets")
+        if not isinstance(ds, dict) or not any(ds.values()):
+            return False
+        write_bundle_json(OUT, bundle)
+        md = build_daily_analysis_markdown(bundle)
+        (OUT / "crypto_market_data_daily_analysis.md").write_text(
+            md,
+            encoding="utf-8",
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _write_newhedge_altcoins_correlation(utc: str) -> bool:
     if not (os.environ.get("NEWHEDGE_API_KEY") or "").strip():
         return False
@@ -218,11 +249,15 @@ def main() -> int:
     if _write_newhedge_altcoins_correlation(utc):
         files_written.append("btc_newhedge_altcoins_correlation.json")
 
+    if _write_crypto_market_data_bundle(utc):
+        files_written.append("btc_crypto_market_data.json")
+        files_written.append("crypto_market_data_daily_analysis.md")
+
     manifest = {
         "generated_utc": utc,
         "source": (
             "Bybit v5 public market API (spot); optional FinancialData.net BTC profile; "
-            "optional NewHedge altcoins correlation"
+            "optional NewHedge altcoins correlation; optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)"
         ),
         "symbol": "BTCUSDT",
         "files": files_written,

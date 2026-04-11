@@ -10,7 +10,7 @@ Commands:
   /market          — Top 10 crypto overview
   /movers [1h|24h] — Top gainers & losers
   /ta <TICKER>     — Technical analysis with strategy signals
-  /btc             — Same as /ta BTC + snapshot footer + optional FDN + optional NewHedge BTC–alts corr.
+  /btc             — BTC specialist offline bundle + optional FDN + optional NewHedge; live TA: /ta BTC
   /research <TICK> — Full research (market + TA + news + AI)
   /finance-agent network [docs|nodes|nn] — Network submodule; nodes+NN topology + OpenVINO stack
   /finance-agent trades|check — Open positions + closed-trade aggregates (overseer)
@@ -609,7 +609,7 @@ Verhalten:
 - Antworte **direkt** auf die letzte Nutzernachricht; keine Meta-Erklärungen über „als KI“ oder deine Aufgabe.
 - **Sprache** wie der Nutzer (Deutsch oder Englisch).
 - **Länge**: typisch 2–8 kurze Absätze oder Aufzählungen; mobillesbar; nur bei expliziter Bitte länger.
-- **Fakten**: keine erfundenen Kurse; wenn Live-Daten fehlen, sag es kurz und schlag vor, `/ta`, `/btc` oder `/market` zu nutzen.
+- **Fakten**: keine erfundenen Kurse; wenn Live-Daten fehlen, sag es kurz und schlag vor, `/ta` (z. B. `/ta BTC`), `/btc` (Offline-Bundle) oder `/market` zu nutzen.
 - **Format**: lieber klare Sätze; wenn TELEGRAM_MARKDOWN genutzt wird, keine kaputten Unterstriche oder ungeschlossene *."""
 
 # Strategy constants (mirrors SygnifStrategy.py)
@@ -1686,6 +1686,11 @@ def cmd_market() -> str:
         pf = _fmt_price(p["price"])
         lines.append(f"`{p['sym']:>6}` {pf:>12} `{arrow}{p['change']:.1f}%` Vol `${vol_m:.0f}M`")
 
+    dl = _defillama_telegram_slow_context()
+    if dl:
+        lines.append("")
+        lines.append(dl)
+
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_")
     return "\n".join(lines)
 
@@ -1753,44 +1758,84 @@ def _newhedge_telegram_altcoins_correlation_block() -> str:
     return format_telegram_altcoins_correlation_block()
 
 
+def _defillama_telegram_slow_context() -> str:
+    """Optional DefiLlama DeFi TVL + agg perp OI (hourly cache by default; disable with DEFILLAMA_CONTEXT=0)."""
+    try:
+        from defillama_client import format_telegram_slow_context
+
+        return (format_telegram_slow_context() or "").strip()
+    except Exception as e:
+        logger.debug("defillama telegram context: %s", e)
+        return ""
+
+
+def _defillama_overseer_plain() -> str:
+    """Same DefiLlama bundle as one line for overseer / plays JSON (plaintext)."""
+    try:
+        from defillama_client import format_plaintext_for_overseer
+
+        return (format_plaintext_for_overseer() or "").strip()
+    except Exception as e:
+        logger.debug("defillama overseer line: %s", e)
+        return ""
+
+
 def _btc_specialist_snapshot_footer() -> str:
-    """One-line hint for Telegram /btc — offline bundle under finance_agent/btc_specialist/data/."""
+    """One-line bundle freshness (plain text — avoids Telegram Markdown mangling paths with underscores)."""
     manifest = Path(__file__).resolve().parent / "btc_specialist" / "data" / "manifest.json"
     if not manifest.is_file():
         return (
-            "_BTC specialist data: no `btc_specialist/data/manifest.json` — run "
-            "`python3 finance_agent/btc_specialist/scripts/pull_btc_context.py` from repo root._"
+            "Bundle: no manifest — run python3 finance_agent/btc_specialist/scripts/pull_btc_context.py "
+            "from repo root."
         )
     try:
         m = json.loads(manifest.read_text(encoding="utf-8"))
         ts = m.get("generated_utc", "?")
-        return f"_BTC specialist offline bundle: `manifest.json` @ {ts} (`finance_agent/btc_specialist/data/`)._"
+        return (
+            f"Bundle: manifest.json @ {ts} — data directory finance_agent/btc_specialist/data"
+        )
     except Exception:
-        return "_BTC specialist: manifest unreadable — re-run pull script._"
+        return "Bundle: manifest unreadable — re-run pull script."
 
 
 def cmd_btc() -> str:
-    """Telegram /btc — parity with /ta BTC plus snapshot footer for the BTC specialist agent."""
-    parts = [cmd_ta("BTC").rstrip(), "", _btc_specialist_snapshot_footer()]
+    """Telegram /btc — BTC specialist only (offline bundle + optional FDN/NewHedge). Live Sygnif TA: `/ta BTC`."""
+    try:
+        from btc_specialist import report as _btc_rep
+
+        core = _btc_rep.build_btc_specialist_report(max_chars=4500)
+    except Exception as e:
+        logger.error("btc_specialist report: %s", e)
+        core = f"*BTC specialist*\n\n_Report error:_ `{e}`"
+    parts = ["*BTC specialist*", "", core, "", _btc_specialist_snapshot_footer()]
     fdn = _fdn_telegram_btc_fundamentals_block()
     if fdn:
         parts.extend(["", fdn])
     nh = _newhedge_telegram_altcoins_correlation_block()
     if nh:
         parts.extend(["", nh])
+    parts.extend(["", "—", "*Live Sygnif TA + signals:* `/ta BTC`"])
     return "\n".join(parts).strip()
 
 
 def cmd_btc_specialist() -> str:
-    """Deep BTC: `cmd_btc()` plus offline bundle (`btc_specialist/report.py`)."""
+    """Longer offline bundle (same stack as /btc, larger cap)."""
     try:
         from btc_specialist import report as _btc_rep
 
-        extra = _btc_rep.build_btc_specialist_report(max_chars=4000)
+        core = _btc_rep.build_btc_specialist_report(max_chars=9000)
     except Exception as e:
-        logger.error("btc_specialist report: %s", e)
-        extra = f"_Bundle report:_ `{e}`"
-    return f"*BTC specialist (deep)*\n\n{cmd_btc()}\n\n---\n\n{extra}".strip()
+        logger.error("btc_specialist deep report: %s", e)
+        core = f"*BTC specialist (deep)*\n\n_Report error:_ `{e}`"
+    parts = ["*BTC specialist (deep)*", "", core, "", _btc_specialist_snapshot_footer()]
+    fdn = _fdn_telegram_btc_fundamentals_block()
+    if fdn:
+        parts.extend(["", fdn])
+    nh = _newhedge_telegram_altcoins_correlation_block()
+    if nh:
+        parts.extend(["", nh])
+    parts.extend(["", "—", "*Live Sygnif TA + signals:* `/ta BTC`"])
+    return "\n".join(parts).strip()
 
 
 def cmd_briefing() -> str:
@@ -1807,11 +1852,23 @@ def cmd_briefing() -> str:
     fdn_section = f"{fdn_block}\n\n" if fdn_block else ""
     nh = _newhedge_telegram_altcoins_correlation_block()
     nh_section = f"{nh}\n\n" if nh else ""
+    cmd_md_block = ""
+    try:
+        import crypto_market_data as _cmd_md2
+
+        b = _cmd_md2.get_bundle_cached()
+        if b:
+            pretty = _cmd_md2.format_bundle_text(b, max_chars=1200).strip()
+            if pretty:
+                cmd_md_block = f"{pretty}\n\n"
+    except Exception as e:
+        logger.debug("briefing telegram crypto_market_data: %s", e)
     return (
         f"*Briefing* (pipe lines = `GET /briefing` contract)\n\n"
         f"```\n{body}\n```\n\n"
         f"{fdn_section}"
         f"{nh_section}"
+        f"{cmd_md_block}"
         f"_HTTP:_ `http://{host}:{port}/briefing?symbols=BTC,ETH`\n"
         f"{_btc_specialist_snapshot_footer()}\n"
         f"_{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
@@ -1995,6 +2052,10 @@ def cmd_plays() -> str:
     market_ctx += "\nTop losers:\n"
     for p in top_losers:
         market_ctx += f"  {p['sym']}: {p['change']:.1f}%\n"
+
+    dl_plain = _defillama_overseer_plain()
+    if dl_plain:
+        market_ctx += f"\nDeFi / perp OI (DefiLlama, slow context): {dl_plain}\n"
 
     # Fetch BTC TA for macro context
     btc_df = bybit_kline("BTCUSDT", "60", 200)
@@ -2438,6 +2499,7 @@ def cmd_help() -> str:
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
         "`/finance-agent briefing` — Pipe briefing (same as HTTP `GET /briefing`; Telegram adds optional FDN lines)\n"
+        "`/finance-agent crypto-daily` — Crypto Market Data: täglicher README-Report (`crypto_market_data_daily_analysis.md`)\n"
         "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (short + nodes/NN summary)\n"
         "`/finance-agent network nodes` — topology + `run_npu` / `placement` / `wire_tensor` + optional `NETWORK_NN_STATUS_URL`\n"
         "`/finance-agent network docs` — doc index + SSM hint\n"
@@ -2448,11 +2510,13 @@ def cmd_help() -> str:
         "`/tendency` — Market tendency (bull/bear)\n"
         "`/signals` — Active entry signals (top pairs)\n"
         "`/scan` — Deep scan: signals + news + AI ranking\n"
-        "`/market` — Top 15 crypto overview\n"
+        "`/market` — Top 15 overview + optional DefiLlama DeFi context (slow, ≤1h cache; off: `DEFILLAMA_CONTEXT=0`)\n"
+        "`/macro` — BTC TA + breadth + same optional DefiLlama block\n"
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
-        "`/btc` — TA + strategy signals (BTC) + `btc_specialist` snapshot + optional FDN + optional NewHedge corr.\n"
-        "`/btc-specialist` — `/btc` plus offline bundle report (`btc_specialist/report.py`)\n"
+        "`/btc` — BTC specialist bundle (`btc_specialist/report.py`) + optional FDN + optional NewHedge; live TA: `/ta BTC`\n"
+        "`/btc-specialist` — same stack as `/btc`, longer report (higher char cap)\n"
+        "`/finance-agent crypto-daily` — Crypto Market Data README-Tagesreport (Datei; Cron: `run_crypto_market_data_daily.py`)\n"
         "`/research ETH` — Full AI research report\n"
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
@@ -2491,13 +2555,53 @@ def cmd_macro() -> str:
     elif ta <= 35:
         regime = "Risk-off bias"
 
+    lines = [
+        "*Macro-Crypto Context*",
+        f"BTC: `{_fmt_price(btc_ind['price'])}` | `{btc_ind['trend']}` | TA `{ta}`",
+        f"RSI `{btc_ind['rsi']:.0f}` | WR `{btc_ind['willr']:.0f}` | MACD `{btc_ind['macd_signal_text']}`",
+        f"Breadth (top vol alts): `{breadth}`",
+        f"Regime: *{regime}*",
+    ]
+    dl = _defillama_telegram_slow_context()
+    if dl:
+        lines.append("")
+        lines.append(dl)
+    lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Command: /finance-agent crypto-daily — README daily analysis file
+# ---------------------------------------------------------------------------
+def cmd_crypto_market_daily() -> str:
+    """Last daily analysis from ErcinDedeoglu/crypto-market-data (all README JSONs); CC BY 4.0."""
+    p = Path(__file__).resolve().parent / "btc_specialist" / "data" / "crypto_market_data_daily_analysis.md"
+    if not p.is_file():
+        return (
+            "*Crypto Market Data — tägliche README-Analyse*\n\n"
+            "_Noch keine Datei._ Einmal täglich ausführen:\n"
+            "`python3 finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`\n\n"
+            "Oder vollständiger BTC-Kontext inkl. gleicher Rohdaten:\n"
+            "`python3 finance_agent/btc_specialist/scripts/pull_btc_context.py`\n\n"
+            "_Cron (UTC 06:00 Beispiel):_\n"
+            "`0 6 * * * cd $HOME && python3 finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`"
+        )
+    try:
+        raw = p.read_text(encoding="utf-8")
+        mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
+    except OSError as e:
+        return f"*crypto-daily* — read error: `{e}`"
+    cap = 3600
+    if len(raw) > cap:
+        body = raw[:cap].rstrip() + "\n\n…_(Telegram gekürzt — Volltext: `crypto_market_data_daily_analysis.md`)_"
+    else:
+        body = raw.strip()
     return (
-        "*Macro-Crypto Context*\n"
-        f"BTC: `{_fmt_price(btc_ind['price'])}` | `{btc_ind['trend']}` | TA `{ta}`\n"
-        f"RSI `{btc_ind['rsi']:.0f}` | WR `{btc_ind['willr']:.0f}` | MACD `{btc_ind['macd_signal_text']}`\n"
-        f"Breadth (top vol alts): `{breadth}`\n"
-        f"Regime: *{regime}*\n"
-        f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
+        f"*Crypto Market Data — daily README analysis*\n"
+        f"_File mtime:_ `{mtime}` _(CC BY 4.0 — not Sygnif TA)_\n\n"
+        f"{body}"
     )
 
 
@@ -2555,8 +2659,8 @@ def cmd_finance_agent(args: str, chat_id: str | None = None) -> str:
         "btc": lambda: cmd_btc(),
         "briefing": lambda: cmd_briefing(),
         "research": lambda: cmd_research(tail or "BTC"),
-        "btc": lambda: cmd_btc(),
         "btc-specialist": lambda: cmd_btc_specialist(),
+        "crypto-daily": lambda: cmd_crypto_market_daily(),
     }
     if sub in subcommands:
         return subcommands[sub]()
@@ -2568,7 +2672,11 @@ def cmd_finance_agent(args: str, chat_id: str | None = None) -> str:
             f"Bitte `/ask …`, `/finance-agent deduce …`, oder einen festen Unterbefehl (`overview`, `trades`).\n"
             f"Rohtext: `{raw}`"
         )
-    return "Unknown /finance-agent command. Use `trades|check|network|network nodes|network docs|overview|cycle|analytics|market|movers|ta <TICK>|btc|briefing|signals|scan|research <TICK>|plays|tendency|macro|deduce|ask`"
+    return (
+        "Unknown /finance-agent command. Use `trades|check|network|network nodes|network docs|overview|cycle|"
+        "analytics|market|movers|ta <TICK>|btc|btc-specialist|crypto-daily|briefing|signals|scan|research <TICK>|"
+        "plays|tendency|macro|deduce|ask`"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3040,10 +3148,14 @@ def _gather_finance_agent_for_agent(args: str) -> str:
         return cmd_briefing()
     if sub == "research":
         return _gather_research_for_agent(tail or "BTC")
-    if sub == "btc":
-        return cmd_btc()
     if sub == "btc-specialist":
         return cmd_btc_specialist()
+    if sub in ("crypto-daily", "cryptodaily", "crypto_md_daily"):
+        return (
+            "=== CRYPTO MARKET DATA — DAILY README ANALYSIS (file) ===\n"
+            + cmd_crypto_market_daily()
+            + "\n=== END CRYPTO-DAILY ==="
+        )
     if sub.isalpha() and 2 <= len(sub) <= 10:
         if not tail:
             return _gather_research_for_agent(sub.upper())
@@ -3052,7 +3164,10 @@ def _gather_finance_agent_for_agent(args: str) -> str:
             "do not treat it as a spot ticker):\n"
             f"{raw}"
         )
-    return f"Unknown /finance-agent subcommand: {raw} (try `trades`, `check`, `network`, `network nodes`, `overview`)"
+    return (
+        f"Unknown /finance-agent subcommand: {raw} (try `trades`, `check`, `network`, "
+        "`crypto-daily`, `network nodes`, `overview`)"
+    )
 
 
 def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
@@ -3431,7 +3546,16 @@ def _briefing(symbols: list[str] | None = None) -> str:
             f"|S:{sup:.4g} R:{res:.4g}"
             f"|TA:{sig['ta_score']} {entry} {lev:.0f}x{exit_part}"
         )
-    return "\n".join(lines) if lines else "No data"
+    core = "\n".join(lines) if lines else "No data"
+    try:
+        import crypto_market_data as _cmd_md
+
+        pipe = _cmd_md.briefing_lines_plain(max_chars=900).strip()
+        if pipe:
+            return f"{core}\n\n{pipe}"
+    except Exception as e:
+        logger.debug("briefing crypto_market_data: %s", e)
+    return core
 
 
 def _build_local_overseer_commentary(prompt: str) -> str:
