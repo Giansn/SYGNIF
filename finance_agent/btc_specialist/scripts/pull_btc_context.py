@@ -18,23 +18,52 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FINANCE_AGENT_DIR = REPO_ROOT / "finance_agent"
 
 
+def _load_dotenv_file(path: Path) -> None:
+    """Parse KEY=VALUE lines into os.environ (setdefault — first loaded wins)."""
+    if not path.is_file():
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        if not k:
+            continue
+        v = v.strip().strip('"').strip("'")
+        os.environ.setdefault(k, v)
+
+
+def _load_repo_env() -> None:
+    """Load secrets from the shared host .env (see ~/xrp_claude_bot/.env) then repo .env."""
+    home = REPO_ROOT.parent
+    for p in (
+        home / "xrp_claude_bot" / ".env",
+        home / "finance_agent" / ".env",
+        REPO_ROOT / ".env",
+    ):
+        _load_dotenv_file(p)
+
+
 def _write_crypto_market_data_bundle(utc: str) -> bool:
-    """All README daily JSONs + markdown analysis (CC BY 4.0); not Sygnif TA."""
+    """All upstream ``data/daily/*.json`` + markdown analysis (CC BY 4.0); not Sygnif TA."""
     sys.path.insert(0, str(FINANCE_AGENT_DIR))
     try:
         from crypto_market_data import (
-            ALL_README_DAILY_PATHS,
             build_daily_analysis_markdown,
             fetch_remote_bundle,
+            list_remote_daily_json_paths,
             write_bundle_json,
         )
     except Exception:
         return False
     try:
-        bundle = fetch_remote_bundle(
-            paths=ALL_README_DAILY_PATHS,
-            timeout_per=15.0,
-        )
+        paths = list_remote_daily_json_paths(timeout=20.0)
+        bundle = fetch_remote_bundle(paths=paths, timeout_per=15.0)
         ds = bundle.get("datasets")
         if not isinstance(ds, dict) or not any(ds.values()):
             return False
@@ -73,16 +102,14 @@ def _write_newhedge_altcoins_correlation(utc: str) -> bool:
     return True
 
 
-def _write_fdn_btc_fundamentals(utc: str) -> bool:
-    if not (os.environ.get("FINANCIALDATA_API_KEY") or "").strip():
-        return False
+def _write_cryptoapis_foundation(utc: str) -> bool:
     sys.path.insert(0, str(FINANCE_AGENT_DIR))
     try:
-        from fdn_fundamentals import write_btc_fundamentals_json  # noqa: PLC0415
+        from cryptoapis_client import write_btc_foundation_json  # noqa: PLC0415
     except Exception:
         return False
     try:
-        return bool(write_btc_fundamentals_json(OUT, utc))
+        return bool(write_btc_foundation_json(OUT, utc))
     except Exception:
         return False
 
@@ -193,6 +220,9 @@ def _write_sygnif_ta_snapshot(h1: list[dict], utc: str) -> None:
     snap = {
         "generated_utc": utc,
         "symbol": "BTCUSDT",
+        "sygnif_ta_timeframe": "1h",
+        "btc_chart_ohlcv_timeframe": "1h",
+        "btc_daily_timeframe": "1d",
         "interval_note": "same 1h series as btc_1h_ohlcv.json",
         "ta_score": ta.get("score"),
         "ta_components": ta.get("components") or {},
@@ -209,6 +239,7 @@ def _write_sygnif_ta_snapshot(h1: list[dict], utc: str) -> None:
 
 
 def main() -> int:
+    _load_repo_env()
     OUT.mkdir(parents=True, exist_ok=True)
     utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -244,10 +275,10 @@ def main() -> int:
     ]
     if (OUT / "btc_sygnif_ta_snapshot.json").is_file():
         files_written.append("btc_sygnif_ta_snapshot.json")
-    if _write_fdn_btc_fundamentals(utc):
-        files_written.append("btc_fdn_fundamentals.json")
     if _write_newhedge_altcoins_correlation(utc):
         files_written.append("btc_newhedge_altcoins_correlation.json")
+    if _write_cryptoapis_foundation(utc):
+        files_written.append("btc_cryptoapis_foundation.json")
 
     if _write_crypto_market_data_bundle(utc):
         files_written.append("btc_crypto_market_data.json")
@@ -256,13 +287,25 @@ def main() -> int:
     manifest = {
         "generated_utc": utc,
         "source": (
-            "Bybit v5 public market API (spot); optional FinancialData.net BTC profile; "
-            "optional NewHedge altcoins correlation; optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)"
+            "Bybit v5 public market API (spot); optional Crypto APIs BTC mainnet + market-data; "
+            "optional NewHedge altcoins correlation; "
+            "optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)"
         ),
         "symbol": "BTCUSDT",
         "files": files_written,
     }
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    sys.path.insert(0, str(REPO_ROOT / "finance_agent" / "btc_specialist"))
+    try:
+        from report import write_btc_specialist_dashboard_json  # noqa: PLC0415
+
+        write_btc_specialist_dashboard_json(OUT, utc)
+        files_written.append("btc_specialist_dashboard.json")
+        manifest["files"] = files_written
+        (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
     print(f"Wrote {OUT} ({utc})")
     return 0

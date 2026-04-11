@@ -1,11 +1,10 @@
 ---
 name: finance-agent
 description: >-
-  Sygnif unified domain (router): strategy + live markets + Telegram bot. Full
-  knowledge base lives in `.cursor/agents/finance-agent.md` — same content as
-  Cursor subagent `finance-agent` and Telegram `/finance-agent` LLM KB.
-  Triggers: crypto, TA, signals, trades, /ta, /btc, /finance-agent, NFI, entry tags,
-  sf_*, orb_*, GitNexus. For BTC-only offline bundle use btc-specialist skill.
+  Sygnif unified domain (router): strategy + live markets + Telegram bot (`bot.py`).
+  Canonical KB: `.cursor/agents/finance-agent.md` (subagent + `/finance-agent` LLM).
+  Triggers: crypto, TA, signals, trades, /ta, /btc, /finance-agent, NFI, tags,
+  sf_*, orb_*, btc_trend profile, GitNexus. BTC-only offline bundle: btc-specialist.
 allowed-tools:
   - Agent
   - Task

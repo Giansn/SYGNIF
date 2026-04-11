@@ -10,7 +10,7 @@ Commands:
   /market          — Top 10 crypto overview
   /movers [1h|24h] — Top gainers & losers
   /ta <TICKER>     — Technical analysis with strategy signals
-  /btc             — BTC specialist offline bundle + optional FDN + optional NewHedge; live TA: /ta BTC
+  /btc             — BTC specialist offline bundle + optional Crypto APIs + NewHedge; live TA: /ta BTC
   /research <TICK> — Full research (market + TA + news + AI)
   /finance-agent network [docs|nodes|nn] — Network submodule; nodes+NN topology + OpenVINO stack
   /finance-agent trades|check — Open positions + closed-trade aggregates (overseer)
@@ -1720,35 +1720,6 @@ def cmd_movers() -> str:
     return "\n".join(lines)
 
 
-def _fdn_telegram_btc_fundamentals_block() -> str:
-    """Optional FinancialData.net BTC profile (Standard tier); empty if no key / error."""
-    try:
-        from fdn_fundamentals import format_telegram_btc_fundamentals_block
-    except ImportError:
-        return ""
-    return format_telegram_btc_fundamentals_block()
-
-
-def _fdn_telegram_btc_fundamentals_one_line() -> str:
-    try:
-        from fdn_fundamentals import format_telegram_btc_fundamentals_one_line
-    except ImportError:
-        return ""
-    return format_telegram_btc_fundamentals_one_line()
-
-
-def _fdn_telegram_briefing_equity_proxy() -> str:
-    """Optional equity proxy (e.g. MSFT) when FDN_BRIEFING_EQUITY_PROXY is set."""
-    proxy = os.environ.get("FDN_BRIEFING_EQUITY_PROXY", "").strip()
-    if not proxy:
-        return ""
-    try:
-        from fdn_fundamentals import format_telegram_equity_proxy_line
-    except ImportError:
-        return ""
-    return format_telegram_equity_proxy_line(proxy)
-
-
 def _newhedge_telegram_altcoins_correlation_block() -> str:
     """Optional NewHedge BTC–altcoin correlation line (Telegram only; not in HTTP ``/briefing`` pipe)."""
     try:
@@ -1756,6 +1727,23 @@ def _newhedge_telegram_altcoins_correlation_block() -> str:
     except ImportError:
         return ""
     return format_telegram_altcoins_correlation_block()
+
+
+def _cryptoapis_telegram_foundation_block() -> str:
+    """Optional Crypto APIs foundation block from ``btc_cryptoapis_foundation.json`` (offline bundle)."""
+    try:
+        from cryptoapis_client import format_telegram_foundation_block
+    except ImportError:
+        return ""
+    return format_telegram_foundation_block()
+
+
+def _cryptoapis_telegram_foundation_one_line() -> str:
+    try:
+        from cryptoapis_client import format_telegram_foundation_one_line
+    except ImportError:
+        return ""
+    return format_telegram_foundation_one_line()
 
 
 def _defillama_telegram_slow_context() -> str:
@@ -1799,7 +1787,7 @@ def _btc_specialist_snapshot_footer() -> str:
 
 
 def cmd_btc() -> str:
-    """Telegram /btc — BTC specialist only (offline bundle + optional FDN/NewHedge). Live Sygnif TA: `/ta BTC`."""
+    """Telegram /btc — BTC specialist only (offline bundle + optional Crypto APIs + NewHedge). Live Sygnif TA: `/ta BTC`."""
     try:
         from btc_specialist import report as _btc_rep
 
@@ -1808,9 +1796,9 @@ def cmd_btc() -> str:
         logger.error("btc_specialist report: %s", e)
         core = f"*BTC specialist*\n\n_Report error:_ `{e}`"
     parts = ["*BTC specialist*", "", core, "", _btc_specialist_snapshot_footer()]
-    fdn = _fdn_telegram_btc_fundamentals_block()
-    if fdn:
-        parts.extend(["", fdn])
+    ca = _cryptoapis_telegram_foundation_block()
+    if ca:
+        parts.extend(["", ca])
     nh = _newhedge_telegram_altcoins_correlation_block()
     if nh:
         parts.extend(["", nh])
@@ -1828,9 +1816,9 @@ def cmd_btc_specialist() -> str:
         logger.error("btc_specialist deep report: %s", e)
         core = f"*BTC specialist (deep)*\n\n_Report error:_ `{e}`"
     parts = ["*BTC specialist (deep)*", "", core, "", _btc_specialist_snapshot_footer()]
-    fdn = _fdn_telegram_btc_fundamentals_block()
-    if fdn:
-        parts.extend(["", fdn])
+    ca = _cryptoapis_telegram_foundation_block()
+    if ca:
+        parts.extend(["", ca])
     nh = _newhedge_telegram_altcoins_correlation_block()
     if nh:
         parts.extend(["", nh])
@@ -1839,17 +1827,16 @@ def cmd_btc_specialist() -> str:
 
 
 def cmd_briefing() -> str:
-    """Telegram / finance-agent: HTTP-parity pipe body + optional FDN lines + HTTP hint + BTC specialist footer.
+    """Telegram / finance-agent: HTTP-parity pipe body + HTTP hint + BTC specialist footer.
 
-    Raw `GET /briefing` stays pipe-only for overseer/LLM consumers; Telegram adds fundamentals when configured.
-    Optional NewHedge BTC–alts correlation line when ``NEWHEDGE_API_KEY`` is set (same as ``/btc``).
+    Raw `GET /briefing` stays pipe-only for overseer/LLM consumers.
+    Optional Crypto APIs one-liner + NewHedge when bundle / keys are configured (same spirit as ``/btc``).
     """
     body = _briefing(None)
     host = FINANCE_AGENT_HTTP_HOST
     port = FINANCE_AGENT_HTTP_PORT
-    fdn_bits = [_fdn_telegram_btc_fundamentals_one_line(), _fdn_telegram_briefing_equity_proxy()]
-    fdn_block = "\n".join(x for x in fdn_bits if x).strip()
-    fdn_section = f"{fdn_block}\n\n" if fdn_block else ""
+    ca_line = _cryptoapis_telegram_foundation_one_line()
+    ca_section = f"{ca_line}\n\n" if ca_line else ""
     nh = _newhedge_telegram_altcoins_correlation_block()
     nh_section = f"{nh}\n\n" if nh else ""
     cmd_md_block = ""
@@ -1866,7 +1853,7 @@ def cmd_briefing() -> str:
     return (
         f"*Briefing* (pipe lines = `GET /briefing` contract)\n\n"
         f"```\n{body}\n```\n\n"
-        f"{fdn_section}"
+        f"{ca_section}"
         f"{nh_section}"
         f"{cmd_md_block}"
         f"_HTTP:_ `http://{host}:{port}/briefing?symbols=BTC,ETH`\n"
@@ -2498,7 +2485,7 @@ def cmd_help() -> str:
         "`/sygnif analytics` — Nur Runtime-Overrides (`strategy_adaptation.json`)\n"
         "`/finance-agent cycle` — gleicher Rohdaten-Bundle wie `/sygnif`\n"
         "`/finance-agent` — Comprehensive research\n"
-        "`/finance-agent briefing` — Pipe briefing (same as HTTP `GET /briefing`; Telegram adds optional FDN lines)\n"
+        "`/finance-agent briefing` — Pipe briefing (same as HTTP `GET /briefing`; Telegram adds optional Crypto APIs + NewHedge)\n"
         "`/finance-agent crypto-daily` — Crypto Market Data: täglicher README-Report (`crypto_market_data_daily_analysis.md`)\n"
         "`/finance-agent network` — [Giansn/Network](https://github.com/Giansn/Network) submodule (short + nodes/NN summary)\n"
         "`/finance-agent network nodes` — topology + `run_npu` / `placement` / `wire_tensor` + optional `NETWORK_NN_STATUS_URL`\n"
@@ -2514,7 +2501,7 @@ def cmd_help() -> str:
         "`/macro` — BTC TA + breadth + same optional DefiLlama block\n"
         "`/movers` — Gainers & losers (24h)\n"
         "`/ta BTC` — TA + strategy signals\n"
-        "`/btc` — BTC specialist bundle (`btc_specialist/report.py`) + optional FDN + optional NewHedge; live TA: `/ta BTC`\n"
+        "`/btc` — BTC specialist bundle (`btc_specialist/report.py`) + optional Crypto APIs + NewHedge; live TA: `/ta BTC`\n"
         "`/btc-specialist` — same stack as `/btc`, longer report (higher char cap)\n"
         "`/finance-agent crypto-daily` — Crypto Market Data README-Tagesreport (Datei; Cron: `run_crypto_market_data_daily.py`)\n"
         "`/research ETH` — Full AI research report\n"
@@ -2583,8 +2570,8 @@ def cmd_crypto_market_daily() -> str:
             "`python3 finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`\n\n"
             "Oder vollständiger BTC-Kontext inkl. gleicher Rohdaten:\n"
             "`python3 finance_agent/btc_specialist/scripts/pull_btc_context.py`\n\n"
-            "_Cron (UTC 06:00 Beispiel):_\n"
-            "`0 6 * * * cd $HOME && python3 finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`"
+            "_Cron (00:00 Europe/Berlin, auf UTC-Servern DST-sicher):_\n"
+            "`0 * * * * [ \"$(TZ=Europe/Berlin date +\\%H)\" = \"00\" ] && CRYPTO_MARKET_DATA_RUN_SCRIPT=$HOME/finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py $HOME/SYGNIF/scripts/cron_crypto_market_data_daily.sh`"
         )
     try:
         raw = p.read_text(encoding="utf-8")

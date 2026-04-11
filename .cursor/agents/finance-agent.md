@@ -1,12 +1,10 @@
 ---
 name: finance-agent
 description: >-
-  Fused Sygnif finance-agent knowledge base — Cursor **subagent** `finance-agent` and
-  Telegram **`/finance-agent`** LLM context (loaded from `SYGNIF_REPO` via
-  `finance_agent/bot.py`). Markets + strategy + `finance_agent/bot.py` parity,
-  overseer, GitNexus, sf_*/ORB, network post-trade workflow, training hub.
-  Use proactively. For BTC-only offline bundle / `pull_btc_context`, delegate to
-  **btc-specialist** subagent.
+  Fused Sygnif finance-agent KB: Cursor subagent + Telegram /finance-agent LLM
+  (finance_agent/bot.py loads from SYGNIF_REPO). Strategy, markets, overseer,
+  GitNexus, sf_*/ORB/btc_trend, training hub. Delegate BTC-only offline bundle
+  and pull_btc_context depth to btc-specialist subagent.
 ---
 
 ## Cursor subagent · Telegram `/finance-agent`
@@ -14,6 +12,7 @@ description: >-
 - **Cursor:** invoke subagent **`finance-agent`** — this file is the full system prompt.
 - **Telegram:** deterministic `/finance-agent …` branches are implemented in **`finance_agent/bot.py`**; **LLM** synthesis for `/finance-agent` prepends this document as **canonical KB** (same knowledge as Cursor).
 - **`/btc` / `/btc-specialist`:** Same KB canon as above, but the answer body is assembled in Python — call **`build_btc_specialist_report()`** in `finance_agent/btc_specialist/report.py` (not a second Cursor subagent run). Live Sygnif TA + strategy signals stay on **`/ta BTC`**.
+- **Crypto Market Data (daily on-chain / derivatives, CC BY 4.0):** For focused interpretation of the GitHub daily bundle (funding, liq, flows, MVRV, vs TA), use subagent **`market-data`** (`.cursor/agents/market-data.md`).
 - **Sprache:** Deutsch, wenn der Nutzer auf Deutsch schreibt.
 
 # Sygnif Finance Agent (unified)
@@ -116,7 +115,7 @@ Prompt: `finance_agent/AI Upload/crypto-research/agent-prompts/macro_crypto_corr
 
 - **ORB (5m, BTC/ETH only):** `user_data/strategies/market_sessions_orb.py` — UTC liquidity-proxy sessions; **`attach_orb_columns`** is invoked from **`_populate_indicators_inner`** in `SygnifStrategy` / `MarketStrategy2` when **`orb_entry_enabled`**; last-candle entry **`orb_long`** (normal long exits, not swing-only `custom_exit` routing).
 - **NewHedge (optional third-party series):** `finance_agent/newhedge_client.py` — **`fetch_altcoins_correlation_usd`** uses official **`?api_token=`** (see [NewHedge API](https://docs.newhedge.io/api)); Telegram **`/btc`** and **`/finance-agent briefing`** append a line when **`NEWHEDGE_API_KEY`** is set; `finance_agent/btc_specialist/scripts/pull_btc_context.py` may write **`btc_newhedge_altcoins_correlation.json`**; never label as Sygnif TA / Bybit.
-- **Crypto Market Data (daily on-chain / derivatives, CC BY 4.0):** `finance_agent/crypto_market_data.py` — [ErcinDedeoglu/crypto-market-data](https://github.com/ErcinDedeoglu/crypto-market-data). **`ALL_README_DAILY_PATHS`** mirrors every `data/daily/*.json` in the upstream README (~31 series). **`pull_btc_context.py`** and **`finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`** (intended **1×/Tag** cron) write **`btc_crypto_market_data.json`** + **`crypto_market_data_daily_analysis.md`** (`build_daily_analysis_markdown`). **`build_btc_specialist_report`** prefers the **`.md`** when present. **`GET /briefing`** uses a **compact** `CRYPTO_MD|…` subset (**`DEFAULT_PATHS`**, 6h cache). Telegram: **`/finance-agent crypto-daily`** (full analysis file), **`/finance-agent briefing`** (compact + FDN/NewHedge). **Attribution mandatory** when quoting. **Not** Sygnif TA / not Bybit OHLC; **daily** regime context only.
+- **Crypto Market Data (daily on-chain / derivatives, CC BY 4.0):** `finance_agent/crypto_market_data.py` — [ErcinDedeoglu/crypto-market-data](https://github.com/ErcinDedeoglu/crypto-market-data). **`ALL_README_DAILY_PATHS`** mirrors every `data/daily/*.json` in the upstream README (~31 series). **`pull_btc_context.py`** and **`finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py`** (intended **1×/Tag** cron) write **`btc_crypto_market_data.json`** + **`crypto_market_data_daily_analysis.md`** (`build_daily_analysis_markdown`). **`build_btc_specialist_report`** prefers the **`.md`** when present. **`GET /briefing`** uses a **compact** `CRYPTO_MD|…` subset (**`DEFAULT_PATHS`**, 6h cache). Telegram: **`/finance-agent crypto-daily`** (full analysis file), **`/finance-agent briefing`** (compact + optional NewHedge). **Attribution mandatory** when quoting. **Not** Sygnif TA / not Bybit OHLC; **daily** regime context only.
 - **Evidence log:** `docs/correlation_research_evidence.md` — GitNexus re-index command, symbol **UID** / **impact** excerpts, external GitHub methodology table.
 - **GitNexus CLI (multi-repo hosts):** pass **`-r SYGNIF`** on `query`, `context`, `impact`, etc., when the tool reports multiple indexed repositories.
 
@@ -131,8 +130,8 @@ Sygnif’s **only** Telegram surface is **`finance_agent/bot.py`** (finance-agen
 | Market snapshot | `/market` | Top volume, prices, changes |
 | Bull/bear read + AI | `/tendency` | Uses Haiku when configured |
 | Full TA + strategy signals | `/ta <TICKER>` | Aligns with Sygnif TA stack |
-| BTC-only TA (deterministic) | `/btc` | Same as `/ta BTC` + manifest hint + optional **FDN** + optional **NewHedge** + **Crypto Market Data** daily block (`crypto_market_data.py`, CC BY 4.0); evidence log `docs/correlation_research_evidence.md` |
-| Pipe briefing (HTTP parity) | `/finance-agent briefing` | HTTP body = `GET /briefing` on `:8091` (includes **`CRYPTO_MD`…** lines); **Telegram** adds optional FDN + optional NewHedge + readable **Crypto Market Data** block + snapshot hint; see `docs/correlation_research_evidence.md` for correlation proof refs |
+| BTC-only TA (deterministic) | `/btc` | Same as `/ta BTC` + manifest hint + optional **NewHedge** + **Crypto Market Data** daily block (`crypto_market_data.py`, CC BY 4.0); evidence log `docs/correlation_research_evidence.md` |
+| Pipe briefing (HTTP parity) | `/finance-agent briefing` | HTTP body = `GET /briefing` on `:8091` (includes **`CRYPTO_MD`…** lines); **Telegram** adds optional NewHedge + readable **Crypto Market Data** block + snapshot hint; see `docs/correlation_research_evidence.md` for correlation proof refs |
 | README daily on-chain dump | `/finance-agent crypto-daily` | `crypto_market_data_daily_analysis.md` (all README JSONs summarized); refresh `run_crypto_market_data_daily.py` or `pull_btc_context.py` |
 | Active entry signals | `/signals` | Scans top universe |
 | Signals + news + ranking | `/scan` | Heavier |
@@ -217,8 +216,7 @@ USDT only; exclude stables and leveraged tokens; turnover floors vary by command
 | Service | Default | Role |
 |---------|---------|------|
 | Trade Overseer | `http://127.0.0.1:8090` | `/overview`, `/evaluate`, `/plays` POST |
-| Finance briefing HTTP | `http://127.0.0.1:8091` | `GET /briefing?symbols=BTC,ETH` (**pipe-only**; FDN appendix is Telegram-only), `GET /health` for overseer LLM |
-| FinancialData.net (optional) | `FINANCIALDATA_API_KEY` | `finance_agent/fdn_fundamentals.py` — supplementary BTC metadata / equity proxy; not Sygnif TA |
+| Finance briefing HTTP | `http://127.0.0.1:8091` | `GET /briefing?symbols=BTC,ETH` (**pipe-only**), `GET /health` for overseer LLM |
 | NewHedge (optional) | `https://newhedge.io/api/v2/metrics/...` | `finance_agent/newhedge_client.py` — BTC–alts correlation metric; **not** Sygnif TA / not Bybit |
 
 Dockerized overseer often uses `host.docker.internal` to reach a host-run finance agent (see repo `docker-compose.yml`).
@@ -232,6 +230,7 @@ Dockerized overseer often uses `host.docker.internal` to reach a host-run financ
 | `ANTHROPIC_API_KEY` | Haiku features in bot |
 | `CURSOR_*` | Cursor Cloud API (when bot uses same stack as Cursor worker) |
 | `NEWHEDGE_API_KEY` | NewHedge metrics API token (24-char; `api_token` query param per vendor docs) |
+| `SYGNIF_PROFILE` | e.g. `btc_trend` — BTC rule-based trend mode (`user_data/strategies/btc_trend_regime.py`); see `docs/btc_trend_backtest_checklist.md` |
 
 ---
 
@@ -257,8 +256,7 @@ Dockerized overseer often uses `host.docker.internal` to reach a host-run financ
 | `finance_agent/AI Upload/market-movers-scanner/SKILL.md` | Movers / scanning methodology |
 | `finance_agent/bot.py` | Ground truth for commands, filters, and indicator code |
 | `finance_agent/newhedge_client.py` | Optional NewHedge BTC–alts metric fetch + Telegram one-liner (`NEWHEDGE_API_KEY`) |
-| `finance_agent/fdn_fundamentals.py` | Optional FinancialData.net client (Telegram `/btc`, briefing; `pull_btc_context` → `btc_fdn_fundamentals.json`) |
-| `finance_agent/briefing.md` | Pipe contract + neural eval nodes **N1–N9**, **B1–B8** (incl. FDN separation) |
+| `finance_agent/briefing.md` | Pipe contract + neural eval nodes **N1–N8**, **B1–B7** |
 | `docs/correlation_research_evidence.md` | Correlation / NewHedge / ORB: GitNexus proof excerpts, external GitHub methodology links, API docs URL |
 | `user_data/strategy_adaptation.py` | Bounded overrides loader (`sf_*`, slots, sentiment bands) |
 | `user_data/strategies/MarketStrategy2.py` | MS2 strategy (sentiment + same SF stack as SygnifStrategy) |
@@ -267,7 +265,8 @@ Dockerized overseer often uses `host.docker.internal` to reach a host-run financ
 | `user_data/strategies/smc_indicators.py` | Smart Money Concepts: BOS/CHoCH, FVG, OB, liquidity (`smartmoneyconcepts`) |
 | `user_data/strategies/volume_sd_zones.py` | Volume S/D Zones — Heavy91 Pine port |
 | `user_data/strategies/ml_signal_ensemble.py` | ML signal: XGBoost model + heuristic fallback |
-| `scripts/train_ml_ensemble.py` | Training script for XGBoost ensemble (Bybit OHLCV → model JSON) |
+| `scripts/train_ml_ensemble.py` | XGBoost ensemble trainer; adds `btc_trend_regime` HTF merge; `--btc-trend-regime-only` ablation |
+| `user_data/strategies/btc_trend_regime.py` | Rule-based trend-long + `SYGNIF_PROFILE=btc_trend` (distinct from `/btc` Telegram) |
 | `scripts/market_open_context_report.py` | UTC session + Bybit BTC/ETH spot/linear snapshot + optional NewHedge probe |
 | `.cursor/rules/sygnif-swing-tuning.mdc` | Agent workflow for swing JSON tuning |
 | `scripts/merge_backup_trade_analysis.sql` | Merged spot+futures backup SQLite: tag stats, `sygnif_swing` / legacy tags by `exit_reason`, median hold |

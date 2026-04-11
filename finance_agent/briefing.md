@@ -9,10 +9,10 @@
 | Surface | Contract | Implementation |
 |--------|-----------|----------------|
 | HTTP | `GET /briefing` and `GET /briefing?symbols=BTC,ETH,...` | `finance_agent/bot.py` → `_briefing()`, `_BriefingHandler` |
-| Telegram | `/finance-agent briefing` | `cmd_briefing()` — same **pipe body** as HTTP + optional **FDN** lines + optional **NewHedge** BTC–alts correlation line + footer |
-| BTC shortcut | `/btc` | `cmd_btc()` = `cmd_ta("BTC")` + snapshot footer + optional **FDN** + optional **NewHedge** (`newhedge_client.py`, `NEWHEDGE_API_KEY`) |
+| Telegram | `/finance-agent briefing` | `cmd_briefing()` — same **pipe body** as HTTP + optional **NewHedge** BTC–alts correlation line + footer |
+| BTC shortcut | `/btc` | `cmd_btc()` = `cmd_ta("BTC")` + snapshot footer + optional **NewHedge** (`newhedge_client.py`, `NEWHEDGE_API_KEY`) |
 | Live TA / score / tags | Always | `calc_indicators`, `calc_ta_score`, `detect_signals` in `finance_agent/bot.py` |
-| Offline BTC bundle | Stale-safe context | `finance_agent/btc_specialist/data/` (`manifest.json`, `btc_sygnif_ta_snapshot.json`, optional `btc_fdn_fundamentals.json`, OHLCV JSON) — refresh: `python3 finance_agent/btc_specialist/scripts/pull_btc_context.py` |
+| Offline BTC bundle | Stale-safe context | `finance_agent/btc_specialist/data/` (`manifest.json`, `btc_sygnif_ta_snapshot.json`, OHLCV JSON) — refresh: `python3 finance_agent/btc_specialist/scripts/pull_btc_context.py` |
 
 Sygnif TA **bands and tag names** must match `detect_signals`, not generic TradingView defaults — see `.cursor/skills/btc-specialist/SKILL.md` and `btc_specialist/PROMPT.md`.
 
@@ -44,7 +44,7 @@ ETH $3,200 downtrend|RSI:48 WR:-45 StRSI:52|MACD:bear CMF:-0.05|S:3100 R:3300|TA
 ## 3. Neural evaluation nodes — how to use
 
 - **When:** After an LLM (or human) produces text that **quotes, interprets, or trades on** briefing, `/btc`, or `btc_sygnif_ta_snapshot.json`.
-- **How:** Run each applicable node; record **PASS** / **WARN** / **FAIL** and a one-line reason. **FAIL** on any **N1–N8** or **B1–B7** node when quoted facts contradict the source; **N9** / **B8** are **FDN** separation checks (often **WARN**).
+- **How:** Run each applicable node; record **PASS** / **WARN** / **FAIL** and a one-line reason. **FAIL** on any **N1–N8** or **B1–B7** node when quoted facts contradict the source.
 - **WARN:** Staleness, ambiguous wording, or missing caveats — not a numeric lie.
 
 ---
@@ -63,11 +63,10 @@ Multi-line `/briefing` or HTTP body (BTC + ETH + optional symbols). Parent input
 | **N6** | **Horizon honesty** | Model states briefing is **snapshot / 1h-based** where relevant; does not claim sub-minute precision. |
 | **N7** | **Query contract** | If `symbols=` was used, evaluation references the same symbol set (max symbols per server logic). |
 | **N8** | **Cross-asset hygiene** | ETH conclusions are not silently attributed to BTC (or vice versa) unless the user asked for a pair read. |
-| **N9** | **FDN separation** | Any **FinancialData.net** line is labeled as **FDN** / not Sygnif; equity proxy is not conflated with crypto pipe lines. |
 
 ---
 
-## 5. BTC specialist nodes (`B1`–`B8`)
+## 5. BTC specialist nodes (`B1`–`B7`)
 
 Parent input = **`/btc` or `cmd_ta("BTC")` block** and/or **`btc_specialist/data/*.json`**.
 
@@ -80,31 +79,19 @@ Parent input = **`/btc` or `cmd_ta("BTC")` block** and/or **`btc_specialist/data
 | **B5** | **Snapshot consistency** | If `btc_sygnif_ta_snapshot.json` exists, quoted score/signals match file; if file missing/outdated, model says so. |
 | **B6** | **No orders** | Output does not imply order placement or `dry_run` changes unless user explicitly requested ops. |
 | **B7** | **OHLC discipline** | Structural claims (higher highs, range) are grounded in `btc_1h_ohlcv.json` / `btc_daily_90d.json` when not using live API. |
-| **B8** | **FDN vs Sygnif** | `btc_fdn_fundamentals.json` (market cap, supply, …) is **reference metadata**, not `calc_ta_score` / `detect_signals`; never substitute for Bybit TA. |
 
 ---
 
 ## 6. Combined run (Telegram `cmd_briefing`)
 
-Telegram wraps the same `_briefing()` body plus optional **FDN** lines (BTC one-liner + optional `FDN_BRIEFING_EQUITY_PROXY`), then **HTTP hint** and **`_btc_specialist_snapshot_footer()`**. Evaluators should:
+Telegram wraps the same `_briefing()` body plus optional **NewHedge** line, then **HTTP hint** and **`_btc_specialist_snapshot_footer()`**. Evaluators should:
 
-1. Run **N1–N9** on the fenced briefing lines **and** any FDN appendix.
-2. Run **B2, B6, B8** (and **B5** if snapshot files are in context) on the footer / any BTC-only narrative.
-
----
-
-## 7. FinancialData.net (optional fundamentals)
-
-| Piece | Role |
-|-------|------|
-| `FINANCIALDATA_API_KEY` | Enables FDN requests (`finance_agent/fdn_fundamentals.py`). |
-| `FDN_BRIEFING_EQUITY_PROXY` | Optional US ticker (e.g. `MSFT`) for a one-line **equity** proxy on Telegram briefing only. |
-| `btc_fdn_fundamentals.json` | Written by `pull_btc_context.py` when the key is set; slim `crypto-information` subset for Cursor/offline. |
-| HTTP `GET /briefing` | **Unchanged** — pipe-only; FDN is **Telegram-only** to keep overseer/LLM pipe contract stable. |
+1. Run **N1–N8** on the fenced briefing lines.
+2. Run **B2, B6** (and **B5** if snapshot files are in context) on the footer / any BTC-only narrative.
 
 ---
 
-## 8. Machine-readable node index (optional parsers)
+## 7. Machine-readable node index (optional parsers)
 
 ```json
 {
@@ -118,25 +105,22 @@ Telegram wraps the same `_briefing()` body plus optional **FDN** lines (BTC one-
     {"id": "N6", "scope": "finance_briefing", "severity": "warn", "name": "horizon_honesty"},
     {"id": "N7", "scope": "finance_briefing", "severity": "fail", "name": "query_contract"},
     {"id": "N8", "scope": "finance_briefing", "severity": "fail", "name": "cross_asset_hygiene"},
-    {"id": "N9", "scope": "finance_briefing", "severity": "warn", "name": "fdn_separation"},
     {"id": "B1", "scope": "btc_specialist", "severity": "fail", "name": "scope_btcusdt"},
     {"id": "B2", "scope": "btc_specialist", "severity": "warn", "name": "live_vs_offline"},
     {"id": "B3", "scope": "btc_specialist", "severity": "warn", "name": "telegram_parity"},
     {"id": "B4", "scope": "btc_specialist", "severity": "fail", "name": "sygnif_semantics"},
     {"id": "B5", "scope": "btc_specialist", "severity": "fail", "name": "snapshot_consistency"},
     {"id": "B6", "scope": "btc_specialist", "severity": "fail", "name": "no_orders"},
-    {"id": "B7", "scope": "btc_specialist", "severity": "warn", "name": "ohlc_discipline"},
-    {"id": "B8", "scope": "btc_specialist", "severity": "fail", "name": "fdn_vs_sygnif"}
+    {"id": "B7", "scope": "btc_specialist", "severity": "warn", "name": "ohlc_discipline"}
   ]
 }
 ```
 
 ---
 
-## 9. Related files
+## 8. Related files
 
-- `finance_agent/bot.py` — `_briefing`, `cmd_briefing`, `cmd_btc`, `_btc_specialist_snapshot_footer`, FDN helpers
-- `finance_agent/fdn_fundamentals.py` — FDN client + Telegram formatters
+- `finance_agent/bot.py` — `_briefing`, `cmd_briefing`, `cmd_btc`, `_btc_specialist_snapshot_footer`
 - `finance_agent/btc_specialist/README.md` — data layout
 - `finance_agent/btc_specialist/PROMPT.md` — BTC sub-agent stub
 - `.cursor/skills/btc-specialist/SKILL.md` — Cursor skill

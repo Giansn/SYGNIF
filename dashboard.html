@@ -269,6 +269,16 @@ tr:hover td { background: #ffffff04; }
   font-weight: 600;
   border: 1px solid #5ae0b515;
 }
+.tag.side-long {
+  background: color-mix(in srgb, var(--g) 16%, transparent);
+  color: var(--g);
+  border-color: color-mix(in srgb, var(--g) 40%, transparent);
+}
+.tag.side-short {
+  background: color-mix(in srgb, var(--r) 16%, transparent);
+  color: var(--r);
+  border-color: color-mix(in srgb, var(--r) 40%, transparent);
+}
 
 .bar-wrap {
   width: 60px; height: 4px;
@@ -310,6 +320,12 @@ tr:hover td { background: #ffffff04; }
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 12px;
+}
+.tc-pair-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
 }
 .tc-pair {
   font-size: 18px;
@@ -576,6 +592,89 @@ tr:hover td { background: #ffffff04; }
   padding: 0 2px;
 }
 
+/* BTC context — recovered panel (linear proj + S/R + optional bundles; transcript df9731fc-ade7-4334-a147-3f73d50a5a3b) */
+.portfolio-chart-wrap.btc-context-wrap { margin-bottom: 24px; }
+.btc-panel-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr);
+  gap: 20px 28px;
+  align-items: start;
+}
+.btc-chart-col { min-width: 0; }
+.btc-chart-col .chart-svg-wrap {
+  width: 100%;
+  height: 220px;
+  min-height: 200px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  overflow: hidden;
+}
+.btc-chart-col .btc-chart-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.btc-chart-col .btc-mini-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t3);
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.btc-legend-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 10px;
+  color: var(--t3);
+  margin-top: 8px;
+  font-family: var(--mono);
+}
+.btc-legend-inner i { display: inline-block; width: 10px; height: 3px; margin-right: 4px; vertical-align: middle; border-radius: 1px; }
+.btc-analysis-col {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t2);
+  padding: 4px 4px 8px 0;
+  overflow-y: auto;
+}
+.btc-analysis-col .btc-sec {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--bd);
+}
+.btc-analysis-col .btc-sec:last-of-type { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.btc-analysis-col .btc-sec-h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.3px;
+  color: var(--t3);
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+.btc-analysis-col .btc-sec-p { color: var(--t1); font-weight: 500; }
+.btc-analysis-col .btc-sec-p strong { color: var(--ac); font-weight: 700; }
+.btc-analysis-col code { font-family: var(--mono); font-size: 11px; color: var(--y); }
+.btc-context-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bd);
+  font-size: 10px;
+  color: var(--t3);
+  font-family: var(--mono);
+  line-height: 1.45;
+}
+.btc-axis-text { font-size: 9px; fill: var(--t3); font-family: var(--mono); }
+.btc-axis-text.y { font-size: 8px; }
+@media (max-width: 768px) {
+  .btc-panel-split { grid-template-columns: 1fr; }
+  .btc-analysis-col { max-height: none !important; }
+}
+
 /* Footer */
 .foot {
   text-align: center;
@@ -672,6 +771,16 @@ tr:hover td { background: #ffffff04; }
     <div class="chart-dates" id="chart-dates"></div>
   </div>
 
+  <div class="portfolio-chart-wrap btc-context-wrap fade-in">
+    <div class="sec-head">
+      <div class="sec-t">BTC context</div>
+      <div class="sec-count" id="btc-snap-age">bundle —</div>
+    </div>
+    <div id="btc-tracker">
+      <div class="empty" style="padding:24px">Loading BTC chart…</div>
+    </div>
+  </div>
+
   <div class="sec">
     <div class="sec-head"><div class="sec-t">Open Positions</div><div class="sec-count" id="pos-count"></div></div>
     <div class="card desktop-table" style="overflow-x:auto">
@@ -702,9 +811,9 @@ tr:hover td { background: #ffffff04; }
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Pair</th><th>P/L %</th><th>P/L</th><th>Dur</th><th>Entry</th><th>Exit</th>
+          <th>Pair</th><th>Side</th><th>P/L %</th><th>P/L</th><th>Dur</th><th>Entry</th><th>Exit</th>
         </tr></thead>
-        <tbody id="closed-tbody"><tr><td colspan="6" class="empty">No closed trades yet</td></tr></tbody>
+        <tbody id="closed-tbody"><tr><td colspan="7" class="empty">No closed trades yet</td></tr></tbody>
       </table>
     </div>
     <div class="trade-cards" id="closed-cards"></div>
@@ -729,7 +838,6 @@ let closedShowAll = false;
 let chartTF = 1;
 let _dailyCache = null;
 let _tradesCache = [];
-
 /* ── Auth ── */
 async function autoLogin() {
   const r = await fetch(`${API}/api/v1/token/login`, {
@@ -957,6 +1065,556 @@ function updatePortfolioChart() {
     rEl.style.color = trend ? 'var(--g)' : 'var(--r)';
   }
 }
+
+function btcFmtNum(x) {
+  if (x == null || x === '' || isNaN(Number(x))) return '—';
+  const n = Number(x);
+  return n >= 10000 ? (n / 1000).toFixed(1) + 'k' : n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function btcHtmlEsc(s) {
+  if (s == null || s === '') return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function btcLinReg(ys) {
+  const n = ys.length;
+  if (n < 2) return { slope: 0, intercept: ys[0] || 0, n };
+  let sx = 0, sy = 0, sxy = 0, sxx = 0;
+  for (let i = 0; i < n; i++) {
+    sx += i; sy += ys[i]; sxy += i * ys[i]; sxx += i * i;
+  }
+  const d = n * sxx - sx * sx;
+  const slope = d === 0 ? 0 : (n * sxy - sx * sy) / d;
+  const intercept = (sy - slope * sx) / n;
+  return { slope, intercept, n };
+}
+
+/** Compact UTC label for chart axis (ms). */
+function btcFmtUtcAxis(ms) {
+  if (ms == null || ms === '') return '';
+  const d = new Date(Number(ms));
+  if (isNaN(d.getTime())) return '';
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  const day = d.getUTCDate();
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  return `${mon} ${day} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function btcPriceAxisLabel(y) {
+  if (y == null || isNaN(y)) return '';
+  const n = Number(y);
+  if (n >= 10000) return (n / 1000).toFixed(1) + 'k';
+  if (n >= 1000) return n.toFixed(0);
+  return n.toFixed(0);
+}
+
+/** Tick indices on 1h bars: ~12h spacing, always include first & last. */
+function btcBarTickIndices(bars) {
+  const n = bars.length;
+  if (n < 2) return [0];
+  let step = 12;
+  if (n <= 36) step = 6;
+  if (n <= 18) step = 3;
+  if (n <= 9) step = 1;
+  const out = [];
+  for (let i = 0; i < n; i += step) out.push(i);
+  if (out[out.length - 1] !== n - 1) out.push(n - 1);
+  return out;
+}
+
+function btcBuildChartSvg(bars, projYs, support, resistance, h24, l24) {
+  const W = 800, H = 248, padL = 56, padR = 12, padT = 10, padB = 44;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const n = bars.length;
+  const np = projYs.length;
+  const total = n + np;
+  if (total < 2) return '';
+  const closes = bars.map(b => b.c);
+  const allY = [...closes, ...projYs];
+  let ymin = Math.min(...allY, support, resistance);
+  let ymax = Math.max(...allY, support, resistance);
+  if (h24 != null && l24 != null && !isNaN(h24) && !isNaN(l24)) {
+    ymin = Math.min(ymin, l24); ymax = Math.max(ymax, h24);
+  }
+  const span = ymax - ymin || 1;
+  const padY = span * 0.05;
+  ymin -= padY; ymax += padY;
+  const yScale = (y) => padT + innerH - ((y - ymin) / (ymax - ymin)) * innerH;
+  const xScale = (i) => padL + (i / (total - 1)) * innerW;
+  let grid = '';
+  const yLbls = [];
+  for (let g = 0; g <= 4; g++) {
+    const gy = padT + (g / 4) * innerH;
+    const yVal = ymax - (g / 4) * (ymax - ymin);
+    grid += `<line class="grid-line" x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}"/>`;
+    yLbls.push(`<text class="btc-axis-text y" x="${padL - 6}" y="${(gy + 4).toFixed(1)}" text-anchor="end">${btcPriceAxisLabel(yVal)}</text>`);
+  }
+  let dayBreaks = '';
+  for (let i = 1; i < n; i++) {
+    const t0 = bars[i - 1].t, t1 = bars[i].t;
+    if (t0 == null || t1 == null) continue;
+    const a = new Date(Number(t0));
+    const b = new Date(Number(t1));
+    if (a.getUTCDate() !== b.getUTCDate() || a.getUTCMonth() !== b.getUTCMonth() || a.getUTCFullYear() !== b.getUTCFullYear()) {
+      const x = xScale(i);
+      dayBreaks += `<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT + innerH).toFixed(1)}" stroke="var(--bd)" stroke-width="1" stroke-dasharray="4 6" opacity="0.65"/>`;
+    }
+  }
+  const hLine = (y, color, dash) => {
+    if (y == null || isNaN(y)) return '';
+    const yy = yScale(y);
+    return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-dasharray="${dash}" opacity="0.88"/>`;
+  };
+  const yTop = Math.min(yScale(h24 != null ? h24 : ymax), yScale(l24 != null ? l24 : ymin));
+  const yBot = Math.max(yScale(h24 != null ? h24 : ymax), yScale(l24 != null ? l24 : ymin));
+  const band = h24 != null && l24 != null && !isNaN(h24) && !isNaN(l24)
+    ? `<rect x="${padL}" y="${yTop.toFixed(1)}" width="${innerW.toFixed(1)}" height="${(yBot - yTop).toFixed(1)}" fill="var(--ac)" opacity="0.06"/>`
+    : '';
+  const linePts = closes.map((c, i) => `${xScale(i).toFixed(1)},${yScale(c).toFixed(1)}`).join(' ');
+  const baseY = H - padB;
+  const firstX = xScale(0);
+  const lastX = xScale(n - 1);
+  const areaPts = `${firstX.toFixed(1)},${baseY.toFixed(1)} ${linePts} ${lastX.toFixed(1)},${baseY.toFixed(1)}`;
+  const projLine = projYs.length
+    ? projYs.map((c, j) => `${xScale(n + j).toFixed(1)},${yScale(c).toFixed(1)}`).join(' ')
+    : '';
+  const bridge = projYs.length
+    ? `<line x1="${xScale(n - 1).toFixed(1)}" y1="${yScale(closes[n - 1]).toFixed(1)}" x2="${xScale(n).toFixed(1)}" y2="${yScale(projYs[0]).toFixed(1)}" stroke="var(--y)" stroke-width="1" stroke-dasharray="3 3" opacity="0.8"/>`
+    : '';
+  const lnColor = 'var(--ac)';
+  let xTicks = '';
+  const tickIdx = btcBarTickIndices(bars);
+  for (const i of tickIdx) {
+    const x = xScale(i);
+    const t = bars[i] && bars[i].t;
+    const lab = btcFmtUtcAxis(t);
+    if (!lab) continue;
+    xTicks += `<line x1="${x.toFixed(1)}" y1="${(padT + innerH).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(padT + innerH + 5).toFixed(1)}" stroke="var(--t3)" stroke-width="1" opacity="0.5"/>`;
+    xTicks += `<text class="btc-axis-text" x="${x.toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="middle">${lab}</text>`;
+  }
+  const t0 = bars[0] && bars[0].t;
+  const t1 = bars[n - 1] && bars[n - 1].t;
+  const ariaSpan = t0 && t1 ? `UTC ${btcFmtUtcAxis(t0)} to ${btcFmtUtcAxis(t1)}` : 'BTC 1h';
+  return `<svg class="portfolio-svg btc-chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="BTC 1h closes ${ariaSpan} projection dashed">
+  <defs>
+    <linearGradient id="btcChartGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" style="stop-color:${lnColor};stop-opacity:0.22"/>
+      <stop offset="100%" style="stop-color:${lnColor};stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+  ${grid}
+  ${yLbls.join('')}
+  ${dayBreaks}
+  ${band}
+  ${hLine(support, 'var(--g)', '5 4')}
+  ${hLine(resistance, 'var(--r)', '5 4')}
+  ${hLine(l24, 'var(--t3)', '2 3')}
+  ${hLine(h24, 'var(--t3)', '2 3')}
+  <polygon fill="url(#btcChartGrad)" points="${areaPts}" opacity="0.9"/>
+  <polyline fill="none" stroke="${lnColor}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="${linePts}"/>
+  ${bridge}
+  ${projLine ? `<polyline fill="none" stroke="var(--y)" stroke-width="1.4" stroke-dasharray="5 4" points="${projLine}"/>` : ''}
+  ${xTicks}
+</svg>`;
+}
+function btcBuildAnalysisColumn(snap, ticker, seg, sup, res, projYs, caRes) {
+  const ind = snap?.indicators || {};
+  const entryRaw = snap?.entries ?? snap?.signals;
+  const entryList = Array.isArray(entryRaw) ? entryRaw : entryRaw != null && entryRaw !== '' ? [entryRaw] : [];
+  const trendStr = ind.trend != null ? String(ind.trend) : '';
+  const upTrend = /uptrend/i.test(trendStr);
+  const downTrend = /downtrend/i.test(trendStr);
+  const strong = /strong/i.test(trendStr);
+  const macd = ind.macd_signal_text != null ? String(ind.macd_signal_text) : '';
+  const taRaw = snap?.ta_score;
+  const ta = taRaw != null ? Number(taRaw) : null;
+  const rsi = ind.rsi != null ? Number(ind.rsi) : null;
+  const bbRaw = ind.bb_position != null ? String(ind.bb_position).replace('%', '') : null;
+  const bb = bbRaw != null ? Number(bbRaw) : null;
+  const spot = ind.price != null ? Number(ind.price) : (ticker && ticker.lastPrice ? Number(ticker.lastPrice) : null);
+
+  // — Trend signal —
+  let trendEmoji = '⚪', trendNote = '';
+  if (upTrend) { trendEmoji = strong ? '🟢' : '🟡'; }
+  else if (downTrend) { trendEmoji = strong ? '🔴' : '🟠'; }
+  let trendLine = `${trendEmoji} <strong>${btcHtmlEsc(trendStr) || '—'}</strong>`;
+  if (upTrend && macd === 'Bearish') trendNote = ' — ⚠️ MACD bearish vs uptrend: expect chop, not a clean run';
+  else if (downTrend && macd === 'Bullish') trendNote = ' — ⚠️ MACD bullish vs downtrend: bounce risk, confirm with volume';
+  else if (upTrend && macd === 'Bullish') trendNote = ' — trend + momentum aligned bullish';
+  else if (downTrend && macd === 'Bearish') trendNote = ' — trend + momentum aligned bearish';
+
+  // — TA score interpretation —
+  let taEmoji = '⚪', taNote = '';
+  if (ta != null) {
+    if (ta >= 65) { taEmoji = '🟢'; taNote = 'strong buy zone (≥65)'; }
+    else if (ta >= 50) { taEmoji = '🟡'; taNote = 'leaning bullish but not strong'; }
+    else if (ta >= 35) { taEmoji = '⚪'; taNote = 'no-man\'s land — no clear edge'; }
+    else if (ta >= 25) { taEmoji = '🟠'; taNote = 'leaning bearish'; }
+    else { taEmoji = '🔴'; taNote = 'strong sell zone (≤25)'; }
+  }
+
+  // — RSI interpretation —
+  let rsiEmoji = '⚪', rsiNote = '';
+  if (rsi != null) {
+    if (rsi >= 70) { rsiEmoji = '🔴'; rsiNote = 'overbought → pullback risk'; }
+    else if (rsi >= 60) { rsiEmoji = '🟡'; rsiNote = 'elevated, watch for rejection'; }
+    else if (rsi >= 40) { rsiEmoji = '⚪'; rsiNote = 'neutral range'; }
+    else if (rsi >= 30) { rsiEmoji = '🟠'; rsiNote = 'approaching oversold'; }
+    else { rsiEmoji = '🟢'; rsiNote = 'oversold → bounce candidate'; }
+  }
+
+  // — BB position —
+  let bbNote = '';
+  if (bb != null) {
+    if (bb >= 90) bbNote = 'near upper band → extended, mean-reversion risk';
+    else if (bb >= 70) bbNote = 'upper half → bullish but stretched';
+    else if (bb >= 30) bbNote = 'mid-band → no edge from bands';
+    else if (bb >= 10) bbNote = 'lower half → bearish but watch for reversal';
+    else bbNote = 'near lower band → oversold, bounce candidate';
+  }
+
+  // — Entries interpretation —
+  let entryLine = '';
+  if (entryList.length) {
+    const hasLong = entryList.some(e => /long/i.test(e) && !/short/i.test(e));
+    const hasShort = entryList.some(e => /short/i.test(e));
+    const ambig = entryList.some(e => /ambiguous/i.test(e));
+    if (ambig && hasLong && hasShort) entryLine = '⚪ No clear entry — both long and short signals (ambiguous)';
+    else if (hasLong && !hasShort) entryLine = '🟢 Entry signals: long bias';
+    else if (hasShort && !hasLong) entryLine = '🔴 Entry signals: short bias';
+    else if (hasLong && hasShort) entryLine = '⚠️ Conflicting entries: long + short';
+    else entryLine = `Signals: ${entryList.join(', ')}`;
+  }
+
+  const tendency = `<div style="display:grid;gap:4px 0;font-size:12px;line-height:1.55">` +
+    `<div>${trendLine}${trendNote}</div>` +
+    `<div>${taEmoji} TA score <strong>${ta ?? '—'}</strong>/100 — ${taNote || '—'}</div>` +
+    `<div>${rsiEmoji} RSI <strong>${rsi != null ? rsi.toFixed(1) : '—'}</strong> — ${rsiNote || '—'}</div>` +
+    `<div>📊 Bollinger <strong>${bbRaw != null ? bbRaw + '%' : '—'}</strong> — ${bbNote || '—'}</div>` +
+    (entryLine ? `<div>${entryLine}</div>` : '') +
+    `</div>`;
+
+  // — S/R section —
+  const lastClose = seg.length ? seg[seg.length - 1] : 0;
+  const implied = lastClose && projYs.length
+    ? ((projYs[projYs.length - 1] - lastClose) / lastClose) * 100
+    : 0;
+  const rng24 = ticker && ticker.lowPrice24h && ticker.highPrice24h
+    ? `${btcFmtNum(ticker.lowPrice24h)} – ${btcFmtNum(ticker.highPrice24h)}`
+    : '—';
+  const spotStr = spot != null ? '$' + spot.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—';
+  const distSup = spot && sup ? ((spot - sup) / sup * 100).toFixed(1) : null;
+  const distRes = spot && res ? ((res - spot) / spot * 100).toFixed(1) : null;
+
+  const sr = `<div style="display:grid;gap:4px 0;font-size:12px;line-height:1.55">` +
+    `<div>💰 BTC <strong>${spotStr}</strong></div>` +
+    `<div>🟢 Support <strong>${btcFmtNum(sup)}</strong>${distSup ? ` (${distSup}% below spot)` : ''} — 48h structural low</div>` +
+    `<div>🔴 Resistance <strong>${btcFmtNum(res)}</strong>${distRes ? ` (${distRes}% above spot)` : ''} — 48h structural high</div>` +
+    `<div>📏 24h range ${rng24}</div>` +
+    (seg.length >= 2 && projYs.length ? `<div>📐 12h projection ${implied >= 0 ? '+' : ''}${implied.toFixed(2)}% <span style="color:var(--t3)">(linear heuristic, not a forecast)</span></div>` : '') +
+    `</div>`;
+
+  // — Crypto APIs —
+  const s = caRes && caRes.summary ? caRes.summary : {};
+  let cryptoApisHtml = '';
+  if (caRes && typeof s === 'object' && Object.keys(s).length) {
+    const rate = s.btc_usd_rate != null ? '$' + Number(s.btc_usd_rate).toLocaleString(undefined, { maximumFractionDigits: 0 }) : null;
+    const bits = [];
+    if (s.block_height != null) bits.push(`⛏️ Block <strong>${Number(s.block_height).toLocaleString()}</strong>`);
+    if (s.transactions_count != null) bits.push(`${Number(s.transactions_count).toLocaleString()} txs`);
+    if (rate) bits.push(`BTC/USD ${rate}`);
+    cryptoApisHtml = bits.join(' · ');
+  } else {
+    cryptoApisHtml = 'Crypto APIs data unavailable — set <code>cryptoapi_Token</code> in <code>.env</code>';
+  }
+  return `
+    <div class="btc-sec"><div class="btc-sec-h">BTC snapshot</div><div class="btc-sec-p">${tendency}</div></div>
+    <div class="btc-sec"><div class="btc-sec-h">Key levels</div><div class="btc-sec-p">${sr}</div></div>
+    <div class="btc-sec"><div class="btc-sec-h">On-chain (Crypto APIs)</div><div class="btc-sec-p">${cryptoApisHtml}</div></div>`;
+}
+
+function cmdLastN(doc, n) {
+  if (!doc || !doc.data || !doc.data.length) return [];
+  return doc.data.slice(-n);
+}
+function cmdVal(pt) { return pt && pt.value != null ? Number(pt.value) : null; }
+function cmdFmt(x) {
+  if (x == null || isNaN(x)) return '—';
+  const ax = Math.abs(x);
+  if (ax >= 1e9) return (x / 1e9).toFixed(1) + 'B';
+  if (ax >= 1e6) return (x / 1e6).toFixed(1) + 'M';
+  if (ax >= 1e3) return (x / 1e3).toFixed(1) + 'k';
+  if (ax >= 1) return x.toFixed(2);
+  if (ax >= 0.001) return x.toFixed(4);
+  return x.toPrecision(3);
+}
+
+function btcBuildCryptoMarketDataHtml(cmdBundle) {
+  if (!cmdBundle || typeof cmdBundle !== 'object') return '';
+  const ds = cmdBundle.datasets;
+  if (!ds || typeof ds !== 'object') return '';
+
+  function metric(file) {
+    const doc = ds[file];
+    if (!doc) return null;
+    const tail = cmdLastN(doc, 8);
+    if (!tail.length) return null;
+    const v = cmdVal(tail[tail.length - 1]);
+    if (v == null) return null;
+    const prev = tail.length >= 2 ? cmdVal(tail[tail.length - 2]) : null;
+    let pct = null;
+    if (prev != null && prev !== 0) pct = ((v - prev) / Math.abs(prev)) * 100;
+    const avg7 = tail.length >= 3
+      ? tail.slice(0, -1).reduce((s, p) => s + (cmdVal(p) || 0), 0) / (tail.length - 1)
+      : null;
+    return { v, pct, avg7 };
+  }
+
+  const rows = [];
+  function row(emoji, label, signal, cls) {
+    rows.push(`<div style="display:flex;align-items:baseline;gap:8px;padding:3px 0">` +
+      `<span style="width:18px;text-align:center;flex-shrink:0">${emoji}</span>` +
+      `<span style="font-weight:600;min-width:120px">${btcHtmlEsc(label)}</span>` +
+      `<span class="${cls}" style="flex:1">${signal}</span></div>`);
+  }
+
+  // 1. Exchange Netflow — negative = outflow = accumulation (bullish)
+  const nf = metric('btc_exchange_netflow.json');
+  if (nf) {
+    const tag = nf.v < -50 ? '🟢 Outflow (accumulation)' : nf.v > 50 ? '🔴 Inflow (sell pressure)' : '⚪ Neutral';
+    row(nf.v < -50 ? '🟢' : nf.v > 50 ? '🔴' : '⚪', 'Exchange Flow',
+      `${cmdFmt(nf.v)} BTC net — ${nf.v < -50 ? 'coins leaving exchanges → accumulation bias' : nf.v > 50 ? 'coins entering exchanges → potential sell pressure' : 'balanced flow'}`,
+      nf.v < -50 ? 'up' : nf.v > 50 ? 'dn' : '');
+  }
+
+  // 2. Whale Ratio — >0.85 heavy whale selling, <0.5 retail-dominated
+  const wr = metric('btc_exchange_whale_ratio.json');
+  if (wr) {
+    row(wr.v >= 0.85 ? '🔴' : wr.v <= 0.5 ? '🟢' : '⚪', 'Whale Ratio',
+      `${wr.v.toFixed(2)} — ${wr.v >= 0.85 ? 'whales dominating inflows → watch for dump' : wr.v >= 0.7 ? 'moderate whale presence' : 'retail-driven flow'}`,
+      wr.v >= 0.85 ? 'dn' : '');
+  }
+
+  // 3. Funding Rate — negative = shorts paying (bearish lean), >0.01 = crowded longs
+  const fr = metric('btc_funding_rates.json');
+  if (fr) {
+    const abs = Math.abs(fr.v);
+    row(fr.v < -0.005 ? '🔻' : fr.v > 0.01 ? '🔺' : '⚪', 'Funding',
+      `${fr.v > 0 ? '+' : ''}${(fr.v * 100).toFixed(3)}% — ${fr.v < -0.005 ? 'shorts paying longs → bearish lean, but squeeze risk' : fr.v > 0.01 ? 'longs paying → crowded long, pullback risk' : 'near-neutral funding'}`,
+      fr.v < -0.005 ? 'dn' : fr.v > 0.01 ? 'dn' : '');
+  }
+
+  // 4. Open Interest
+  const oi = metric('btc_open_interest.json');
+  if (oi) {
+    const chg = oi.pct != null ? ` (${oi.pct >= 0 ? '+' : ''}${oi.pct.toFixed(1)}% 1d)` : '';
+    row('📊', 'Open Interest', `$${cmdFmt(oi.v)}${chg}${oi.pct != null && Math.abs(oi.pct) > 5 ? ' — significant move, volatility likely' : ''}`, '');
+  }
+
+  // 5. Taker Buy/Sell >1 = aggressive buying, <1 = selling
+  const tbs = metric('btc_taker_buy_sell_ratio.json');
+  if (tbs) {
+    row(tbs.v > 1.02 ? '🟢' : tbs.v < 0.98 ? '🔴' : '⚪', 'Taker Ratio',
+      `${tbs.v.toFixed(3)} — ${tbs.v > 1.02 ? 'buyers aggressive (market buys > sells)' : tbs.v < 0.98 ? 'sellers aggressive (market sells > buys)' : 'balanced order flow'}`,
+      tbs.v > 1.02 ? 'up' : tbs.v < 0.98 ? 'dn' : '');
+  }
+
+  // 6. MVRV — <1 undervalued, 1-2 fair, 2-3 warming, >3 overheated
+  const mvrv = metric('btc_mvrv_ratio.json');
+  if (mvrv) {
+    let zone = 'fair value zone';
+    let em = '⚪';
+    if (mvrv.v < 1) { zone = 'below realized value → historically strong buy zone'; em = '🟢'; }
+    else if (mvrv.v > 3.5) { zone = 'extreme overvaluation → cycle top risk'; em = '🔴'; }
+    else if (mvrv.v > 2.5) { zone = 'warming → late-cycle caution'; em = '🟡'; }
+    row(em, 'MVRV', `${mvrv.v.toFixed(2)} — ${zone}`, mvrv.v < 1 ? 'up' : mvrv.v > 3 ? 'dn' : '');
+  }
+
+  // 7. Puell Multiple — <0.5 miner capitulation (bullish), >4 overheated
+  const puell = metric('btc_puell_multiple.json');
+  if (puell) {
+    row(puell.v < 0.5 ? '🟢' : puell.v > 4 ? '🔴' : '⚪', 'Puell',
+      `${puell.v.toFixed(2)} — ${puell.v < 0.5 ? 'miner capitulation zone → historically bullish' : puell.v > 4 ? 'miners highly profitable → distribution risk' : 'normal miner revenue range'}`,
+      puell.v < 0.5 ? 'up' : puell.v > 4 ? 'dn' : '');
+  }
+
+  // 8. Stablecoin Netflow — negative = dry powder leaving exchanges
+  const sc = metric('stablecoin_exchange_netflow.json');
+  if (sc) {
+    row(sc.v > 5e6 ? '🟢' : sc.v < -5e6 ? '🔻' : '⚪', 'Stablecoin Flow',
+      `$${cmdFmt(sc.v)} net — ${sc.v > 5e6 ? 'stablecoins entering exchanges → buying power building' : sc.v < -5e6 ? 'stablecoins leaving exchanges → less dry powder' : 'flat stablecoin movement'}`,
+      sc.v > 5e6 ? 'up' : sc.v < -5e6 ? 'dn' : '');
+  }
+
+  // ── Institutional vs Retail ──
+  rows.push('<div style="margin:8px 0 4px;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--t3);font-weight:700">Institutional vs Retail</div>');
+
+  const cb = metric('btc_coinbase_premium_index.json');
+  if (cb) {
+    row(cb.v > 0.05 ? '🟢' : cb.v < -0.05 ? '🔴' : '⚪', 'Coinbase Premium',
+      `${cb.v >= 0 ? '+' : ''}${cb.v.toFixed(3)} — ${cb.v > 0.05 ? 'US institutional buying (Coinbase price > global avg)' : cb.v < -0.05 ? 'US selling pressure (Coinbase price < global avg)' : 'negligible premium — no clear US bias'}`,
+      cb.v > 0.05 ? 'up' : cb.v < -0.05 ? 'dn' : '');
+  }
+
+  const cbGap = metric('btc_coinbase_premium_gap.json');
+  if (cbGap) {
+    row(cbGap.v > 20 ? '🟢' : cbGap.v < -20 ? '🔴' : '⚪', 'CB Premium Gap',
+      `$${cbGap.v.toFixed(0)} — ${cbGap.v > 20 ? 'significant US premium → strong institutional demand' : cbGap.v < -20 ? 'US discount → institutional selling or low demand' : 'tight gap — no strong directional signal'}`,
+      cbGap.v > 20 ? 'up' : cbGap.v < -20 ? 'dn' : '');
+  }
+
+  const korea = metric('btc_korea_premium_index.json');
+  if (korea) {
+    row(korea.v > 2 ? '🟢' : korea.v < -2 ? '🔴' : '⚪', 'Korea Premium',
+      `${korea.v >= 0 ? '+' : ''}${korea.v.toFixed(2)}% — ${korea.v > 2 ? 'Korean retail FOMO (Kimchi premium) → retail euphoria' : korea.v < -2 ? 'Korean discount → local selling pressure or capital outflow' : 'normal range — no extreme regional bias'}`,
+      korea.v > 2 ? 'up' : korea.v < -2 ? 'dn' : '');
+  }
+
+  // ── Liquidations ──
+  function metricNonZero(file) {
+    const doc = ds[file];
+    if (!doc || !doc.data || !doc.data.length) return null;
+    const arr = doc.data;
+    for (let i = arr.length - 1; i >= Math.max(0, arr.length - 5); i--) {
+      const v = arr[i].value != null ? Number(arr[i].value) : null;
+      if (v != null && v > 0) {
+        const prev = i >= 1 ? Number(arr[i - 1].value) : null;
+        let pct = null;
+        if (prev != null && prev > 0) pct = ((v - prev) / prev) * 100;
+        const ts = arr[i].timestamp;
+        return { v, pct, ts, daysAgo: Math.round((Date.now() - ts) / 86400000) };
+      }
+    }
+    return null;
+  }
+
+  const ll = metricNonZero('btc_long_liquidations_usd.json');
+  const sl = metricNonZero('btc_short_liquidations_usd.json');
+  if (ll || sl) {
+    rows.push('<div style="margin:8px 0 4px;font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--t3);font-weight:700">Liquidations</div>');
+    const lv = ll ? ll.v : 0, sv = sl ? sl.v : 0;
+    const total = lv + sv;
+    const age = ll ? (ll.daysAgo <= 0 ? 'today' : ll.daysAgo === 1 ? 'yesterday' : `${ll.daysAgo}d ago`) : '';
+
+    if (lv > 0) {
+      const lpct = total > 0 ? (lv / total * 100).toFixed(0) : '—';
+      row(lv > sv * 2 ? '🔴' : '⚪', 'Long Liqs',
+        `$${cmdFmt(lv)} (${lpct}% of total) ${age} — ${lv > sv * 2 ? 'long-heavy → cascading sell pressure, overleveraged longs punished' : lv > sv ? 'slightly more longs liquidated' : 'balanced'}`,
+        lv > sv * 2 ? 'dn' : '');
+    }
+    if (sv > 0) {
+      const spct = total > 0 ? (sv / total * 100).toFixed(0) : '—';
+      row(sv > lv * 2 ? '🟢' : '⚪', 'Short Liqs',
+        `$${cmdFmt(sv)} (${spct}% of total) ${age} — ${sv > lv * 2 ? 'short squeeze → forced buying, bears trapped' : sv > lv ? 'slightly more shorts liquidated' : 'balanced'}`,
+        sv > lv * 2 ? 'up' : '');
+    }
+    if (total > 0) {
+      const ratio = lv > 0 && sv > 0 ? (lv / sv).toFixed(2) : '—';
+      const verdict = lv > sv * 3 ? '⚠️ Extreme long liquidation event — market flush'
+        : sv > lv * 3 ? '⚠️ Extreme short squeeze — forced covering rally'
+        : lv > sv * 1.5 ? 'Longs hit harder → bearish tilt'
+        : sv > lv * 1.5 ? 'Shorts hit harder → bullish tilt'
+        : 'Balanced liquidations — no clear winner';
+      row('⚖️', 'L/S Ratio', `${ratio} — ${verdict}`, '');
+    }
+  }
+
+  if (!rows.length) return '';
+  const gen = cmdBundle.generated_utc ? String(cmdBundle.generated_utc).slice(0, 10) : '';
+  return `<div style="font-size:12px;line-height:1.5">${rows.join('')}</div>` +
+    `<div style="margin-top:8px;font-size:9px;color:var(--t3)">` +
+    `<a href="https://github.com/ErcinDedeoglu/crypto-market-data" target="_blank" rel="noopener" style="color:var(--t3)">Crypto Market Data</a> (Ercin Dedeoglu, CC BY 4.0) · daily · ${gen}</div>`;
+}
+
+let _btcPanelRefreshAt = 0;
+
+async function refreshBtcContext() {
+  const now = Date.now();
+  if (_btcPanelRefreshAt && now - _btcPanelRefreshAt < 25000 && document.getElementById('btc-tracker')?.querySelector('.btc-panel-split')) return;
+  _btcPanelRefreshAt = now;
+  const el = document.getElementById('btc-tracker');
+  const ageEl = document.getElementById('btc-snap-age');
+  if (!el) return;
+  const origin = window.location.origin;
+  const p = (name) => `${origin}/sygnif/btc/${name}`;
+  try {
+    const [snap, ohlcv, ticker, manifest, caRes, cmdBundle] = await Promise.all([
+      fetch(p('btc_sygnif_ta_snapshot.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+      fetch(p('btc_1h_ohlcv.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+      fetch(p('bybit_btc_ticker.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+      fetch(p('manifest.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+      fetch(p('btc_cryptoapis_foundation.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+      fetch(p('btc_crypto_market_data.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
+    ]);
+    const gen = (snap && snap.generated_utc) || (manifest && manifest.generated_utc) || '—';
+    if (ageEl) ageEl.textContent = gen !== '—' ? `snap ${String(gen).slice(0, 19).replace('T', ' ')} UTC` : 'Sygnif TA';
+    const bars = Array.isArray(ohlcv) ? ohlcv.slice(-72) : [];
+    const closes = bars.map(b => b.c);
+    const lb = Math.min(24, Math.max(2, closes.length));
+    const seg = closes.slice(-lb);
+    const reg = btcLinReg(seg);
+    const projYs = [];
+    for (let k = 0; k < 12; k++) projYs.push(reg.slope * (seg.length + k) + reg.intercept);
+    const win = bars.length >= 8 ? bars.slice(-48) : bars;
+    const support = win.length ? Math.min(...win.map(b => b.l)) : 0;
+    const resistance = win.length ? Math.max(...win.map(b => b.h)) : 0;
+    const h24 = ticker && ticker.highPrice24h != null ? parseFloat(ticker.highPrice24h) : null;
+    const l24 = ticker && ticker.lowPrice24h != null ? parseFloat(ticker.lowPrice24h) : null;
+    const svg = bars.length >= 4 ? btcBuildChartSvg(bars, projYs, support, resistance, h24, l24) : '';
+    const analysisCol = btcBuildAnalysisColumn(snap, ticker, seg, support, resistance, projYs, caRes);
+    const cmdHtml = btcBuildCryptoMarketDataHtml(cmdBundle);
+    const chartBlock = svg
+      ? `<div class="chart-svg-wrap">${svg}</div>
+         <div class="btc-mini-labels"><span>${btcFmtNum(support)} sup</span><span>${btcFmtNum(resistance)} res</span></div>
+         <div class="btc-legend-inner">
+           <span><i style="background:var(--ac)"></i>1h close</span>
+           <span><i style="background:var(--y)"></i>12h proj</span>
+           <span><i style="background:var(--g)"></i>48h sup</span>
+           <span><i style="background:var(--r)"></i>48h res</span>
+           <span><i style="background:var(--t3)"></i>24h band</span>
+         </div>`
+      : '<div class="chart-svg-wrap"><div class="empty" style="padding:32px">Insufficient OHLCV for chart</div></div>';
+    const cmdBlock = cmdHtml
+      ? `<div class="btc-sec" style="border-bottom:none"><div class="btc-sec-h">On-chain / derivatives (daily)</div><div class="btc-sec-p">${cmdHtml}</div></div>`
+      : '';
+    el.innerHTML = `<div class="btc-panel-split">
+      <div class="btc-chart-col">${chartBlock}</div>
+      <div class="btc-analysis-col">${analysisCol}${cmdBlock}</div>
+    </div>
+    <div class="btc-context-foot">1h OHLCV · Bybit · Sygnif TA · Crypto APIs · <a href="https://github.com/ErcinDedeoglu/crypto-market-data" target="_blank" rel="noopener" style="color:var(--t3)">Crypto Market Data</a> (CC BY 4.0) · <code>pull_btc_context.py</code> · panel refresh 30m</div>`;
+    requestAnimationFrame(() => { requestAnimationFrame(syncBtcPanelHeights); });
+  } catch (e) {
+    if (ageEl) ageEl.textContent = 'unavailable';
+    el.innerHTML = '<span class="empty" style="padding:24px;display:block">BTC bundle offline — run <code>pull_btc_context.py</code> on the server</span>';
+  }
+}
+
+function syncBtcPanelHeights() {
+  const el = document.getElementById('btc-tracker');
+  if (!el) return;
+  const split = el.querySelector('.btc-panel-split');
+  const chartCol = split && split.querySelector('.btc-chart-col');
+  const analysisCol = split && split.querySelector('.btc-analysis-col');
+  if (!chartCol || !analysisCol) return;
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    analysisCol.style.maxHeight = '';
+    return;
+  }
+  analysisCol.style.maxHeight = chartCol.offsetHeight + 'px';
+}
+
+let _btcResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_btcResizeTimer);
+  _btcResizeTimer = setTimeout(syncBtcPanelHeights, 150);
+});
+
 
 /* ── Build SL/TP levels from trade data ── */
 function getLevels(t) {
@@ -1189,6 +1847,7 @@ async function refresh() {
     }
 
     document.getElementById('err').style.display = 'none';
+    refreshBtcContext().catch(() => {});
 
   } catch (e) {
     document.getElementById('err').textContent = `API Error: ${e.message}`;
@@ -1211,6 +1870,14 @@ setInterval(() => {
   if (el) el.textContent = new Date().toLocaleTimeString();
 }, 1000);
 
+/** Freqtrade trade: long unless `is_short` is true (futures shorts). */
+function tradeSideTag(t) {
+  const short = t && (t.is_short === true || t.is_short === 1);
+  const cls = short ? 'side-short' : 'side-long';
+  const text = short ? 'short' : 'long';
+  return `<span class="tag ${cls}">${text}</span>`;
+}
+
 function renderClosedSection() {
   const ctb = document.getElementById('closed-tbody');
   const cc = document.getElementById('closed-cards');
@@ -1219,7 +1886,7 @@ function renderClosedSection() {
   if (!ctb || !cc) return;
 
   if (!closedTradesAll.length) {
-    ctb.innerHTML = '<tr><td colspan="6" class="empty">No closed trades yet</td></tr>';
+    ctb.innerHTML = '<tr><td colspan="7" class="empty">No closed trades yet</td></tr>';
     cc.innerHTML = '<div class="card"><div class="empty">No closed trades yet</div></div>';
     document.getElementById('closed-count').textContent = '0 recent';
     if (actions) actions.style.display = 'none';
@@ -1240,6 +1907,7 @@ function renderClosedSection() {
       : (t.trade_duration ? (t.trade_duration < 60 ? t.trade_duration + 'm' : (t.trade_duration/60).toFixed(1) + 'h') : '--');
     return `<tr>
       <td><span class="pair-name">${t.pair.replace('/USDT', '')}<span> /USDT</span></span></td>
+      <td>${tradeSideTag(t)}</td>
       <td><span class="${pc(pctVal)}" style="font-weight:700">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</span></td>
       <td class="${pc(pnl)}">${fmt(pnl)}</td>
       <td style="color:var(--t2)">${dur}</td>
@@ -1253,7 +1921,7 @@ function renderClosedSection() {
     const pnl = t.profit_abs || 0;
     return `<div class="tc">
       <div class="tc-top">
-        <div><div class="tc-pair">${t.pair.replace('/USDT', '')}<span> /USDT</span></div></div>
+        <div class="tc-pair-row"><div class="tc-pair">${t.pair.replace('/USDT', '')}<span> /USDT</span></div>${tradeSideTag(t)}</div>
         <div>
           <div class="tc-pnl ${pc(pctVal)}">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</div>
           <div class="tc-pnl-sub">${fmt(pnl)} USDT</div>
@@ -1275,11 +1943,11 @@ document.getElementById('closed-toggle').addEventListener('click', () => {
   renderClosedSection();
 });
 
-document.querySelectorAll('.tf-btn').forEach(btn => {
+document.querySelectorAll('.portfolio-chart-wrap .tf-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.portfolio-chart-wrap .tf-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    chartTF = parseInt(btn.dataset.tf);
+    chartTF = parseInt(btn.dataset.tf, 10);
     updatePortfolioChart();
   });
 });

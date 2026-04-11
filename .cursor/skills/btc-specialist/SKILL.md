@@ -1,10 +1,10 @@
 ---
 name: btc-specialist
 description: >-
-  Sygnif BTC-only analysis toolkit: Bybit spot BTCUSDT, offline JSON bundle
-  (pull_btc_context.py), Sygnif TA/signal semantics via bot.py + strategy code,
-  optional FDN/NewHedge/correlation evidence. Not the Telegram surface — use
-  finance-agent skill for bot commands and multi-asset work.
+  Sygnif BTC-only toolkit: Bybit spot BTCUSDT, btc_specialist JSON bundle
+  (pull_btc_context.py), Sygnif TA/tags (bot.py + strategies), NewHedge,
+  correlation docs, btc_trend_regime + ML regime hooks. Not Telegram — use
+  finance-agent for /btc parity and multi-asset work.
 ---
 
 > **Delegated agent (preferred for BTC-only runs):** **`.cursor/agents/btc-specialist.md`**. This **SKILL.md** is the attachable reference pack (same scope).
@@ -30,10 +30,12 @@ description: >-
 | **`user_data/strategies/market_sessions_orb.py`** | Session ORB columns; **`orb_long`** is **BTC/ETH** — relevant when the question is BTC breakout context |
 | **`finance_agent/newhedge_client.py`** | Optional BTC–alts correlation metric (`NEWHEDGE_API_KEY`); not Sygnif TA |
 | **`finance_agent/crypto_market_data.py`** | All README `data/daily` JSONs (**`ALL_README_DAILY_PATHS`**); **`run_crypto_market_data_daily.py`** (cron) or **`pull_btc_context.py`** → `btc_crypto_market_data.json` + **`crypto_market_data_daily_analysis.md`**; **`/finance-agent crypto-daily`**; not Sygnif TA / not Bybit OHLC |
-| **`finance_agent/fdn_fundamentals.py`** | Optional FDN metadata (`FINANCIALDATA_API_KEY`); not Bybit price |
 | **`docs/correlation_research_evidence.md`** | ORB / NewHedge / methodology references |
 | **`scripts/market_open_context_report.py`** | UTC session + Bybit BTC/ETH snapshot (+ optional NewHedge probe) |
-| **`scripts/train_btc_5m_direction.py`** | **Research-only:** next **5m bar** direction model (Bybit spot OHLCV + same indicator features as **`scripts/train_ml_ensemble.py`**). Train → `user_data/ml_models/`; **not** live trading, **not** `/btc` parity — optional experiment alongside **`pull_btc_context`**. |
+| **`scripts/train_btc_5m_direction.py`** | **Research-only:** next **5m bar** direction (Bybit 5m + `train_ml_ensemble` features). Optional **`--regime-filter`** = train only when **`btc_trend_regime`** is true. **Not** live Freqtrade tags. |
+| **`scripts/train_ml_ensemble.py`** | XGBoost signal experiment; merges 1h/4h for **`btc_trend_regime`** column. **`--btc-trend-regime-only`** = ablation on trend bars. Requires `xgboost` + `sklearn` (see repo `.venv` or pip). |
+| **`user_data/strategies/btc_trend_regime.py`** | Rule-based trend-long definition (1h/4h RSI, 1h EMA200, 5m ADX); used when **`SYGNIF_PROFILE=btc_trend`** — **not** the same as `/btc` Telegram output. |
+| **`docs/btc_trend_backtest_checklist.md`** | How to backtest / validate the `btc_trend` profile. |
 
 ## Bybit v5 (spot `BTCUSDT`)
 
@@ -44,7 +46,7 @@ description: >-
 
 - **`manifest.json`**: last pull time (UTC); not a live quote.
 - **`btc_sygnif_ta_snapshot.json`**: optional; built when `bot` imports during pull — re-run pull after TA/bot changes.
-- **`btc_fdn_fundamentals.json`** / **`btc_newhedge_altcoins_correlation.json`**: optional third-party; never label as Sygnif score or Bybit OHLC.
+- **`btc_newhedge_altcoins_correlation.json`**: optional third-party; never label as Sygnif score or Bybit OHLC.
 - **`btc_crypto_market_data.json`**: optional full README daily JSON bundle; **CC BY 4.0**; daily granularity only.
 - **`crypto_market_data_daily_analysis.md`**: optional markdown pass over all README daily series; refresh via **`run_crypto_market_data_daily.py`** (cron) or **`pull_btc_context.py`**.
 
@@ -56,8 +58,13 @@ Align narratives with **`detect_signals`** in `finance_agent/bot.py` (not generi
 
 1. Read `manifest.json` (+ `btc_sygnif_ta_snapshot.json` if present). For on-chain/derivatives context: prefer **`crypto_market_data_daily_analysis.md`**, else **`btc_crypto_market_data.json`**.
 2. If stale or user wants live: Bybit ticker/klines or run **`pull_btc_context.py`** from repo root.
-3. For **ML / next-bar research** on **5m** BTC (same feature set as ensemble trainer): **`python3 scripts/train_btc_5m_direction.py train|predict`** — see script docstring; keep labels **research-only**, not Sygnif live tags.
+3. For **ML / regime research** (5m noise — research only): **`scripts/train_btc_5m_direction.py`**, **`scripts/train_ml_ensemble.py`** with optional **`--btc-trend-regime-only`**; rule-based regime source: **`btc_trend_regime.py`** (distinct from Telegram **`/btc`**).
 4. For “what would Telegram show?” or multi-coin → attach **finance-agent**, not this skill alone.
+
+## Spot vs futures (naming)
+
+- **Default narrative reference:** Bybit **spot** **`BTCUSDT`** (this skill, `pull_btc_context`, public tickers above).
+- **Live Freqtrade:** may use **`BTC/USDT:USDT`** (perps) — strategy and `SYGNIF_PROFILE=btc_trend` still key off **BTC** pair; cite the pair the user’s config uses when it matters for execution.
 
 ## Deeper TA math
 

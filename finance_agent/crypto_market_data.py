@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 RAW_BASE = (
     "https://raw.githubusercontent.com/ErcinDedeoglu/crypto-market-data/main/data/daily"
 )
+# GitHub Contents API — lists every file under data/daily (new upstream JSONs included automatically).
+GITHUB_API_DAILY_DIR = (
+    "https://api.github.com/repos/ErcinDedeoglu/crypto-market-data/"
+    "contents/data/daily?ref=main"
+)
 
 # Curated: compact briefing pipe + 6h cache (fast).
 DEFAULT_PATHS: tuple[str, ...] = (
@@ -34,7 +39,8 @@ DEFAULT_PATHS: tuple[str, ...] = (
     "stablecoin_exchange_netflow.json",
 )
 
-# All `data/daily/*.json` datasets listed in upstream README (ErcinDedeoglu/crypto-market-data).
+# Fallback when GitHub directory listing fails (offline, rate limit). Keep in sync with
+# https://github.com/ErcinDedeoglu/crypto-market-data/tree/main/data/daily
 ALL_README_DAILY_PATHS: tuple[str, ...] = (
     "btc_exchange_netflow.json",
     "btc_exchange_reserve.json",
@@ -66,6 +72,55 @@ ALL_README_DAILY_PATHS: tuple[str, ...] = (
     "btc_coinbase_premium_gap.json",
     "btc_korea_premium_index.json",
 )
+
+
+def list_remote_daily_json_paths(*, timeout: float = 20.0) -> tuple[str, ...]:
+    """Return all ``*.json`` names from upstream ``data/daily`` via GitHub API.
+
+    Falls back to :data:`ALL_README_DAILY_PATHS` if the API is unreachable or returns
+    nothing (rate limit, network). Unauthenticated API quota: 60 req/hr per IP.
+    """
+    req = Request(
+        GITHUB_API_DAILY_DIR,
+        headers={
+            "User-Agent": "Sygnif-finance-agent/1",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        arr = json.loads(raw.decode())
+    except (URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError) as e:
+        logger.warning("list_remote_daily_json_paths: %s — using static fallback", e)
+        return ALL_README_DAILY_PATHS
+    if not isinstance(arr, list):
+        return ALL_README_DAILY_PATHS
+    names = sorted(
+        str(x["name"])
+        for x in arr
+        if isinstance(x, dict)
+        and x.get("type") == "file"
+        and str(x.get("name", "")).endswith(".json")
+    )
+    if not names:
+        logger.warning("list_remote_daily_json_paths: empty listing — using static fallback")
+        return ALL_README_DAILY_PATHS
+    return tuple(names)
+
+
+def paths_order_from_bundle(bundle: dict | None) -> tuple[str, ...]:
+    """Order of datasets for formatting; supports bundles saved before ``paths_order`` existed."""
+    if not bundle or not isinstance(bundle, dict):
+        return ALL_README_DAILY_PATHS
+    po = bundle.get("paths_order")
+    if isinstance(po, (list, tuple)) and po:
+        return tuple(str(p) for p in po)
+    ds = bundle.get("datasets")
+    if isinstance(ds, dict) and ds:
+        return tuple(sorted(ds.keys()))
+    return ALL_README_DAILY_PATHS
+
 
 ATTRIBUTION_MARKDOWN = (
     "_On-chain/derivatives daily:_ [Crypto Market Data](https://github.com/ErcinDedeoglu/crypto-market-data) "
@@ -153,7 +208,11 @@ def fetch_remote_bundle(
     paths: tuple[str, ...] = DEFAULT_PATHS,
     timeout_per: float = 7.0,
 ) -> dict:
-    """Download selected daily JSON files; return serializable bundle for disk cache."""
+    """Download selected daily JSON files; return serializable bundle for disk cache.
+
+    ``paths_order`` in the returned dict matches the fetch order (full pulls should use
+    :func:`list_remote_daily_json_paths` so every ``data/daily/*.json`` is included).
+    """
     utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     out: dict[str, dict | None] = {}
     for rel in paths:
@@ -164,6 +223,7 @@ def fetch_remote_bundle(
         "source": "github.com/ErcinDedeoglu/crypto-market-data (CC BY 4.0)",
         "base_url": RAW_BASE,
         "datasets": out,
+        "paths_order": tuple(paths),
     }
 
 
@@ -247,8 +307,9 @@ def build_daily_analysis_markdown(bundle: dict | None) -> str:
         lines.append("_No datasets._")
         return "\n".join(lines)
 
+    path_list = paths_order_from_bundle(bundle if isinstance(bundle, dict) else None)
     by_section: dict[str, list[str]] = {}
-    for rel in ALL_README_DAILY_PATHS:
+    for rel in path_list:
         doc = ds.get(rel)
         sec = _section_title_for_file(rel)
         if sec not in by_section:

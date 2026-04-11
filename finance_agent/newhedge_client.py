@@ -88,7 +88,7 @@ def format_telegram_altcoins_correlation_block() -> str:
 
     Returns empty string if ``NEWHEDGE_API_KEY`` is unset. On HTTP/parse errors,
     returns a one-line italic hint. Labels source as **not** Sygnif TA (parity
-    with FDN separation in ``briefing.md``).
+    with third-party separation in ``briefing.md``).
     """
     key = (os.environ.get("NEWHEDGE_API_KEY", "") or "").strip()
     if not key:
