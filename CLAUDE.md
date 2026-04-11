@@ -8,12 +8,14 @@ Claude Code auto-loads this file. **Split layout:**
 | **`AGENTS.md`** | Same GitNexus block as below (for Cursor / Cloud Agents) |
 | **`.cursor/rules/*.mdc`** | Cursor IDE / Cloud Agent rules |
 
+**Cursor skills** (attach in Cursor; not `~/.claude/skills/finance-agent/`): **`.cursor/skills/finance-agent/SKILL.md`** (unified domain + Telegram bot parity), **`.cursor/skills/btc-specialist/SKILL.md`** (BTC reference tables). **BTC-only agent:** **`.cursor/agents/btc-specialist.md`** (delegated persona; same scope as btc-specialist skill).
+
 `npx gitnexus analyze` refreshes the GitNexus section **below** and in **`AGENTS.md`** in parallel.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **SYGNIF** (1618 symbols, 3614 relationships, 137 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **SYGNIF** (2071 symbols, 4684 relationships, 175 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

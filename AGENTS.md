@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **SYGNIF** (1618 symbols, 3614 relationships, 137 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **SYGNIF** (2071 symbols, 4684 relationships, 175 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -99,3 +99,15 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Cursor — Sygnif finance / BTC skills & agents
+
+Canonical paths (repo-relative; attach skills in Cursor — **`~/.claude/skills/finance-agent/`** removed):
+
+| Kind | Name | Path |
+|------|------|------|
+| Skill | **finance-agent** | `.cursor/skills/finance-agent/SKILL.md` |
+| Skill | **btc-specialist** | `.cursor/skills/btc-specialist/SKILL.md` |
+| Agent | **btc-specialist** | `.cursor/agents/btc-specialist.md` |
+
+For **Bitcoin-only** analysis, prefer the **agent** (`.cursor/agents/btc-specialist.md`) when delegating; use the **skill** for the reference tables and file index.

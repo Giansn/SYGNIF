@@ -18,6 +18,23 @@ When you run as the **Cursor Agent Worker** for this **Sygnif** repo (`agent wor
 - **`finance_agent/*.md`** — `cloud-runbook.md`, `AGENT_OPS_README.md`, `spot-agent-prompt.md`, `futures-agent-prompt.md`, `futures-shorts-module.md`, `strategy-comparison-module.md`.
 - **`finance_agent/AI Upload/`** — Crypto-research workflows, agent prompts, skills.
 
+## Cursor SKILL files (canonical — attach in IDE)
+
+Do **not** use removed **`~/.claude/skills/finance-agent/`**. Sygnif skills live only under **`.cursor/skills/`** in this repo:
+
+| Skill | Path (repo-relative) | Role |
+|-------|----------------------|------|
+| **finance-agent** | `.cursor/skills/finance-agent/SKILL.md` | Unified Sygnif domain + **Telegram** command parity (`finance_agent/bot.py`). |
+| **btc-specialist** | `.cursor/skills/btc-specialist/SKILL.md` | BTC-only analysis: `btc_specialist/` pulls, JSON snapshots, Bybit patterns — not a second bot. |
+
+**Cursor Agent** (delegated BTC-only persona — prefer over skill alone when routing BTC work):
+
+| Agent | Path (repo-relative) |
+|-------|----------------------|
+| **btc-specialist** | `.cursor/agents/btc-specialist.md` |
+
+On this host: **`~/SYGNIF/.cursor/skills/...`** and **`~/SYGNIF/.cursor/agents/...`**.
+
 ## Adaptive strategy tuning (bounded)
 
 After your analysis, you **may** update **`user_data/strategy_adaptation.json`** with a JSON object:
