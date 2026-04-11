@@ -921,6 +921,9 @@ function findTodayDailyRow(daily) {
   return hit || null;
 }
 
+let _actualBalance = null;
+let _openPnl = 0;
+
 function getChartData() {
   return buildGranularData(chartTF);
 }
@@ -974,6 +977,15 @@ function buildGranularData(days) {
       labels.push(d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
     }
   }
+
+  if (_actualBalance != null && _actualBalance > 0 && values.length) {
+    const liveEquity = _actualBalance + _openPnl;
+    const drift = values[values.length - 1] - liveEquity;
+    if (Math.abs(drift) > 0.01) {
+      for (let i = 0; i < values.length; i++) values[i] -= drift;
+    }
+  }
+
   return { values, labels };
 }
 
@@ -1690,6 +1702,7 @@ async function refresh() {
 
     // Balance — same as spot dashboard
     const walletBalance = balData.total || balData.value || 0;
+    _actualBalance = walletBalance;
 
     const totalPnl = profit.profit_all_coin || 0;
     document.getElementById('bal').textContent = '$' + walletBalance.toFixed(2);
@@ -1698,6 +1711,7 @@ async function refresh() {
 
     // Open P/L
     const openPnl = trades.reduce((s, t) => s + (t.profit_abs || 0), 0);
+    _openPnl = openPnl;
     document.getElementById('pnl').textContent = '$' + fmt(openPnl);
     document.getElementById('pnl').className = `stat-val ${pc(openPnl)}`;
     document.getElementById('pnl-s').textContent = `${trades.length} positions`;
