@@ -1,12 +1,14 @@
 //@version=6
-strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500)
+strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500, process_orders_on_close=true)
 
 // ── Inputs ──
 srLen    = input.int(20,    "S/R Lookback", minval=10)
 fibLen   = input.int(50,    "Fib Lookback", minval=20)
 zoneAtr  = input.float(0.3, "Zone Thickness (x ATR)", step=0.1)
-slMul    = input.float(1.5, "SL (x ATR)", step=0.5)
+slMul    = input.float(0.75,"SL (x ATR)", step=0.25)
 maxZones = input.int(8,     "Max Zones Each Side", minval=3)
+minBody  = input.float(0.2, "Min Body % for Strong Candle", step=0.05)
+minVol   = input.float(1.8, "Min Vol Ratio for Strong Candle", step=0.1)
 tbl      = input.bool(true, "Dashboard")
 
 // ── Indicators ──
@@ -14,19 +16,20 @@ atr    = ta.atr(14)
 rsiV   = ta.rsi(close, 14)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
 vr     = volume / ta.sma(volume, 20)
+e20    = ta.ema(close, 20)
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 htfUp  = close > e50_1h
 htfDn  = close < e50_1h
 
-// ══════════════════════════════════════════════════════════════════════════════
-// REAL-TIME ZONES — no pivot delay
-// ══════════════════════════════════════════════════════════════════════════════
+// Sideways filter: ADX < 20 = choppy, suppress signals
+adxVal = ta.rma(math.abs(ta.change(ta.highest(high, 14)) - ta.change(ta.lowest(low, 14))), 14)
+choppy = ta.atr(5) / ta.atr(20) < 0.8 and math.abs(close - e20) / atr < 0.5
 
-// S/R from rolling high/low
+// S/R
 resLvl = ta.highest(high, srLen)
 supLvl = ta.lowest(low, srLen)
 
-// Fibonacci from wider lookback
+// Fibonacci
 fibHi  = ta.highest(high, fibLen)
 fibLo  = ta.lowest(low, fibLen)
 fibRng = fibHi - fibLo
@@ -36,7 +39,6 @@ fib500 = fibHi - fibRng * 0.500
 fib618 = fibHi - fibRng * 0.618
 fib786 = fibHi - fibRng * 0.786
 
-// Zone thickness
 zt = atr * zoneAtr
 
 // ── Zone arrays ──
@@ -53,13 +55,17 @@ var array<int>   sR = array.new_int(0)
 var array<box>   sX = array.new_box(0)
 var array<label> sL2 = array.new_label(0)
 
-// Track last created levels to avoid duplicates
 var float lastDemLvl = 0.0
 var float lastSupLvl = 0.0
 var float lastFibDem = 0.0
 var float lastFibSup = 0.0
 
-// Helper: add demand zone
+// Trade log
+var int totalTrades = 0
+var int wins = 0
+var int losses = 0
+var float totalPnl = 0.0
+
 addDem(float top, float btm, string src) =>
     array.push(dT, top)
     array.push(dB, btm)
@@ -90,62 +96,51 @@ addSup(float top, float btm, string src) =>
         box.delete(array.shift(sX))
         label.delete(array.shift(sL2))
 
-// ── Create zones in real-time ──
-
-// 1. Support bounce: price touches support and closes above → instant demand zone
+// ── Create zones (only when NOT choppy) ──
 supBounce = low <= supLvl + zt and close > supLvl and close > open
-if supBounce and math.abs(supLvl - lastDemLvl) > atr
-    addDem(supLvl + zt, supLvl - zt * 0.5, "S/R Support")
+if supBounce and math.abs(supLvl - lastDemLvl) > atr and not choppy
+    addDem(supLvl + zt, supLvl - zt * 0.5, "Support")
     lastDemLvl := supLvl
 
-// 2. Resistance rejection: price touches resistance and closes below → instant supply zone
 resReject = high >= resLvl - zt and close < resLvl and close < open
-if resReject and math.abs(resLvl - lastSupLvl) > atr
-    addSup(resLvl + zt * 0.5, resLvl - zt, "S/R Resistance")
+if resReject and math.abs(resLvl - lastSupLvl) > atr and not choppy
+    addSup(resLvl + zt * 0.5, resLvl - zt, "Resistance")
     lastSupLvl := resLvl
 
-// 3. Fib demand: price bounces off 61.8% or 78.6% → demand zone
-fib618bounce = low <= fib618 + zt and close > fib618 and close > open
-fib786bounce = low <= fib786 + zt and close > fib786 and close > open
-if (fib618bounce or fib786bounce) and math.abs((fib618bounce ? fib618 : fib786) - lastFibDem) > atr
-    fibLvl = fib618bounce ? fib618 : fib786
-    addDem(fibLvl + zt, fibLvl - zt * 0.5, fib618bounce ? "Fib 61.8%" : "Fib 78.6%")
+fib618b = low <= fib618 + zt and close > fib618 and close > open
+fib786b = low <= fib786 + zt and close > fib786 and close > open
+if (fib618b or fib786b) and math.abs((fib618b ? fib618 : fib786) - lastFibDem) > atr
+    fibLvl = fib618b ? fib618 : fib786
+    addDem(fibLvl + zt, fibLvl - zt * 0.5, fib618b ? "Fib 61.8%" : "Fib 78.6%")
     lastFibDem := fibLvl
 
-// 4. Fib supply: price rejects off 23.6% or 38.2% → supply zone
-fib236reject = high >= fib236 - zt and close < fib236 and close < open
-fib382reject = high >= fib382 - zt and close < fib382 and close < open
-if (fib236reject or fib382reject) and math.abs((fib236reject ? fib236 : fib382) - lastFibSup) > atr
-    fibLvl = fib236reject ? fib236 : fib382
-    addSup(fibLvl + zt * 0.5, fibLvl - zt, fib236reject ? "Fib 23.6%" : "Fib 38.2%")
+fib236r = high >= fib236 - zt and close < fib236 and close < open
+fib382r = high >= fib382 - zt and close < fib382 and close < open
+if (fib236r or fib382r) and math.abs((fib236r ? fib236 : fib382) - lastFibSup) > atr
+    fibLvl = fib236r ? fib236 : fib382
+    addSup(fibLvl + zt * 0.5, fibLvl - zt, fib236r ? "Fib 23.6%" : "Fib 38.2%")
     lastFibSup := fibLvl
 
-// 5. Strong candle imprint: big bullish candle body = demand, big bearish = supply
 bodyPct = math.abs(close - open) / close * 100
-bigBull = close > open and bodyPct > 0.15 and vr > 1.5
-bigBear = close < open and bodyPct > 0.15 and vr > 1.5
-
-if bigBull and math.abs(low - lastDemLvl) > atr
-    addDem(math.min(open, close), low, "Strong bullish")
+bigBull = close > open and bodyPct > minBody and vr > minVol
+bigBear = close < open and bodyPct > minBody and vr > minVol
+if bigBull and math.abs(low - lastDemLvl) > atr and not choppy
+    addDem(math.min(open, close), low, "Strong bull")
     lastDemLvl := low
-
-if bigBear and math.abs(high - lastSupLvl) > atr
-    addSup(high, math.max(open, close), "Strong bearish")
+if bigBear and math.abs(high - lastSupLvl) > atr and not choppy
+    addSup(high, math.max(open, close), "Strong bear")
     lastSupLvl := high
 
-// 6. Fib 50% zones (lighter)
-fib500demBounce = low <= fib500 + zt and close > fib500 and close > open
-fib500supReject = high >= fib500 - zt and close < fib500 and close < open
-if fib500demBounce and math.abs(fib500 - lastFibDem) > atr
+fib500db = low <= fib500 + zt and close > fib500 and close > open
+fib500sr = high >= fib500 - zt and close < fib500 and close < open
+if fib500db and math.abs(fib500 - lastFibDem) > atr
     addDem(fib500 + zt, fib500 - zt * 0.5, "Fib 50%")
     lastFibDem := fib500
-if fib500supReject and math.abs(fib500 - lastFibSup) > atr
+if fib500sr and math.abs(fib500 - lastFibSup) > atr
     addSup(fib500 + zt * 0.5, fib500 - zt, "Fib 50%")
     lastFibSup := fib500
 
-// ══════════════════════════════════════════════════════════════════════════════
-// UPDATE ZONES + DETECT TOUCH
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Update zones + detect touch ──
 bool hitDemand = false
 bool hitSupply = false
 float bestDConf = 0.0
@@ -226,19 +221,31 @@ if array.size(sT2) > 0
             array.remove(sL2, i)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FLIP: candle confirms direction
+// FLIP — instant on same bar, candle confirms, no signal in chop
 // ══════════════════════════════════════════════════════════════════════════════
-isLong = strategy.position_size > 0
+isLong  = strategy.position_size > 0
 isShort = strategy.position_size < 0
-goLong  = hitDemand and close > open
-goShort = hitSupply and close < open
 
+goLong  = hitDemand and close > open and not choppy
+goShort = hitSupply and close < open and not choppy
+
+// Track PnL from closed trades
+if strategy.closedtrades > 0
+    lastPnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    if ta.change(strategy.closedtrades) > 0
+        totalTrades += 1
+        totalPnl += lastPnl
+        if lastPnl > 0
+            wins += 1
+        else
+            losses += 1
+
+// Flip: entry reverses position instantly (process_orders_on_close=true)
 if goLong and not isLong
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", loss=atr * slMul / syminfo.mintick)
     tier = bestDConf >= 70 ? "A+" : bestDConf >= 50 ? "A" : bestDConf >= 30 ? "B" : "C"
-    sz = bestDConf >= 60 ? "BIG" : bestDConf >= 30 ? "MED" : "SMALL"
-    eTip = "LONG " + tier + " | " + sz + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
+    eTip = "LONG " + tier + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses) + " | PnL: " + str.tostring(math.round(totalPnl, 2))
     clr = bestDConf >= 60 ? color.green : bestDConf >= 30 ? color.new(color.green, 20) : color.new(color.green, 40)
     label.new(bar_index, low - atr * 0.4, "▲" + tier, style=label.style_label_up, color=clr, textcolor=color.white, size=bestDConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
@@ -246,8 +253,7 @@ if goShort and not isShort
     strategy.entry("Short", strategy.short)
     strategy.exit("SX", "Short", loss=atr * slMul / syminfo.mintick)
     tier = bestSConf >= 70 ? "A+" : bestSConf >= 50 ? "A" : bestSConf >= 30 ? "B" : "C"
-    sz = bestSConf >= 60 ? "BIG" : bestSConf >= 30 ? "MED" : "SMALL"
-    eTip = "SHORT " + tier + " | " + sz + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
+    eTip = "SHORT " + tier + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses) + " | PnL: " + str.tostring(math.round(totalPnl, 2))
     clr = bestSConf >= 60 ? color.red : bestSConf >= 30 ? color.new(color.red, 20) : color.new(color.red, 40)
     label.new(bar_index, high + atr * 0.4, "▼" + tier, style=label.style_label_down, color=clr, textcolor=color.white, size=bestSConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
@@ -257,26 +263,32 @@ plot(fib382, "Fib 38.2", color.new(color.orange, 70), 1, plot.style_stepline)
 plot(fib500, "Fib 50",   color.new(color.blue, 70),   1, plot.style_stepline)
 plot(fib618, "Fib 61.8", color.new(color.green, 60),  1, plot.style_stepline)
 
-// ── Dashboard ──
+// ── Dashboard with trade log ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
     pos = isLong ? "LONG" : isShort ? "SHORT" : "FLAT"
     color pc = isLong ? color.green : isShort ? color.red : color.gray
     ac = math.max(bestDConf, bestSConf)
     at = ac >= 70 ? "A+" : ac >= 50 ? "A" : ac >= 30 ? "B" : ac > 0 ? "C" : "—"
     color cc = ac >= 60 ? color.green : ac >= 30 ? color.yellow : color.gray
-    table.cell(t, 0, 0, "SYGNIF",   text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 1, 0, "5m BTC",   text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1, "Position", text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1, pos,        text_color=pc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Zone",     text_color=color.gray,  text_size=size.small)
+    wr2 = totalTrades > 0 ? wins * 100.0 / totalTrades : 0.0
+    color pnlC = totalPnl >= 0 ? color.green : color.red
+    table.cell(t, 0, 0, "SYGNIF",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0, "5m BTC",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1, "Position",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1, pos,         text_color=pc,          text_size=size.normal)
+    table.cell(t, 0, 2, "Zone",      text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 2, at + " " + str.tostring(math.round(ac, 0)) + "%", text_color=cc, text_size=size.normal)
-    table.cell(t, 0, 3, "Zones",    text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 3, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT2)) + "S", text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 4, "S/R",      text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 4, str.tostring(math.round(supLvl, 0)) + " / " + str.tostring(math.round(resLvl, 0)), text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 5, "RSI/Vol",  text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 5, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 3, "Trades",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(totalTrades) + " (" + str.tostring(wins) + "W " + str.tostring(losses) + "L)", text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 4, "Win Rate",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 4, str.tostring(math.round(wr2, 1)) + "%", text_color=wr2 >= 50 ? color.green : color.red, text_size=size.small)
+    table.cell(t, 0, 5, "Net PnL",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 5, str.tostring(math.round(totalPnl, 2)), text_color=pnlC, text_size=size.normal)
+    table.cell(t, 0, 6, "Zones",     text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT2)) + "S", text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 7, "RSI/Vol",   text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
 
 alertcondition(goLong and not isLong,   "SYGNIF Long",  "SYGNIF: LONG")
 alertcondition(goShort and not isShort, "SYGNIF Short", "SYGNIF: SHORT")
