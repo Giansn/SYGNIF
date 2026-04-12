@@ -7,8 +7,11 @@ fibLen   = input.int(50,    "Fib Lookback", minval=20)
 zoneAtr  = input.float(0.3, "Zone Thickness (x ATR)", step=0.1)
 slMul    = input.float(0.75,"SL (x ATR)", step=0.25)
 maxZones = input.int(8,     "Max Zones Each Side", minval=3)
-minBody  = input.float(0.2, "Min Body % for Strong Candle", step=0.05)
-minVol   = input.float(1.8, "Min Vol Ratio for Strong Candle", step=0.1)
+pacLen   = input.int(34,    "PAC Channel EMA", minval=10)
+fastEma  = input.int(89,    "Fast EMA (trend)", minval=20)
+medEma   = input.int(200,   "Medium EMA (trend)", minval=50)
+scalpTP  = input.float(0.5, "Scalp TP (x ATR)", step=0.1)
+scalpSL  = input.float(0.4, "Scalp SL (x ATR)", step=0.1)
 tbl      = input.bool(true, "Dashboard")
 
 // ── Indicators ──
@@ -16,48 +19,49 @@ atr    = ta.atr(14)
 rsiV   = ta.rsi(close, 14)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
 vr     = volume / ta.sma(volume, 20)
-e20    = ta.ema(close, 20)
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 htfUp  = close > e50_1h
 htfDn  = close < e50_1h
 
-// ── Sideways detection (multi-layer) ──
-// 1. ATR compression: short ATR shrinking vs long ATR
-atrRatio = ta.atr(5) / ta.atr(20)
-atrSqueeze = atrRatio < 0.75
+// ── PAC (Price Action Channel) ──
+pacH = ta.ema(high, pacLen)
+pacL = ta.ema(low, pacLen)
+pacC = ta.ema(close, pacLen)
+emaFast = ta.ema(close, fastEma)
+emaMed  = ta.ema(close, medEma)
 
-// 2. Bollinger Squeeze: bands narrowing = low volatility
-bbW = ta.stdev(close, 20) * 2 / ta.sma(close, 20) * 100
-bbSqueeze = bbW < ta.sma(bbW, 50)
+// Trend via PAC + EMAs
+trendUp = emaFast > emaMed and pacL > emaMed
+trendDn = emaFast < emaMed and pacH < emaMed
+trending = trendUp or trendDn
 
-// 3. Price hugging EMA: flat, no trend
-emaFlat = math.abs(close - e20) / atr < 0.4
+// Chop = NOT trending
+sideways = not trending
 
-// 4. Small candles: 3 consecutive bars with body < 0.08% = chop
-smallBar = math.abs(close - open) / close * 100 < 0.08
-threeSmall = smallBar and smallBar[1] and smallBar[2]
+// PAC pullback detection (JustUncleL concept)
+abovePAC = close > pacH
+belowPAC = close < pacL
+insidePAC = close >= pacL and close <= pacH
 
-// 5. Range bound: high-low range of last 12 bars < 1.5x ATR
-range12 = ta.highest(high, 12) - ta.lowest(low, 12)
-rangeTight = range12 < atr * 1.5
+// Pullback: price was outside PAC, came back in, now exits other side
+wasBelow3 = ta.barssince(close < pacC) <= 3
+wasAbove3 = ta.barssince(close > pacC) <= 3
+pacBuySignal  = trendUp and open < pacH and close > pacH and wasBelow3
+pacSellSignal = trendDn and open > pacL and close < pacL and wasAbove3
 
-// Combined: choppy if 2+ signals agree
-choppyCount = (atrSqueeze ? 1 : 0) + (bbSqueeze and emaFlat ? 1 : 0) + (threeSmall ? 1 : 0) + (rangeTight ? 1 : 0)
-choppy = choppyCount >= 2
+// Scalp signals in sideways: any PAC exit with candle confirmation
+scalpBuy  = sideways and close > pacH and close > open and close[1] <= pacH
+scalpSell = sideways and close < pacL and close < open and close[1] >= pacL
 
-// S/R
+// S/R + Fib
 resLvl = ta.highest(high, srLen)
 supLvl = ta.lowest(low, srLen)
-
-// Fibonacci
 fibHi  = ta.highest(high, fibLen)
 fibLo  = ta.lowest(low, fibLen)
 fibRng = fibHi - fibLo
-fib236 = fibHi - fibRng * 0.236
 fib382 = fibHi - fibRng * 0.382
 fib500 = fibHi - fibRng * 0.500
 fib618 = fibHi - fibRng * 0.618
-fib786 = fibHi - fibRng * 0.786
 
 zt = atr * zoneAtr
 
@@ -74,17 +78,8 @@ var array<int>   sI = array.new_int(0)
 var array<int>   sR = array.new_int(0)
 var array<box>   sX = array.new_box(0)
 var array<label> sL2 = array.new_label(0)
-
 var float lastDemLvl = 0.0
 var float lastSupLvl = 0.0
-var float lastFibDem = 0.0
-var float lastFibSup = 0.0
-
-// Trade log
-var int totalTrades = 0
-var int wins = 0
-var int losses = 0
-var float totalPnl = 0.0
 
 addDem(float top, float btm, string src) =>
     array.push(dT, top)
@@ -116,49 +111,30 @@ addSup(float top, float btm, string src) =>
         box.delete(array.shift(sX))
         label.delete(array.shift(sL2))
 
-// ── Create zones (only when NOT choppy) ──
+// Create zones (only in trends, not sideways)
 supBounce = low <= supLvl + zt and close > supLvl and close > open
-if supBounce and math.abs(supLvl - lastDemLvl) > atr and not choppy
+if supBounce and math.abs(supLvl - lastDemLvl) > atr and trending
     addDem(supLvl + zt, supLvl - zt * 0.5, "Support")
     lastDemLvl := supLvl
-
 resReject = high >= resLvl - zt and close < resLvl and close < open
-if resReject and math.abs(resLvl - lastSupLvl) > atr and not choppy
+if resReject and math.abs(resLvl - lastSupLvl) > atr and trending
     addSup(resLvl + zt * 0.5, resLvl - zt, "Resistance")
     lastSupLvl := resLvl
-
 fib618b = low <= fib618 + zt and close > fib618 and close > open
-fib786b = low <= fib786 + zt and close > fib786 and close > open
-if (fib618b or fib786b) and math.abs((fib618b ? fib618 : fib786) - lastFibDem) > atr
-    fibLvl = fib618b ? fib618 : fib786
-    addDem(fibLvl + zt, fibLvl - zt * 0.5, fib618b ? "Fib 61.8%" : "Fib 78.6%")
-    lastFibDem := fibLvl
-
-fib236r = high >= fib236 - zt and close < fib236 and close < open
+if fib618b and math.abs(fib618 - lastDemLvl) > atr
+    addDem(fib618 + zt, fib618 - zt * 0.5, "Fib 61.8%")
+    lastDemLvl := fib618
 fib382r = high >= fib382 - zt and close < fib382 and close < open
-if (fib236r or fib382r) and math.abs((fib236r ? fib236 : fib382) - lastFibSup) > atr
-    fibLvl = fib236r ? fib236 : fib382
-    addSup(fibLvl + zt * 0.5, fibLvl - zt, fib236r ? "Fib 23.6%" : "Fib 38.2%")
-    lastFibSup := fibLvl
-
+if fib382r and math.abs(fib382 - lastSupLvl) > atr
+    addSup(fib382 + zt * 0.5, fib382 - zt, "Fib 38.2%")
+    lastSupLvl := fib382
 bodyPct = math.abs(close - open) / close * 100
-bigBull = close > open and bodyPct > minBody and vr > minVol
-bigBear = close < open and bodyPct > minBody and vr > minVol
-if bigBull and math.abs(low - lastDemLvl) > atr and not choppy
+if close > open and bodyPct > 0.2 and vr > 1.8 and math.abs(low - lastDemLvl) > atr and trending
     addDem(math.min(open, close), low, "Strong bull")
     lastDemLvl := low
-if bigBear and math.abs(high - lastSupLvl) > atr and not choppy
+if close < open and bodyPct > 0.2 and vr > 1.8 and math.abs(high - lastSupLvl) > atr and trending
     addSup(high, math.max(open, close), "Strong bear")
     lastSupLvl := high
-
-fib500db = low <= fib500 + zt and close > fib500 and close > open
-fib500sr = high >= fib500 - zt and close < fib500 and close < open
-if fib500db and math.abs(fib500 - lastFibDem) > atr
-    addDem(fib500 + zt, fib500 - zt * 0.5, "Fib 50%")
-    lastFibDem := fib500
-if fib500sr and math.abs(fib500 - lastFibSup) > atr
-    addSup(fib500 + zt * 0.5, fib500 - zt, "Fib 50%")
-    lastFibSup := fib500
 
 // ── Update zones + detect touch ──
 bool hitDemand = false
@@ -184,8 +160,7 @@ if array.size(dT) > 0
         label.set_x(lb, bar_index + 4)
         label.set_y(lb, ztt)
         label.set_text(lb, tier)
-        exp = math.round(ht * (1 + conf / 100) * 3, 2)
-        label.set_tooltip(lb, "DEMAND → LONG\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(exp) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x | Age: " + str.tostring(age) + "b")
+        label.set_tooltip(lb, "DEMAND\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x")
         if low <= ztt and close > ztt
             array.set(dR, i, zret + 1)
         if low <= ztt and high >= zb
@@ -221,8 +196,7 @@ if array.size(sT2) > 0
         label.set_x(lb, bar_index + 4)
         label.set_y(lb, zb)
         label.set_text(lb, tier)
-        exp = math.round(ht * (1 + conf / 100) * 3, 2)
-        label.set_tooltip(lb, "SUPPLY → SHORT\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(exp) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x | Age: " + str.tostring(age) + "b")
+        label.set_tooltip(lb, "SUPPLY\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x")
         if high >= zb and close < zb
             array.set(sR, i, zret + 1)
         if high >= zb and low <= ztt
@@ -241,102 +215,119 @@ if array.size(sT2) > 0
             array.remove(sL2, i)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FLIP — instant, candle confirms, no chop, cooldown after SL
+// DUAL MODE: Trend = zone flip, Sideways = PAC scalp
 // ══════════════════════════════════════════════════════════════════════════════
 isLong  = strategy.position_size > 0
 isShort = strategy.position_size < 0
 
-// Cooldown after SL: no re-entry for 6 bars after a stop loss
-var int lastSLbar = 0
-wasLong  = strategy.position_size[1] > 0
-wasShort = strategy.position_size[1] < 0
-isFlat   = strategy.position_size == 0
-
-// Detect SL hit: was in position, now flat, and no new entry on this bar
-slHit = isFlat and (wasLong or wasShort)
-if slHit
-    lastSLbar := bar_index
-
-slCooled = bar_index - lastSLbar >= 6
-
-// Track PnL
-if strategy.closedtrades > 0
-    lastPnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
-    if ta.change(strategy.closedtrades) > 0
-        totalTrades += 1
-        totalPnl += lastPnl
-        if lastPnl > 0
-            wins += 1
-        else
-            losses += 1
-
-// Consecutive losses: if last 2 trades were losses, wait longer
-var int consLoss = 0
+// Trade log
+var int totalTrades = 0
+var int wins = 0
+var int losses = 0
+var float totalPnl = 0.0
 if strategy.closedtrades > 0 and ta.change(strategy.closedtrades) > 0
-    if strategy.closedtrades.profit(strategy.closedtrades - 1) < 0
-        consLoss += 1
+    totalTrades += 1
+    lp = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    totalPnl += lp
+    if lp > 0
+        wins += 1
     else
-        consLoss := 0
+        losses += 1
 
-consLossCool = consLoss >= 2 and bar_index - lastSLbar < 20
+// MODE 1: TREND — zone flip (bigger trades)
+zoneLong  = trending and hitDemand and close > open and not isLong
+zoneShort = trending and hitSupply and close < open and not isShort
 
-goLong  = hitDemand and close > open and not choppy and slCooled and not consLossCool
-goShort = hitSupply and close < open and not choppy and slCooled and not consLossCool
-
-// Close in deep chop
-if choppy and (isLong or isShort) and choppyCount >= 3
-    strategy.close_all(comment="Chop exit")
-
-if goLong and not isLong
+if zoneLong
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", loss=atr * slMul / syminfo.mintick)
     tier = bestDConf >= 70 ? "A+" : bestDConf >= 50 ? "A" : bestDConf >= 30 ? "B" : "C"
-    eTip = "LONG " + tier + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses) + " | PnL: " + str.tostring(math.round(totalPnl, 2))
-    clr = bestDConf >= 60 ? color.green : bestDConf >= 30 ? color.new(color.green, 20) : color.new(color.green, 40)
+    eTip = "TREND LONG " + tier + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses)
+    clr = bestDConf >= 50 ? color.green : color.new(color.green, 30)
     label.new(bar_index, low - atr * 0.4, "▲" + tier, style=label.style_label_up, color=clr, textcolor=color.white, size=bestDConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
-if goShort and not isShort
+if zoneShort
     strategy.entry("Short", strategy.short)
     strategy.exit("SX", "Short", loss=atr * slMul / syminfo.mintick)
     tier = bestSConf >= 70 ? "A+" : bestSConf >= 50 ? "A" : bestSConf >= 30 ? "B" : "C"
-    eTip = "SHORT " + tier + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses) + " | PnL: " + str.tostring(math.round(totalPnl, 2))
-    clr = bestSConf >= 60 ? color.red : bestSConf >= 30 ? color.new(color.red, 20) : color.new(color.red, 40)
+    eTip = "TREND SHORT " + tier + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nW/L: " + str.tostring(wins) + "/" + str.tostring(losses)
+    clr = bestSConf >= 50 ? color.red : color.new(color.red, 30)
     label.new(bar_index, high + atr * 0.4, "▼" + tier, style=label.style_label_down, color=clr, textcolor=color.white, size=bestSConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
-// ── Reference lines ──
-plot(e50_1h, "1h EMA50", color.new(color.orange, 50), 2)
-plot(fib382, "Fib 38.2", color.new(color.orange, 70), 1, plot.style_stepline)
-plot(fib500, "Fib 50",   color.new(color.blue, 70),   1, plot.style_stepline)
-plot(fib618, "Fib 61.8", color.new(color.green, 60),  1, plot.style_stepline)
+// MODE 2: SIDEWAYS — PAC pullback scalps (tighter TP/SL, smaller labels)
+if scalpBuy and not isLong and sideways
+    strategy.entry("ScalpL", strategy.long)
+    strategy.exit("ScLX", "ScalpL", profit=atr * scalpTP / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    eTip = "SCALP LONG\nPAC breakout\nTP: $" + str.tostring(math.round(atr * scalpTP, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1))
+    label.new(bar_index, low - atr * 0.3, "↑sc", style=label.style_label_up, color=color.new(color.teal, 20), textcolor=color.white, size=size.tiny, tooltip=eTip)
 
-// ── Dashboard with trade log ──
+if scalpSell and not isShort and sideways
+    strategy.entry("ScalpS", strategy.short)
+    strategy.exit("ScSX", "ScalpS", profit=atr * scalpTP / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    eTip = "SCALP SHORT\nPAC breakdown\nTP: $" + str.tostring(math.round(atr * scalpTP, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1))
+    label.new(bar_index, high + atr * 0.3, "↓sc", style=label.style_label_down, color=color.new(color.purple, 20), textcolor=color.white, size=size.tiny, tooltip=eTip)
+
+// PAC pullback in trend (recovery after pullback into channel)
+if pacBuySignal and not isLong and not zoneLong
+    strategy.entry("PB_L", strategy.long)
+    strategy.exit("PBX", "PB_L", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    label.new(bar_index, low - atr * 0.3, "↑pb", style=label.style_label_up, color=color.new(color.green, 40), textcolor=color.white, size=size.tiny, tooltip="PULLBACK LONG\nTrend recovery above PAC\nTP: $" + str.tostring(math.round(atr, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)))
+
+if pacSellSignal and not isShort and not zoneShort
+    strategy.entry("PB_S", strategy.short)
+    strategy.exit("PBX", "PB_S", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    label.new(bar_index, high + atr * 0.3, "↓pb", style=label.style_label_down, color=color.new(color.red, 40), textcolor=color.white, size=size.tiny, tooltip="PULLBACK SHORT\nTrend recovery below PAC\nTP: $" + str.tostring(math.round(atr, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)))
+
+// ── Visuals ──
+// PAC channel
+pU = plot(pacH, "PAC High", color.new(color.gray, 60), 1)
+pL2 = plot(pacL, "PAC Low",  color.new(color.gray, 60), 1)
+fill(pU, pL2, color=sideways ? color.new(color.yellow, 90) : color.new(color.gray, 95))
+plot(pacC, "PAC Mid", color.new(color.red, 60), 1)
+
+// Trend EMAs
+plot(emaFast, "EMA " + str.tostring(fastEma), color.new(color.green, 40), 2)
+plot(emaMed,  "EMA " + str.tostring(medEma),  color.new(color.blue, 40),  2)
+
+// Trend background
+color bg = na
+if trendUp
+    bg := color.new(color.green, 95)
+if trendDn
+    bg := color.new(color.red, 95)
+if sideways
+    bg := color.new(color.yellow, 97)
+bgcolor(bg)
+
+// Fib reference
+plot(fib382, "Fib 38.2", color.new(color.orange, 75), 1, plot.style_stepline)
+plot(fib618, "Fib 61.8", color.new(color.green, 70),  1, plot.style_stepline)
+
+// ── Dashboard ──
 if tbl and barstate.islast
     var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
     pos = isLong ? "LONG" : isShort ? "SHORT" : "FLAT"
     color pc = isLong ? color.green : isShort ? color.red : color.gray
-    ac = math.max(bestDConf, bestSConf)
-    at = ac >= 70 ? "A+" : ac >= 50 ? "A" : ac >= 30 ? "B" : ac > 0 ? "C" : "—"
-    color cc = ac >= 60 ? color.green : ac >= 30 ? color.yellow : color.gray
+    mode = trending ? (trendUp ? "TREND UP" : "TREND DN") : "SCALP"
+    color mc = trendUp ? color.green : trendDn ? color.red : color.yellow
     wr2 = totalTrades > 0 ? wins * 100.0 / totalTrades : 0.0
     color pnlC = totalPnl >= 0 ? color.green : color.red
     table.cell(t, 0, 0, "SYGNIF",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 1, 0, "5m BTC",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 0, 1, "Position",  text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 1, pos,         text_color=pc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Zone",      text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2, at + " " + str.tostring(math.round(ac, 0)) + "%", text_color=cc, text_size=size.normal)
+    table.cell(t, 0, 2, "Mode",      text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2, mode,        text_color=mc,          text_size=size.normal)
     table.cell(t, 0, 3, "Trades",    text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 3, str.tostring(totalTrades) + " (" + str.tostring(wins) + "W " + str.tostring(losses) + "L)", text_color=color.white, text_size=size.small)
     table.cell(t, 0, 4, "Win Rate",  text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 4, str.tostring(math.round(wr2, 1)) + "%", text_color=wr2 >= 50 ? color.green : color.red, text_size=size.small)
     table.cell(t, 0, 5, "Net PnL",   text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 5, str.tostring(math.round(totalPnl, 2)), text_color=pnlC, text_size=size.normal)
+    table.cell(t, 1, 5, str.tostring(math.round(totalPnl, 4)), text_color=pnlC, text_size=size.normal)
     table.cell(t, 0, 6, "Zones",     text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 6, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT2)) + "S", text_color=color.white, text_size=size.tiny)
-    chopStr = choppy ? "CHOP " + str.tostring(choppyCount) + "/4" : "CLEAR"
-    color chopC = choppy ? color.orange : color.green
-    table.cell(t, 0, 7, "Market",    text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7, chopStr,     text_color=chopC,       text_size=size.tiny)
+    table.cell(t, 0, 7, "RSI/Vol",   text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
 
-alertcondition(goLong and not isLong,   "SYGNIF Long",  "SYGNIF: LONG")
-alertcondition(goShort and not isShort, "SYGNIF Short", "SYGNIF: SHORT")
+alertcondition(zoneLong or scalpBuy or pacBuySignal,    "SYGNIF Long",  "SYGNIF: LONG")
+alertcondition(zoneShort or scalpSell or pacSellSignal, "SYGNIF Short", "SYGNIF: SHORT")
