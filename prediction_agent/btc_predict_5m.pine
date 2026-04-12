@@ -1,16 +1,19 @@
 //@version=6
-strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=200, max_lines_count=200)
+strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_lines_count=500)
 
 // ── Inputs ──
+zzLen    = input.int(9,     "ZigZag Length", minval=5)
+fibFact  = input.float(0.33,"MSB Fib Confirm", step=0.01)
 pivotLen = input.int(10,    "Pivot Lookback", minval=5)
 fibLen   = input.int(50,    "Fib Lookback", minval=20)
-sfVol    = input.float(3.0, "Swing Fail Vol Filter %", step=0.5)
+sfVol    = input.float(3.0, "SF Vol Filter %", step=0.5)
 tpMul    = input.float(2.5, "TP (x ATR)", step=0.5)
 slMul    = input.float(1.5, "SL (x ATR)", step=0.5)
-minSc    = input.int(72,    "Min Score", minval=60, maxval=85)
+minSc    = input.int(70,    "Min Score", minval=60, maxval=85)
 cdBars   = input.int(24,    "Cooldown Bars", minval=6)
 tbl      = input.bool(true, "Dashboard")
-showZone = input.bool(true, "Show Liq Zones")
+showOB   = input.bool(true, "Show Order Blocks")
+showLiq  = input.bool(true, "Show Liq Zones")
 fibPlt   = input.bool(true, "Show Fib")
 
 // ── Core indicators ──
@@ -37,11 +40,98 @@ rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
 htfUp  = close > e50_1h and rsi_1h > 45
 htfDn  = close < e50_1h and rsi_1h < 55
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKET STRUCTURE (ZigZag + MSB + Order Blocks)
+// ══════════════════════════════════════════════════════════════════════════════
+
+to_up   = high >= ta.highest(zzLen)
+to_down = low <= ta.lowest(zzLen)
+
+var int trend = 1
+trend := trend == 1 and to_down ? -1 : trend == -1 and to_up ? 1 : trend
+
+// Track swing points
+lastUpSince  = ta.barssince(to_up[1])
+lastDnSince  = ta.barssince(to_down[1])
+lowVal  = ta.lowest(nz(lastUpSince > 0 ? lastUpSince : 1, 1))
+highVal = ta.highest(nz(lastDnSince > 0 ? lastDnSince : 1, 1))
+
+var float[] hiPts = array.new_float(0)
+var float[] loPts = array.new_float(0)
+var int[]   hiIdx = array.new_int(0)
+var int[]   loIdx = array.new_int(0)
+
+if ta.change(trend) != 0
+    if trend == 1
+        array.push(loPts, lowVal)
+        array.push(loIdx, bar_index - ta.barssince(lowVal == low))
+    if trend == -1
+        array.push(hiPts, highVal)
+        array.push(hiIdx, bar_index - ta.barssince(highVal == high))
+
+// Get recent swing points
+float h0 = array.size(hiPts) > 0 ? array.last(hiPts) : na
+float h1 = array.size(hiPts) > 1 ? array.get(hiPts, array.size(hiPts) - 2) : na
+float l0 = array.size(loPts) > 0 ? array.last(loPts) : na
+float l1 = array.size(loPts) > 1 ? array.get(loPts, array.size(loPts) - 2) : na
+
+// Market structure state
+var int mktStr = 1
+lastL0 = ta.valuewhen(ta.change(mktStr) != 0, nz(l0), 0)
+lastH0 = ta.valuewhen(ta.change(mktStr) != 0, nz(h0), 0)
+
+if not na(l0) and not na(l1) and not na(h0) and not na(h1)
+    if lastL0 != l0 or lastH0 != h0
+        if mktStr == 1 and l0 < l1 and l0 < l1 - math.abs(nz(h0) - l1) * fibFact
+            mktStr := -1
+        if mktStr == -1 and h0 > h1 and h0 > h1 + math.abs(h1 - nz(l0)) * fibFact
+            mktStr := 1
+
+bullMSB = ta.change(mktStr) > 0
+bearMSB = ta.change(mktStr) < 0
+mktBull = mktStr == 1
+mktBear = mktStr == -1
+
+// ── Order Block detection ──
+// Bullish OB = last bearish candle before the bullish MSB move
+// Bearish OB = last bullish candle before the bearish MSB move
+var float buOBtop = na
+var float buOBbtm = na
+var float beOBtop = na
+var float beOBbtm = na
+var bool  buOBactive = false
+var bool  beOBactive = false
+
+if bullMSB
+    for i = 1 to 20
+        if close[i] < open[i]
+            buOBtop := high[i]
+            buOBbtm := low[i]
+            buOBactive := true
+            break
+
+if bearMSB
+    for i = 1 to 20
+        if close[i] > open[i]
+            beOBtop := high[i]
+            beOBbtm := low[i]
+            beOBactive := true
+            break
+
+// Price in OB zone
+inBullOB = buOBactive and close >= buOBbtm and close <= buOBtop
+inBearOB = beOBactive and close >= beOBbtm and close <= beOBtop
+
+// OB invalidation: price closes below bull OB or above bear OB
+if buOBactive and close < buOBbtm - atr * 0.5
+    buOBactive := false
+if beOBactive and close > beOBtop + atr * 0.5
+    beOBactive := false
+
 // ── Fibonacci ──
 fibHi  = ta.highest(high, fibLen)
 fibLo  = ta.lowest(low, fibLen)
 fibRng = fibHi - fibLo
-fib236 = fibHi - fibRng * 0.236
 fib382 = fibHi - fibRng * 0.382
 fib500 = fibHi - fibRng * 0.500
 fib618 = fibHi - fibRng * 0.618
@@ -52,112 +142,82 @@ if close <= fib618 and close >= fib786
     fibScore := 1.0
 else if close <= fib382 and close > fib618
     fibScore := 0.5
-else if close > fib236
+else if close > fibHi - fibRng * 0.236
     fibScore := -0.7
 
-fibLongBoost  = (low <= fib618 and close > fib618 and close > open) or (low <= fib786 and close > fib786 and close > open)
-fibShortBoost = (high >= fib236 and close < fib236 and close < open) or (high >= fib382 and close < fib382 and close < open)
+fibLongB  = (low <= fib618 and close > fib618 and close > open) or (low <= fib786 and close > fib786 and close > open)
+fibShortB = (high >= fibHi - fibRng * 0.236 and close < fibHi - fibRng * 0.236 and close < open)
 
-// ══════════════════════════════════════════════════════════════════════════════
-// LIQUIDITY SWINGS (pivot-based, inspired by LuxAlgo concept)
-// ══════════════════════════════════════════════════════════════════════════════
-
-// Detect real swing points via pivots
+// ── Liquidity swings (pivot-based) ──
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 
-// Track swing high zone (wick top to body top)
-var float shTop = na   // wick high
-var float shBtm = na   // body top (max of open, close)
-var int   shBar = 0
-var int   shRetests = 0
-var float shVol = 0.0
-var bool  shSwept = false
+var float shTop = na
+var float shBtm = na
+var int   shRet = 0
+var bool  shSwp = false
 
 if not na(ph)
-    shTop     := high[pivotLen]
-    shBtm     := math.max(open[pivotLen], close[pivotLen])
-    shBar     := bar_index - pivotLen
-    shRetests := 0
-    shVol     := 0.0
-    shSwept   := false
+    shTop := high[pivotLen]
+    shBtm := math.max(open[pivotLen], close[pivotLen])
+    shRet := 0
+    shSwp := false
 
-// Track swing low zone (wick low to body low)
-var float slTop = na   // body bottom (min of open, close)
-var float slBtm = na   // wick low
-var int   slBar = 0
-var int   slRetests = 0
-var float slVol = 0.0
-var bool  slSwept = false
+var float slTopZ = na
+var float slBtmZ = na
+var int   slRet = 0
+var bool  slSwp = false
 
 if not na(pl)
-    slTop     := math.min(open[pivotLen], close[pivotLen])
-    slBtm     := low[pivotLen]
-    slBar     := bar_index - pivotLen
-    slRetests := 0
-    slVol     := 0.0
-    slSwept   := false
+    slTopZ := math.min(open[pivotLen], close[pivotLen])
+    slBtmZ := low[pivotLen]
+    slRet  := 0
+    slSwp  := false
 
-// Count retests: price enters the zone but doesn't break through
-if not shSwept and not na(shTop)
+if not shSwp and not na(shTop)
     if high >= shBtm and high <= shTop and close < shBtm
-        shRetests += 1
-        shVol += volume
+        shRet += 1
+if not slSwp and not na(slBtmZ)
+    if low <= slTopZ and low >= slBtmZ and close > slTopZ
+        slRet += 1
 
-if not slSwept and not na(slBtm)
-    if low <= slTop and low >= slBtm and close > slTop
-        slRetests += 1
-        slVol += volume
+shSweep = not shSwp and not na(shTop) and high > shTop and close < shTop and close < open and vr > 1.3
+slSweep = not slSwp and not na(slBtmZ) and low < slBtmZ and close > slBtmZ and close > open and vr > 1.3
 
-// Sweep detection: price breaks through zone then reverses
-shSweepBar = not shSwept and high > shTop and close < shTop and close < open
-slSweepBar = not slSwept and low < slBtm and close > slBtm and close > open
+if high > nz(shTop)
+    shSwp := true
+if low < nz(slBtmZ)
+    slSwp := true
 
-if high > shTop
-    shSwept := true
-if low < slBtm
-    slSwept := true
-
-// Liquidity density: more retests = more stops stacked = stronger reaction expected
-liqDensityHi = shRetests
-liqDensityLo = slRetests
-
-// Sweep quality: volume on sweep bar vs average (real liquidity taken)
-sweepVolHi = shSweepBar and vr > 1.3
-sweepVolLo = slSweepBar and vr > 1.3
-
-// Distance to liq zones (ATR-normalized)
-distToSH = na(shTop) ? 99.0 : (shTop - close) / atr
-distToSL = na(slBtm) ? 99.0 : (close - slBtm) / atr
-
-// Magnet effect: price approaching liq zone with momentum
-liqMagnetUp = distToSH < 3 and distToSH > 0 and mom > 0
-liqMagnetDn = distToSL < 3 and distToSL > 0 and mom < 0
-
-// ── Failure Swing (uses pivot S/R, not simple highest) ──
+// Failure swing = sweep + reversal at real S/R
 volPct = math.abs(close - e120) / e120 * 100
-sfVolOk = volPct > sfVol
+fsLong  = slSweep and volPct > sfVol and slRet >= 1
+fsShort = shSweep and volPct > sfVol and shRet >= 1
 
-// Swing fail = sweep + reversal + volatility filter
-fsLong  = slSweepBar and sfVolOk and liqDensityLo >= 1
-fsShort = shSweepBar and sfVolOk and liqDensityHi >= 1
-
-// ── Composite liq + sweep score ──
+// ── Liq + structure composite score ──
 float liqScore = 0.0
-if sweepVolLo or fsLong
+if slSweep or fsLong
     liqScore := 1.0
-else if sweepVolHi or fsShort
+else if shSweep or fsShort
     liqScore := -1.0
-else if liqMagnetDn
-    liqScore := -0.4
-else if liqMagnetUp
-    liqScore := 0.4
-else if distToSL < 2
-    liqScore := -0.2
-else if distToSH < 2
-    liqScore := 0.2
 
-// ── Scoring (13 indicators) ──
+float msbScore = 0.0
+if mktBull
+    msbScore := 0.6
+if mktBear
+    msbScore := -0.6
+if bullMSB
+    msbScore := 1.0
+if bearMSB
+    msbScore := -1.0
+
+float obScore = 0.0
+if inBullOB and mktBull
+    obScore := 1.0
+if inBearOB and mktBear
+    obScore := -1.0
+
+// ── Scoring (14 indicators) ──
 s1  = (rsiV - 50) / 50
 s2  = (rsiF - 50) / 50
 s3  = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
@@ -176,55 +236,58 @@ else
 s10 = math.max(math.min((close - close[5]) / (atr * 5), 1.0), -1.0)
 s11 = fibScore
 s12 = liqScore
-float s13 = 0.0
-if fsLong
-    s13 := 1.0
-else if fsShort
-    s13 := -1.0
+s13 = msbScore
+s14 = obScore
 
-raw = s1*10 + s2*6 + s3*10 + s4*5 + s5*7 + s6*3 + s7*5 + s8*3 + s9*9 + s10*6 + s11*12 + s12*12 + s13*12
+raw = s1*8 + s2*5 + s3*8 + s4*4 + s5*6 + s6*3 + s7*4 + s8*3 + s9*7 + s10*5 + s11*10 + s12*10 + s13*14 + s14*13
 score = ta.ema(math.max(math.min((raw/100 + 1) / 2 * 100, 100.0), 0.0), 5)
 
-// ── Consensus — 6 voters ──
+// ── Consensus — 7 voters ──
 v1 = score >= 60 ? 1 : score <= 40 ? -1 : 0
 v2 = hl > 0 and close > e26 ? 1 : hl < 0 and close < e26 ? -1 : 0
 v3 = rsiV > 55 and mom > 0 ? 1 : rsiV < 45 and mom < 0 ? -1 : 0
 v4 = fibScore >= 0.5 ? 1 : fibScore <= -0.5 ? -1 : 0
 v5 = liqScore >= 0.5 ? 1 : liqScore <= -0.5 ? -1 : 0
-v6 = s13 >= 0.5 ? 1 : s13 <= -0.5 ? -1 : 0
-votes = v1 + v2 + v3 + v4 + v5 + v6
+v6 = msbScore >= 0.5 ? 1 : msbScore <= -0.5 ? -1 : 0
+v7 = obScore >= 0.5 ? 1 : obScore <= -0.5 ? -1 : 0
+votes = v1 + v2 + v3 + v4 + v5 + v6 + v7
 
 // ── Entry paths ──
-bullBase     = score >= minSc and votes >= 4 and vr > 1.2 and htfUp and close > e50 and rsiV < 70
-bearBase     = score <= (100 - minSc) and votes <= -4 and vr > 1.2 and htfDn and close < e50 and rsiV > 30
-sfLongEntry  = fsLong and htfUp and votes >= 2 and rsiV < 45 and liqDensityLo >= 2
-sfShortEntry = fsShort and htfDn and votes <= -2 and rsiV > 55 and liqDensityHi >= 2
-sweepLong    = sweepVolLo and fibLongBoost and htfUp and rsiV < 40
-sweepShort   = sweepVolHi and fibShortBoost and htfDn and rsiV > 60
+bullBase     = score >= minSc and votes >= 4 and vr > 1.2 and htfUp and mktBull and rsiV < 70
+bearBase     = score <= (100 - minSc) and votes <= -4 and vr > 1.2 and htfDn and mktBear and rsiV > 30
+// OB entry: price returned to order block in confirmed structure
+obLongEntry  = inBullOB and mktBull and htfUp and votes >= 3 and rsiV < 50 and score >= 55
+obShortEntry = inBearOB and mktBear and htfDn and votes <= -3 and rsiV > 50 and score <= 45
+// Sweep + fib confluence
+sweepLong    = slSweep and fibLongB and htfUp and mktBull and rsiV < 40
+sweepShort   = shSweep and fibShortB and htfDn and mktBear and rsiV > 60
+// Swing fail at retested level
+sfLongEntry  = fsLong and htfUp and mktBull and votes >= 2 and rsiV < 45
+sfShortEntry = fsShort and htfDn and mktBear and votes <= -2 and rsiV > 55
 
-bull = bullBase or sfLongEntry or sweepLong
-bear = bearBase or sfShortEntry or sweepShort
+bull = bullBase or obLongEntry or sweepLong or sfLongEntry
+bear = bearBase or obShortEntry or sweepShort or sfShortEntry
 
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
 flat   = strategy.position_size == 0
 
-// ── TP: EMA120 for swing fails, fib levels, fallback ATR ──
+// ── TP ──
 float tpLong = atr * tpMul
-if fsLong and e120 > close and e120 - close > atr
+if inBullOB and not na(shBtm) and shBtm - close > atr
+    tpLong := shBtm - close
+else if fsLong and e120 > close and e120 - close > atr
     tpLong := e120 - close
 else if close < fib500 and fib382 - close > atr
     tpLong := fib382 - close
-else if close < fib618 and fib500 - close > atr
-    tpLong := fib500 - close
 
 float tpShort = atr * tpMul
-if fsShort and close > e120 and close - e120 > atr
+if inBearOB and not na(slTopZ) and close - slTopZ > atr
+    tpShort := close - slTopZ
+else if fsShort and close > e120 and close - e120 > atr
     tpShort := close - e120
 else if close > fib500 and close - fib618 > atr
     tpShort := close - fib618
-else if close > fib382 and close - fib500 > atr
-    tpShort := close - fib500
 
 slD = atr * slMul
 
@@ -239,41 +302,50 @@ if bear and cooled and flat
     lastEntry := bar_index
 
 // ── Visuals ──
-// Liq zones as boxes
+// Order blocks as boxes
+var box buOBbox = na
+var box beOBbox = na
+
+if bullMSB and showOB and buOBactive
+    buOBbox := box.new(bar_index - 20, buOBtop, bar_index + 10, buOBbtm, border_color=color.green, bgcolor=color.new(color.green, 85), text="OB", text_color=color.green, text_size=size.tiny, text_halign=text.align_right)
+
+if bearMSB and showOB and beOBactive
+    beOBbox := box.new(bar_index - 20, beOBtop, bar_index + 10, beOBbtm, border_color=color.red, bgcolor=color.new(color.red, 85), text="OB", text_color=color.red, text_size=size.tiny, text_halign=text.align_right)
+
+if buOBactive and not na(buOBbox) and showOB
+    box.set_right(buOBbox, bar_index + 5)
+if beOBactive and not na(beOBbox) and showOB
+    box.set_right(beOBbox, bar_index + 5)
+
+// Liq zones
 var box shBox = na
-var box slBox = na
-
-if not na(ph) and showZone
-    shBox := box.new(shBar, shTop, bar_index, shBtm, border_color=color.new(color.red, 60), bgcolor=color.new(color.red, 88))
-if not shSwept and not na(shBox) and showZone
+var box slBoxZ = na
+if not na(ph) and showLiq
+    shBox := box.new(bar_index - pivotLen, shTop, bar_index, shBtm, border_color=color.new(color.red, 60), bgcolor=color.new(color.red, 90))
+if not shSwp and not na(shBox) and showLiq
     box.set_right(shBox, bar_index + 3)
-if shSwept and not shSwept[1] and not na(shBox)
-    box.set_right(shBox, bar_index)
+if not na(pl) and showLiq
+    slBoxZ := box.new(bar_index - pivotLen, slTopZ, bar_index, slBtmZ, border_color=color.new(color.teal, 60), bgcolor=color.new(color.teal, 90))
+if not slSwp and not na(slBoxZ) and showLiq
+    box.set_right(slBoxZ, bar_index + 3)
 
-if not na(pl) and showZone
-    slBox := box.new(slBar, slTop, bar_index, slBtm, border_color=color.new(color.teal, 60), bgcolor=color.new(color.teal, 88))
-if not slSwept and not na(slBox) and showZone
-    box.set_right(slBox, bar_index + 3)
-if slSwept and not slSwept[1] and not na(slBox)
-    box.set_right(slBox, bar_index)
-
-// Fib levels
-plot(fibPlt ? fib382 : na, "Fib 38.2%", color.new(color.orange, 50), 1, plot.style_cross)
-plot(fibPlt ? fib500 : na, "Fib 50%",   color.new(color.blue, 50),   1, plot.style_cross)
-plot(fibPlt ? fib618 : na, "Fib 61.8%", color.new(color.green, 40),  2, plot.style_cross)
-plot(e50_1h, "1h EMA50", color.new(color.orange, 40), 2)
-plot(e120,   "EMA120",   color.new(color.yellow, 50), 1)
+// MSB markers
+plotshape(bullMSB, "Bull MSB", shape.labelup,   location.belowbar, color.green, text="MSB", textcolor=color.white, size=size.tiny)
+plotshape(bearMSB, "Bear MSB", shape.labeldown,  location.abovebar, color.red,   text="MSB", textcolor=color.white, size=size.tiny)
 
 // Sweep markers
-plotshape(sweepVolLo, "Sweep Long",  shape.diamond, location.belowbar, color.new(color.lime, 0),    size=size.small)
-plotshape(sweepVolHi, "Sweep Short", shape.diamond, location.abovebar, color.new(color.fuchsia, 0),  size=size.small)
-plotshape(fsLong and not sweepVolLo,  "SF Long",  shape.cross, location.belowbar, color.new(color.lime, 20),    size=size.small)
-plotshape(fsShort and not sweepVolHi, "SF Short", shape.cross, location.abovebar, color.new(color.fuchsia, 20),  size=size.small)
+plotshape(slSweep and not fsLong,  "Sweep L", shape.diamond, location.belowbar, color.new(color.lime, 0),    size=size.tiny)
+plotshape(shSweep and not fsShort, "Sweep S", shape.diamond, location.abovebar, color.new(color.fuchsia, 0),  size=size.tiny)
+
+plot(fibPlt ? fib382 : na, "Fib 38.2%", color.new(color.orange, 50), 1, plot.style_cross)
+plot(fibPlt ? fib618 : na, "Fib 61.8%", color.new(color.green, 40),  2, plot.style_cross)
+plot(e50_1h, "1h EMA50", color.new(color.orange, 40), 2)
+plot(e120,   "EMA120",   color.new(color.yellow, 60), 1)
 
 color bg = color.new(color.gray, 97)
-if score >= 60
+if mktBull and score >= 55
     bg := color.new(color.green, 93)
-if score <= 40
+if mktBear and score <= 45
     bg := color.new(color.red, 93)
 bgcolor(bg)
 
@@ -282,44 +354,42 @@ plot(score, "Score", color.new(color.blue, 100), display=display.data_window)
 // ── Dashboard ──
 if tbl and barstate.islast
     var t = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 20), border_width=1)
-    dir = score >= minSc ? "LONG" : score <= (100 - minSc) ? "SHORT" : "FLAT"
-    con = votes >= 4 ? "STRONG" : votes >= 3 ? "BULLISH" : votes <= -4 ? "STRONG" : votes <= -3 ? "BEARISH" : "WAIT"
-    color dc = score >= minSc ? color.green : score <= (100 - minSc) ? color.red : color.gray
+    dir = bull ? "LONG" : bear ? "SHORT" : "FLAT"
+    struc = mktBull ? "BULL" : mktBear ? "BEAR" : "—"
+    color dc = bull ? color.green : bear ? color.red : color.gray
+    color sc = mktBull ? color.green : mktBear ? color.red : color.gray
+    con = votes >= 4 ? "STRONG" : votes >= 3 ? "YES" : votes <= -4 ? "STRONG" : votes <= -3 ? "YES" : "WAIT"
     color cc = math.abs(votes) >= 4 ? (votes > 0 ? color.green : color.red) : math.abs(votes) >= 3 ? (votes > 0 ? color.green : color.red) : color.orange
-    htf = htfUp ? "UP" : htfDn ? "DOWN" : "FLAT"
+    htf = htfUp ? "UP" : htfDn ? "DN" : "—"
     color hc = htfUp ? color.green : htfDn ? color.red : color.gray
-    fibZ = fibScore >= 0.5 ? "BUY" : fibScore <= -0.5 ? "SELL" : "—"
-    color fc = fibScore >= 0.5 ? color.green : fibScore <= -0.5 ? color.red : color.gray
-    liqZ = sweepVolLo or fsLong ? "SWEPT L" : sweepVolHi or fsShort ? "SWEPT S" : liqMagnetDn ? "MAGNET DN" : liqMagnetUp ? "MAGNET UP" : "CLEAR"
-    color lc = liqScore >= 0.5 ? color.green : liqScore <= -0.5 ? color.red : math.abs(liqScore) > 0.2 ? color.orange : color.gray
-    rHi = na(shRetests) ? "—" : str.tostring(shRetests) + "x"
-    rLo = na(slRetests) ? "—" : str.tostring(slRetests) + "x"
-    table.cell(t, 0, 0,  "SYGNIF",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 1, 0,  "5m BTC",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1,  "Bias",       text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1,  dir,          text_color=dc,          text_size=size.normal)
-    table.cell(t, 0, 2,  "1h Trend",   text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2,  htf,          text_color=hc,          text_size=size.normal)
-    table.cell(t, 0, 3,  "Fib",        text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 3,  fibZ,         text_color=fc,          text_size=size.normal)
-    table.cell(t, 0, 4,  "Liq",        text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 4,  liqZ,         text_color=lc,          text_size=size.normal)
-    table.cell(t, 0, 5,  "Retests",    text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 5,  "H:" + rHi + " L:" + rLo, text_color=color.white, text_size=size.small)
-    table.cell(t, 0, 6,  "Consensus",  text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 6,  con + " " + str.tostring(votes) + "/6", text_color=cc, text_size=size.small)
-    table.cell(t, 0, 7,  "Score",      text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7,  str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
+    obZ = inBullOB ? "BULL OB" : inBearOB ? "BEAR OB" : "—"
+    color oc = inBullOB ? color.green : inBearOB ? color.red : color.gray
+    table.cell(t, 0, 0,  "SYGNIF",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0,  "5m BTC",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1,  "Bias",        text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1,  dir,           text_color=dc,          text_size=size.normal)
+    table.cell(t, 0, 2,  "Structure",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2,  struc,         text_color=sc,          text_size=size.normal)
+    table.cell(t, 0, 3,  "1h Trend",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3,  htf,           text_color=hc,          text_size=size.normal)
+    table.cell(t, 0, 4,  "Order Block", text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 4,  obZ,           text_color=oc,          text_size=size.normal)
+    table.cell(t, 0, 5,  "Consensus",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 5,  con + " " + str.tostring(votes) + "/7", text_color=cc, text_size=size.small)
+    table.cell(t, 0, 6,  "Score",       text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6,  str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
+    rHi = na(shRet) ? "—" : str.tostring(shRet) + "x"
+    rLo = na(slRet) ? "—" : str.tostring(slRet) + "x"
+    table.cell(t, 0, 7,  "Retests",     text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7,  "H:" + rHi + " L:" + rLo, text_color=color.white, text_size=size.tiny)
     float tpS = strategy.position_size > 0 ? tpLong : tpShort
-    table.cell(t, 0, 8,  "TP / SL",    text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 0, 8,  "TP / SL",     text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 8,  str.tostring(math.round(tpS, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
-    shStr = na(shTop) ? "—" : str.tostring(math.round(shTop, 0))
-    slStr = na(slBtm) ? "—" : str.tostring(math.round(slBtm, 0))
-    table.cell(t, 0, 9,  "Swing H/L",  text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 9,  shStr + " / " + slStr, text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 10, "ATR",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 0, 9,  "Fib",         text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 9,  str.tostring(math.round(fibScore, 2)), text_color=fibScore > 0 ? color.green : fibScore < 0 ? color.red : color.gray, text_size=size.tiny)
+    table.cell(t, 0, 10, "ATR",         text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 10, str.tostring(math.round(atr, 0)),   text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 11, "Vol",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 0, 11, "Vol",         text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 11, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
 
 alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
