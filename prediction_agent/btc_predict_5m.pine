@@ -1,0 +1,211 @@
+// ============================================================================
+// SYGNIF BTC Prediction — 5min Timeframe
+// Pine Script v5 — TradingView
+//
+// Port of btc_predict_runner.py scoring logic.
+// Uses the same 10 indicators, scores them into a composite prediction,
+// then shows directional bias (UP / DOWN) with confidence %.
+//
+// How to use:
+//   1. Open TradingView → BTCUSDT (or BTCUSD) on 5m chart
+//   2. Pine Editor → paste this script → Add to chart
+//   3. Green background = bullish, red = bearish, gray = neutral
+//   4. Table in top-right shows live prediction + breakdown
+//   5. Arrows mark signal flips
+// ============================================================================
+
+//@version=5
+indicator("SYGNIF BTC Predict 5m", overlay=true, max_labels_count=500)
+
+// --- Inputs ---
+rsiLen       = input.int(14,  "RSI Period")
+rsiFastLen   = input.int(6,   "RSI Fast Period")
+macdFast     = input.int(12,  "MACD Fast")
+macdSlow     = input.int(26,  "MACD Slow")
+macdSignal   = input.int(9,   "MACD Signal")
+bbLen        = input.int(20,  "Bollinger Period")
+bbDev        = input.float(2, "Bollinger StdDev")
+atrLen       = input.int(14,  "ATR Period")
+momLen       = input.int(10,  "Momentum Period")
+rocLen       = input.int(12,  "ROC Period")
+willrLen     = input.int(14,  "Williams %R Period")
+volSmaLen    = input.int(20,  "Volume SMA Period")
+lookback     = input.int(5,   "Lookback Window (bars for slope)")
+showTable    = input.bool(true,"Show Dashboard")
+showSignals  = input.bool(true,"Show Arrow Signals")
+
+// --- Indicators (same set as btc_predict_runner.py) ---
+
+// RSI
+rsiVal      = ta.rsi(close, rsiLen)
+rsiFast     = ta.rsi(close, rsiFastLen)
+
+// MACD
+[macdLine, signalLine, histLine] = ta.macd(close, macdFast, macdSlow, macdSignal)
+
+// Bollinger Bands
+bbMid       = ta.sma(close, bbLen)
+bbStd       = ta.stdev(close, bbLen)
+bbUpper     = bbMid + bbDev * bbStd
+bbLower     = bbMid - bbDev * bbStd
+bbPos       = (close - bbLower) / (bbUpper - bbLower)
+
+// ATR
+atrVal      = ta.atr(atrLen)
+
+// Momentum
+momVal      = close - close[momLen]
+
+// Rate of Change
+rocVal      = (close - close[rocLen]) / close[rocLen] * 100
+
+// Williams %R
+willrVal    = -100 * (ta.highest(high, willrLen) - close) / (ta.highest(high, willrLen) - ta.lowest(low, willrLen))
+
+// Volume vs average
+volSma      = ta.sma(volume, volSmaLen)
+volRatio    = volume / volSma
+
+// EMA trend
+ema12       = ta.ema(close, 12)
+ema26       = ta.ema(close, 26)
+ema50       = ta.ema(close, 50)
+
+// --- Scoring Engine ---
+// Each indicator contributes a score from -1 (bearish) to +1 (bullish).
+// Weighted sum → composite score 0..100.
+
+// RSI score: >60 bullish, <40 bearish, scaled
+rsiScore     = (rsiVal - 50) / 50
+rsiFastScore = (rsiFast - 50) / 50
+
+// MACD score: histogram direction + crossover
+macdScore    = histLine > 0 ? math.min(histLine / atrVal, 1.0) : math.max(histLine / atrVal, -1.0)
+
+// Bollinger score: position within bands
+bbScore      = (bbPos - 0.5) * 2
+
+// Momentum score
+momNorm      = momVal / atrVal
+momScore     = math.max(math.min(momNorm / 3, 1.0), -1.0)
+
+// ROC score
+rocScore     = math.max(math.min(rocVal / 3, 1.0), -1.0)
+
+// Williams %R score: >-20 overbought (bearish), <-80 oversold (bullish)
+willrScore   = -(willrVal + 50) / 50
+
+// Volume score: high volume confirms direction
+volScore     = momVal > 0 ? math.min((volRatio - 1) / 2, 1.0) : -math.min((volRatio - 1) / 2, 1.0)
+
+// EMA trend score
+emaTrend     = close > ema12 and ema12 > ema26 ? 1.0 : close < ema12 and ema12 < ema26 ? -1.0 : (close - ema26) / atrVal * 0.3
+
+// Slope (price direction over lookback)
+slope        = (close - close[lookback]) / (atrVal * lookback)
+slopeScore   = math.max(math.min(slope, 1.0), -1.0)
+
+// --- Weighted composite ---
+float w_rsi       = 15
+float w_rsiFast   = 10
+float w_macd      = 15
+float w_bb        = 8
+float w_mom       = 10
+float w_roc       = 5
+float w_willr     = 8
+float w_vol       = 5
+float w_ema       = 14
+float w_slope     = 10
+float totalWeight = w_rsi + w_rsiFast + w_macd + w_bb + w_mom + w_roc + w_willr + w_vol + w_ema + w_slope
+
+rawScore = (rsiScore    * w_rsi +
+            rsiFastScore* w_rsiFast +
+            macdScore   * w_macd +
+            bbScore     * w_bb +
+            momScore    * w_mom +
+            rocScore    * w_roc +
+            willrScore  * w_willr +
+            volScore    * w_vol +
+            emaTrend    * w_ema +
+            slopeScore  * w_slope) / totalWeight
+
+// Scale from [-1, +1] → [0, 100]
+compositeScore = math.max(math.min((rawScore + 1) / 2 * 100, 100), 0)
+
+// Smooth to reduce noise on 5m
+smoothScore = ta.ema(compositeScore, 3)
+
+// --- Prediction ---
+bullish = smoothScore >= 60
+bearish = smoothScore <= 40
+neutral = not bullish and not bearish
+
+confidence = math.abs(smoothScore - 50) * 2
+direction  = bullish ? "UP" : bearish ? "DOWN" : "NEUTRAL"
+
+// --- Consensus (mimic 3-model vote) ---
+// Model 1: score-based (above)
+vote1 = bullish ? 1 : bearish ? -1 : 0
+// Model 2: MACD + EMA agreement
+vote2 = histLine > 0 and close > ema26 ? 1 : histLine < 0 and close < ema26 ? -1 : 0
+// Model 3: RSI + momentum agreement
+vote3 = rsiVal > 55 and momVal > 0 ? 1 : rsiVal < 45 and momVal < 0 ? -1 : 0
+
+totalVotes = vote1 + vote2 + vote3
+consensus  = totalVotes >= 2 ? "BULLISH" : totalVotes <= -2 ? "BEARISH" : "MIXED"
+
+// --- Visual: background color ---
+bgColor = bullish ? color.new(color.green, 90) : bearish ? color.new(color.red, 90) : color.new(color.gray, 95)
+bgcolor(bgColor)
+
+// --- Visual: signal arrows on flips ---
+longEntry  = bullish and not bullish[1] and showSignals
+shortEntry = bearish and not bearish[1] and showSignals
+
+plotshape(longEntry,  title="Buy Signal",  style=shape.triangleup,   location=location.belowbar, color=color.green, size=size.small)
+plotshape(shortEntry, title="Sell Signal", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.small)
+
+// --- Visual: score line (separate pane would need a second indicator, so plot as overlay-hidden) ---
+plot(smoothScore, "Prediction Score", color=color.new(color.blue, 100), display=display.data_window)
+plot(confidence,  "Confidence %",     color=color.new(color.blue, 100), display=display.data_window)
+
+// --- Dashboard Table ---
+if showTable and barstate.islast
+    var t = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 20), border_width=1)
+
+    dirColor = bullish ? color.green : bearish ? color.red : color.gray
+
+    table.cell(t, 0, 0, "SYGNIF Predict",  text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0, "5m BTC",           text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+
+    table.cell(t, 0, 1, "Direction",         text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 1, direction,           text_color=dirColor,   text_size=size.normal)
+
+    table.cell(t, 0, 2, "Confidence",        text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(math.round(confidence, 1)) + "%", text_color=dirColor, text_size=size.normal)
+
+    table.cell(t, 0, 3, "Score",             text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(math.round(smoothScore, 1)) + " / 100", text_color=color.white, text_size=size.small)
+
+    consColor = totalVotes >= 2 ? color.green : totalVotes <= -2 ? color.red : color.orange
+    table.cell(t, 0, 4, "Consensus",         text_color=color.gray, text_size=size.small)
+    table.cell(t, 1, 4, consensus,           text_color=consColor,  text_size=size.normal)
+
+    table.cell(t, 0, 5, "",                  text_color=color.gray, text_size=size.tiny)
+    table.cell(t, 1, 5, "",                  text_color=color.gray, text_size=size.tiny)
+
+    table.cell(t, 0, 6, "RSI",              text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, str.tostring(math.round(rsiVal, 1)), text_color=rsiVal > 60 ? color.green : rsiVal < 40 ? color.red : color.white, text_size=size.tiny)
+
+    table.cell(t, 0, 7, "MACD Hist",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(histLine, 1)), text_color=histLine > 0 ? color.green : color.red, text_size=size.tiny)
+
+    table.cell(t, 0, 8, "Will %R",          text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 8, str.tostring(math.round(willrVal, 1)), text_color=willrVal < -80 ? color.green : willrVal > -20 ? color.red : color.white, text_size=size.tiny)
+
+    table.cell(t, 0, 9, "Vol Ratio",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 9, str.tostring(math.round(volRatio, 2)) + "x", text_color=volRatio > 1.5 ? color.green : color.white, text_size=size.tiny)
+
+// --- Alerts ---
+alertcondition(longEntry,  title="SYGNIF Buy",  message="SYGNIF 5m: BTC prediction flipped BULLISH (score {{plot_0}}, confidence {{plot_1}}%)")
+alertcondition(shortEntry, title="SYGNIF Sell", message="SYGNIF 5m: BTC prediction flipped BEARISH (score {{plot_0}}, confidence {{plot_1}}%)")
