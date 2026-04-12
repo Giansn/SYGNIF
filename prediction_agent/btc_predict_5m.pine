@@ -21,9 +21,29 @@ e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 htfUp  = close > e50_1h
 htfDn  = close < e50_1h
 
-// Sideways filter: ADX < 20 = choppy, suppress signals
-adxVal = ta.rma(math.abs(ta.change(ta.highest(high, 14)) - ta.change(ta.lowest(low, 14))), 14)
-choppy = ta.atr(5) / ta.atr(20) < 0.8 and math.abs(close - e20) / atr < 0.5
+// ── Sideways detection (multi-layer) ──
+// 1. ATR compression: short ATR shrinking vs long ATR
+atrRatio = ta.atr(5) / ta.atr(20)
+atrSqueeze = atrRatio < 0.75
+
+// 2. Bollinger Squeeze: bands narrowing = low volatility
+bbW = ta.stdev(close, 20) * 2 / ta.sma(close, 20) * 100
+bbSqueeze = bbW < ta.sma(bbW, 50)
+
+// 3. Price hugging EMA: flat, no trend
+emaFlat = math.abs(close - e20) / atr < 0.4
+
+// 4. Small candles: 3 consecutive bars with body < 0.08% = chop
+smallBar = math.abs(close - open) / close * 100 < 0.08
+threeSmall = smallBar and smallBar[1] and smallBar[2]
+
+// 5. Range bound: high-low range of last 12 bars < 1.5x ATR
+range12 = ta.highest(high, 12) - ta.lowest(low, 12)
+rangeTight = range12 < atr * 1.5
+
+// Combined: choppy if 2+ signals agree
+choppyCount = (atrSqueeze ? 1 : 0) + (bbSqueeze and emaFlat ? 1 : 0) + (threeSmall ? 1 : 0) + (rangeTight ? 1 : 0)
+choppy = choppyCount >= 2
 
 // S/R
 resLvl = ta.highest(high, srLen)
@@ -240,7 +260,10 @@ if strategy.closedtrades > 0
         else
             losses += 1
 
-// Flip: entry reverses position instantly (process_orders_on_close=true)
+// Close position if market turns choppy while in trade
+if choppy and (isLong or isShort) and choppyCount >= 3
+    strategy.close_all(comment="Chop exit")
+
 if goLong and not isLong
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", loss=atr * slMul / syminfo.mintick)
@@ -287,8 +310,10 @@ if tbl and barstate.islast
     table.cell(t, 1, 5, str.tostring(math.round(totalPnl, 2)), text_color=pnlC, text_size=size.normal)
     table.cell(t, 0, 6, "Zones",     text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 6, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT2)) + "S", text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 7, "RSI/Vol",   text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
+    chopStr = choppy ? "CHOP " + str.tostring(choppyCount) + "/4" : "CLEAR"
+    color chopC = choppy ? color.orange : color.green
+    table.cell(t, 0, 7, "Market",    text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, chopStr,     text_color=chopC,       text_size=size.tiny)
 
 alertcondition(goLong and not isLong,   "SYGNIF Long",  "SYGNIF: LONG")
 alertcondition(goShort and not isShort, "SYGNIF Short", "SYGNIF: SHORT")
