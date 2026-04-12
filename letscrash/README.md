@@ -5,3 +5,4 @@ Design notes and **plans** that may land in main Sygnif code later. Contents her
 | Document | Purpose |
 |----------|---------|
 | [PREDICTION_PIPELINE_AND_SELF_LEARNING_PLAN.md](./PREDICTION_PIPELINE_AND_SELF_LEARNING_PLAN.md) | Prediction engine, briefing HTTP ports, pipeline, bounded self-learning, RAM |
+| [BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md](./BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md) | Optional BTC-only Freqtrade Docker service + **ruleprediction-agent** + **sygnif-agent-inherit** mapping |

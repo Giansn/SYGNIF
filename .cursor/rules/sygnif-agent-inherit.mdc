@@ -68,5 +68,6 @@ Document `source`, `reason`, and `updated` (ISO UTC) when you change overrides.
 
 - Telegram Sygnif Agent: `finance-agent.service` → `~/finance_agent/bot.py` (shared `.env` with this repo).
 - This worker: `cursor-agent-worker.service` — same repo, Cloud-side agent runs with full file/shell tools.
+- Optional **BTC-only spot** Freqtrade container (second trader) — design and compose fragment: **`letscrash/BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md`**; when implementing, keep **one `finance-agent` :8091** surface (**ruleprediction-agent**) and shared **inherit** behaviour above.
 
 Use the files above as the **single source of behaviour** for “what the finance agent can reason about.”
