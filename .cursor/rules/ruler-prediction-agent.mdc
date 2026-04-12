@@ -1,0 +1,31 @@
+---
+description: Prediction agent tree — RAM, briefing port contract, no silent live wiring
+globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md
+alwaysApply: false
+---
+
+# Ruler: prediction engine & network briefing
+
+## Scope
+
+Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, or **`.cursor/agents/prediction-agent.md`**.
+
+## Ports (do not fragment)
+
+- **Finance-agent HTTP** defaults to **`FINANCE_AGENT_HTTP_PORT=8091`** (see `finance_agent/bot.py`). **`GET /briefing`**, sentiment, overseer hooks share this listener — avoid a second ad-hoc HTTP server for the same contract.
+
+## RAM / CPU
+
+- Run **at most one** heavy train job (runner, Hydra `cryptopredictions`, PyTorch submodule) at a time on small instances.
+- Keep **`btc_predict_runner.py`** windows bounded via CLI; do not load full history into briefing responses.
+
+## Self-learning (bounded)
+
+- **Mechanical feedback:** `scripts/prediction_horizon_check.py` (`save` / `check`) — no live orders.
+- **Retrain:** prefer systemd timer + logs; document disk and peak RAM.
+- **Live risk:** only via **`user_data/strategy_adaptation.json`** (clamped keys) or explicit strategy integration + tests — never imply `prediction_agent` drives Freqtrade by default.
+
+## Honesty
+
+- `prediction_agent/SOURCES.md`: BitVision / CryptoPredictions extracts are **reference** unless explicitly wired.
+- Delegate narrative TA parity to **`finance_agent/bot.py`** / **SygnifStrategy** — not duplicated here.
