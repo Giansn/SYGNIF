@@ -64,9 +64,9 @@ flowchart LR
 
 ---
 
-## 5. Config sketch (`user_data/config_btc_spot_dedicated.json`)
+## 5. Config (`user_data/config_btc_spot_dedicated.json`)
 
-**Create from** `config.json`: set **`max_open_trades`** low (e.g. 3), **`pair_whitelist`** / static list **`["BTC/USDT"]`**, **`pairlists`** → **`StaticPairList`**, own **`api_server.listen_port`** 8080 (internal), new **`jwt_secret_key`**, separate **`db_url`** filename, **`dry_run`: true** until reviewed.
+**Start from** **`user_data/config_btc_spot_dedicated.example.json`**: copy → `config_btc_spot_dedicated.json`, set Bybit **`key`/`secret`**, replace **`jwt_secret_key`** (e.g. `openssl rand -hex 32`) and **`api_server.password`**, tune **`dry_run`**. Example uses **`max_open_trades`: 3**, **`pair_whitelist`** `["BTC/USDT"]` only, **`StaticPairList`**, **`telegram.enabled`: false** (rely on `notification-handler` webhooks unless you want direct bot Telegram). CORS includes **`:8282`** for a dedicated dashboard proxy.
 
 **API host port:** map **host `8282` → container `8080`** so **8181** (main spot) and **8081** (futures) stay unchanged.
 
