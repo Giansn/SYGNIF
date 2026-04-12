@@ -170,16 +170,9 @@ isShort = strategy.position_size < 0
 isBullCandle = close > open
 isBearCandle = close < open
 
-// If both zones hit on same bar: bearish candle → short wins, bullish → long wins
-bool goLong  = false
-bool goShort = false
-
-if hitDemand and hitSupply
-    goLong  := isBullCandle
-    goShort := isBearCandle
-else
-    goLong  := hitDemand
-    goShort := hitSupply
+// Candle must confirm direction — no long on red candle, no short on green candle
+bool goLong  = hitDemand and isBullCandle
+bool goShort = hitSupply and isBearCandle
 
 if goLong and not isLong
     strategy.entry("Long", strategy.long)
