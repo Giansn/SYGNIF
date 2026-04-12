@@ -164,11 +164,24 @@ if array.size(sT2) > 0
             array.remove(sX, i)
             array.remove(sL2, i)
 
-// ── FLIP: demand = long, supply = short ──
+// ── FLIP: candle direction decides priority when both zones hit ──
 isLong  = strategy.position_size > 0
 isShort = strategy.position_size < 0
+isBullCandle = close > open
+isBearCandle = close < open
 
-if hitDemand and not isLong
+// If both zones hit on same bar: bearish candle → short wins, bullish → long wins
+bool goLong  = false
+bool goShort = false
+
+if hitDemand and hitSupply
+    goLong  := isBullCandle
+    goShort := isBearCandle
+else
+    goLong  := hitDemand
+    goShort := hitSupply
+
+if goLong and not isLong
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", loss=atr * slMul / syminfo.mintick)
     tier = bestDConf >= 70 ? "A+" : bestDConf >= 50 ? "A" : bestDConf >= 30 ? "B" : "C"
@@ -178,7 +191,7 @@ if hitDemand and not isLong
     clr = bestDConf >= 60 ? color.green : bestDConf >= 30 ? color.new(color.green, 20) : color.new(color.green, 40)
     label.new(bar_index, low - atr * 0.4, "▲" + tier, style=label.style_label_up, color=clr, textcolor=color.white, size=bestDConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
-if hitSupply and not isShort
+if goShort and not isShort
     strategy.entry("Short", strategy.short)
     strategy.exit("SX", "Short", loss=atr * slMul / syminfo.mintick)
     tier = bestSConf >= 70 ? "A+" : bestSConf >= 50 ? "A" : bestSConf >= 30 ? "B" : "C"
