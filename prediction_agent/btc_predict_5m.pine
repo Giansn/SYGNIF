@@ -2,34 +2,23 @@
 strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500)
 
 // ── Inputs ──
-zzLen    = input.int(9,     "ZigZag Length", minval=5)
-fibFact  = input.float(0.33,"MSB Fib Confirm", step=0.01)
-pivotLen = input.int(10,    "Pivot Lookback", minval=5)
-fibLen   = input.int(50,    "Fib Lookback", minval=20)
-sfVol    = input.float(3.0, "SF Vol Filter %", step=0.5)
+pivotLen = input.int(7,     "Pivot Length", minval=3)
 tpMul    = input.float(2.5, "TP (x ATR)", step=0.5)
 slMul    = input.float(1.5, "SL (x ATR)", step=0.5)
-minSc    = input.int(70,    "Min Score", minval=60, maxval=85)
-cdBars   = input.int(24,    "Cooldown Bars", minval=6)
+minConf  = input.int(40,    "Min Confidence to Trade", minval=20, maxval=80)
+cdBars   = input.int(20,    "Cooldown Bars", minval=6)
 tbl      = input.bool(true, "Dashboard")
 
-// ── Core indicators ──
+// ── Indicators ──
 rsiV = ta.rsi(close, 14)
 rsiF = ta.rsi(close, 6)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
-bbM  = ta.sma(close, 20)
-bbS  = ta.stdev(close, 20)
-bbU  = bbM + 2 * bbS
-bbL  = bbM - 2 * bbS
 atr  = ta.atr(14)
 mom  = close - close[10]
-roc  = (close - close[12]) / close[12] * 100
-wr   = -100 * (ta.highest(high, 14) - close) / (ta.highest(high, 14) - ta.lowest(low, 14))
 vr   = volume / ta.sma(volume, 20)
 e12  = ta.ema(close, 12)
 e26  = ta.ema(close, 26)
 e50  = ta.ema(close, 50)
-e120 = ta.ema(close, 120)
 
 // ── Higher TF ──
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
@@ -38,377 +27,200 @@ htfUp  = close > e50_1h and rsi_1h > 45
 htfDn  = close < e50_1h and rsi_1h < 55
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MARKET STRUCTURE (ZigZag + MSB)
+// ZONE DETECTION — pivot swing highs/lows become zones
 // ══════════════════════════════════════════════════════════════════════════════
-to_up   = high >= ta.highest(zzLen)
-to_down = low <= ta.lowest(zzLen)
-
-var int zzTrend = 1
-zzTrend := zzTrend == 1 and to_down ? -1 : zzTrend == -1 and to_up ? 1 : zzTrend
-
-lastUpSince = ta.barssince(to_up[1])
-lastDnSince = ta.barssince(to_down[1])
-lowVal  = ta.lowest(nz(lastUpSince > 0 ? lastUpSince : 1, 1))
-highVal = ta.highest(nz(lastDnSince > 0 ? lastDnSince : 1, 1))
-
-var float[] hiPts = array.new_float(0)
-var float[] loPts = array.new_float(0)
-
-if ta.change(zzTrend) != 0
-    if zzTrend == 1
-        array.push(loPts, lowVal)
-    if zzTrend == -1
-        array.push(hiPts, highVal)
-
-float h0 = array.size(hiPts) > 0 ? array.last(hiPts) : na
-float h1 = array.size(hiPts) > 1 ? array.get(hiPts, array.size(hiPts) - 2) : na
-float l0 = array.size(loPts) > 0 ? array.last(loPts) : na
-float l1 = array.size(loPts) > 1 ? array.get(loPts, array.size(loPts) - 2) : na
-
-var int mktStr = 1
-lastL0 = ta.valuewhen(ta.change(mktStr) != 0, nz(l0), 0)
-lastH0 = ta.valuewhen(ta.change(mktStr) != 0, nz(h0), 0)
-
-if not na(l0) and not na(l1) and not na(h0) and not na(h1)
-    if lastL0 != l0 or lastH0 != h0
-        if mktStr == 1 and l0 < l1 and l0 < l1 - math.abs(nz(h0) - l1) * fibFact
-            mktStr := -1
-        if mktStr == -1 and h0 > h1 and h0 > h1 + math.abs(h1 - nz(l0)) * fibFact
-            mktStr := 1
-
-bullMSB = ta.change(mktStr) > 0
-bearMSB = ta.change(mktStr) < 0
-mktBull = mktStr == 1
-mktBear = mktStr == -1
-
-// ── Order Block ──
-var float buOBtop = na
-var float buOBbtm = na
-var float beOBtop = na
-var float beOBbtm = na
-var bool  buOBon = false
-var bool  beOBon = false
-var int   buOBbar = 0
-var int   beOBbar = 0
-
-if bullMSB
-    for i = 1 to 20
-        if close[i] < open[i]
-            buOBtop := high[i]
-            buOBbtm := low[i]
-            buOBon  := true
-            buOBbar := bar_index
-            break
-
-if bearMSB
-    for i = 1 to 20
-        if close[i] > open[i]
-            beOBtop := high[i]
-            beOBbtm := low[i]
-            beOBon  := true
-            beOBbar := bar_index
-            break
-
-inBullOB = buOBon and close >= buOBbtm and close <= buOBtop
-inBearOB = beOBon and close >= beOBbtm and close <= beOBtop
-
-if buOBon and close < buOBbtm - atr * 0.5
-    buOBon := false
-if beOBon and close > beOBtop + atr * 0.5
-    beOBon := false
-
-// ── Fibonacci ──
-fibHi  = ta.highest(high, fibLen)
-fibLo  = ta.lowest(low, fibLen)
-fibRng = fibHi - fibLo
-fib382 = fibHi - fibRng * 0.382
-fib500 = fibHi - fibRng * 0.500
-fib618 = fibHi - fibRng * 0.618
-fib786 = fibHi - fibRng * 0.786
-
-float fibScore = 0.0
-if close <= fib618 and close >= fib786
-    fibScore := 1.0
-else if close <= fib382 and close > fib618
-    fibScore := 0.5
-else if close > fibHi - fibRng * 0.236
-    fibScore := -0.7
-
-fibLongB  = (low <= fib618 and close > fib618 and close > open) or (low <= fib786 and close > fib786 and close > open)
-fibShortB = high >= fibHi - fibRng * 0.236 and close < fibHi - fibRng * 0.236 and close < open
-
-// ── Liquidity swings ──
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 
-var float shTop = na
-var float shBtm = na
-var int   shRet = 0
-var bool  shSwp = false
+// Supply zone (resistance): candle body-to-wick at pivot high
+var float supTop = na
+var float supBtm = na
+var int   supBar = 0
+var int   supRet = 0
+var bool  supOk  = true
 
 if not na(ph)
-    shTop := high[pivotLen]
-    shBtm := math.max(open[pivotLen], close[pivotLen])
-    shRet := 0
-    shSwp := false
+    supTop := high[pivotLen]
+    supBtm := math.max(open[pivotLen], close[pivotLen])
+    supBar := bar_index - pivotLen
+    supRet := 0
+    supOk  := true
 
-var float slTopZ = na
-var float slBtmZ = na
-var int   slRet = 0
-var bool  slSwp = false
+// Demand zone (support): candle body-to-wick at pivot low
+var float demTop = na
+var float demBtm = na
+var int   demBar = 0
+var int   demRet = 0
+var bool  demOk  = true
 
 if not na(pl)
-    slTopZ := math.min(open[pivotLen], close[pivotLen])
-    slBtmZ := low[pivotLen]
-    slRet  := 0
-    slSwp  := false
+    demTop := math.min(open[pivotLen], close[pivotLen])
+    demBtm := low[pivotLen]
+    demBar := bar_index - pivotLen
+    demRet := 0
+    demOk  := true
 
-if not shSwp and not na(shTop) and high >= shBtm and high <= shTop and close < shBtm
-    shRet += 1
-if not slSwp and not na(slBtmZ) and low <= slTopZ and low >= slBtmZ and close > slTopZ
-    slRet += 1
+// Count retests
+if supOk and not na(supTop) and high >= supBtm and close < supBtm
+    supRet += 1
+if demOk and not na(demBtm) and low <= demTop and close > demTop
+    demRet += 1
 
-shSweep = not shSwp and not na(shTop) and high > shTop and close < shTop and close < open and vr > 1.3
-slSweep = not slSwp and not na(slBtmZ) and low < slBtmZ and close > slBtmZ and close > open and vr > 1.3
+// Zone broken = invalidated
+if supOk and not na(supTop) and close > supTop + atr * 0.3
+    supOk := false
+if demOk and not na(demBtm) and close < demBtm - atr * 0.3
+    demOk := false
 
-if high > nz(shTop)
-    shSwp := true
-if low < nz(slBtmZ)
-    slSwp := true
-
-volPct = math.abs(close - e120) / e120 * 100
-fsLong  = slSweep and volPct > sfVol and slRet >= 1
-fsShort = shSweep and volPct > sfVol and shRet >= 1
-
-float liqScore = 0.0
-if slSweep or fsLong
-    liqScore := 1.0
-else if shSweep or fsShort
-    liqScore := -1.0
-
-float msbScore = mktBull ? 0.6 : mktBear ? -0.6 : 0.0
-if bullMSB
-    msbScore := 1.0
-if bearMSB
-    msbScore := -1.0
-
-float obScore = 0.0
-if inBullOB and mktBull
-    obScore := 1.0
-if inBearOB and mktBear
-    obScore := -1.0
+// Price inside zone
+inDemand = demOk and close >= demBtm and close <= demTop
+inSupply = supOk and close >= supBtm and close <= supTop
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CONFIDENCE ENGINE
+// CONFIDENCE — builds per zone from width, age, retests, confluence
 // ══════════════════════════════════════════════════════════════════════════════
+demHeight = demOk ? (demTop - demBtm) / close * 100 : 0.0
+supHeight = supOk ? (supTop - supBtm) / close * 100 : 0.0
+demAge    = demOk ? math.min(bar_index - demBar, 200) : 0
+supAge    = supOk ? math.min(bar_index - supBar, 200) : 0
 
-// Confidence builds from: zone age, zone height, retests, volume, structure alignment
-// Resets after a big move (ATR breakout)
+// Fib confluence: is the zone near a key fib level?
+fibHi  = ta.highest(high, 50)
+fibLo  = ta.lowest(low, 50)
+fibRng = fibHi - fibLo
+fib618 = fibHi - fibRng * 0.618
+fib382 = fibHi - fibRng * 0.382
 
-var float bullConf = 0.0
-var float bearConf = 0.0
+demAtFib = demOk and demBtm <= fib618 + atr * 0.5 and demBtm >= fib618 - atr * 0.5
+supAtFib = supOk and supTop >= fib382 - atr * 0.5 and supTop <= fib382 + atr * 0.5
 
-// Zone height as % of price
-buOBheight = buOBon ? (buOBtop - buOBbtm) / close * 100 : 0.0
-beOBheight = beOBon ? (beOBtop - beOBbtm) / close * 100 : 0.0
+// Build confidence 0-100
+float longConf = 0.0
+if demOk
+    longConf := math.min(demHeight * 25 + demAge * 0.15 + demRet * 20 + (htfUp ? 15.0 : 0.0) + (demAtFib ? 15.0 : 0.0) + (rsiV < 40 ? 10.0 : 0.0), 100.0)
 
-// Zone age in bars
-buOBage = buOBon ? bar_index - buOBbar : 0
-beOBage = beOBon ? bar_index - beOBbar : 0
+float shortConf = 0.0
+if supOk
+    shortConf := math.min(supHeight * 25 + supAge * 0.15 + supRet * 20 + (htfDn ? 15.0 : 0.0) + (supAtFib ? 15.0 : 0.0) + (rsiV > 60 ? 10.0 : 0.0), 100.0)
 
-// Build confidence: wider zone + older + more retests + volume = more confident
-if buOBon
-    bullConf := math.min(buOBheight * 20 + math.min(buOBage, 100) * 0.3 + slRet * 15 + (mktBull ? 15.0 : 0.0) + (htfUp ? 10.0 : 0.0) + (fibScore > 0 ? fibScore * 10 : 0.0), 100.0)
-else
-    bullConf := 0.0
+// Expected move % = ATR-based, scaled by confidence
+longMove  = longConf > 0 ? atr * tpMul / close * 100 * (1 + longConf / 150) : 0.0
+shortMove = shortConf > 0 ? atr * tpMul / close * 100 * (1 + shortConf / 150) : 0.0
 
-if beOBon
-    bearConf := math.min(beOBheight * 20 + math.min(beOBage, 100) * 0.3 + shRet * 15 + (mktBear ? 15.0 : 0.0) + (htfDn ? 10.0 : 0.0) + (fibScore < 0 ? math.abs(fibScore) * 10 : 0.0), 100.0)
-else
-    bearConf := 0.0
+// Tier
+string longTier  = longConf >= 75 ? "A+" : longConf >= 55 ? "A" : longConf >= 35 ? "B" : longConf > 0 ? "C" : "—"
+string shortTier = shortConf >= 75 ? "A+" : shortConf >= 55 ? "A" : shortConf >= 35 ? "B" : shortConf > 0 ? "C" : "—"
 
-// Reset on big move (price moved > 2x ATR from OB)
-if buOBon and close > buOBtop + atr * 2
-    bullConf := 0.0
-    buOBon := false
-if beOBon and close < beOBbtm - atr * 2
-    bearConf := 0.0
-    beOBon := false
+// ── Quick directional score ──
+dirScore = (rsiV - 50) / 50 * 15 + (rsiF - 50) / 50 * 10 + (hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)) * 15 + math.max(math.min(mom / atr / 3, 1.0), -1.0) * 15 + (close > e12 and e12 > e26 ? 1.0 : close < e12 and e12 < e26 ? -1.0 : 0.0) * 15 + (htfUp ? 1.0 : htfDn ? -1.0 : 0.0) * 15 + (mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)) * 15
+score = ta.ema(math.max(math.min((dirScore / 100 + 1) / 2 * 100, 100.0), 0.0), 5)
 
-// Expected move % based on confidence + ATR
-bullExpMove = bullConf > 0 ? atr * tpMul / close * 100 * (1 + bullConf / 100) : 0.0
-bearExpMove = bearConf > 0 ? atr * tpMul / close * 100 * (1 + bearConf / 100) : 0.0
-
-// Confidence tier
-string bullTier = bullConf >= 75 ? "A+" : bullConf >= 55 ? "A" : bullConf >= 35 ? "B" : bullConf > 0 ? "C" : "—"
-string bearTier = bearConf >= 75 ? "A+" : bearConf >= 55 ? "A" : bearConf >= 35 ? "B" : bearConf > 0 ? "C" : "—"
-
-// ── Scoring (14 indicators) ──
-s1  = (rsiV - 50) / 50
-s2  = (rsiF - 50) / 50
-s3  = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
-s4  = ((close - bbL) / (bbU - bbL) - 0.5) * 2
-s5  = math.max(math.min(mom / atr / 3, 1.0), -1.0)
-s6  = math.max(math.min(roc / 3, 1.0), -1.0)
-s7  = -(wr + 50) / 50
-s8  = mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)
-float s9 = 0.0
-if close > e12 and e12 > e26
-    s9 := 1.0
-else if close < e12 and e12 < e26
-    s9 := -1.0
-else
-    s9 := math.max(math.min((close - e26) / atr * 0.3, 1.0), -1.0)
-s10 = math.max(math.min((close - close[5]) / (atr * 5), 1.0), -1.0)
-
-raw = s1*8 + s2*5 + s3*8 + s4*4 + s5*6 + s6*3 + s7*4 + s8*3 + s9*7 + s10*5 + fibScore*10 + liqScore*10 + msbScore*14 + obScore*13
-score = ta.ema(math.max(math.min((raw/100 + 1) / 2 * 100, 100.0), 0.0), 5)
-
-// ── Consensus — 7 voters ──
-v1 = score >= 60 ? 1 : score <= 40 ? -1 : 0
-v2 = hl > 0 and close > e26 ? 1 : hl < 0 and close < e26 ? -1 : 0
-v3 = rsiV > 55 and mom > 0 ? 1 : rsiV < 45 and mom < 0 ? -1 : 0
-v4 = fibScore >= 0.5 ? 1 : fibScore <= -0.5 ? -1 : 0
-v5 = liqScore >= 0.5 ? 1 : liqScore <= -0.5 ? -1 : 0
-v6 = msbScore >= 0.5 ? 1 : msbScore <= -0.5 ? -1 : 0
-v7 = obScore >= 0.5 ? 1 : obScore <= -0.5 ? -1 : 0
-votes = v1 + v2 + v3 + v4 + v5 + v6 + v7
-
-// ── Entry paths ──
-bullBase     = score >= minSc and votes >= 4 and vr > 1.2 and htfUp and mktBull and rsiV < 70
-bearBase     = score <= (100 - minSc) and votes <= -4 and vr > 1.2 and htfDn and mktBear and rsiV > 30
-obLongEntry  = inBullOB and mktBull and htfUp and votes >= 3 and rsiV < 50 and bullConf >= 35
-obShortEntry = inBearOB and mktBear and htfDn and votes <= -3 and rsiV > 50 and bearConf >= 35
-sweepLong    = slSweep and fibLongB and htfUp and mktBull and rsiV < 40
-sweepShort   = shSweep and fibShortB and htfDn and mktBear and rsiV > 60
-sfLongEntry  = fsLong and htfUp and mktBull and votes >= 2 and rsiV < 45
-sfShortEntry = fsShort and htfDn and mktBear and votes <= -2 and rsiV > 55
-
-bull = bullBase or obLongEntry or sweepLong or sfLongEntry
-bear = bearBase or obShortEntry or sweepShort or sfShortEntry
+// ── Entry conditions ──
+bull = inDemand and longConf >= minConf and htfUp and score >= 55 and rsiV < 65 and vr > 0.8
+bear = inSupply and shortConf >= minConf and htfDn and score <= 45 and rsiV > 35 and vr > 0.8
 
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
 flat   = strategy.position_size == 0
 
-// ── TP scaled by confidence ──
-float tpLong = atr * tpMul * (1 + bullConf / 200)
-if inBullOB and not na(shBtm) and shBtm - close > atr
-    tpLong := shBtm - close
-else if fsLong and e120 > close and e120 - close > atr
-    tpLong := e120 - close
-
-float tpShort = atr * tpMul * (1 + bearConf / 200)
-if inBearOB and not na(slTopZ) and close - slTopZ > atr
-    tpShort := close - slTopZ
-else if fsShort and close > e120 and close - e120 > atr
-    tpShort := close - e120
-
+tpL = atr * tpMul * (1 + longConf / 200)
+tpS = atr * tpMul * (1 + shortConf / 200)
 slD = atr * slMul
-
-// Entry label text
-string entryType = ""
-float  entryConf = 0.0
-float  entryMove = 0.0
 
 if bull and cooled and flat
     strategy.entry("Long", strategy.long)
-    strategy.exit("LX", "Long", profit=tpLong / syminfo.mintick, loss=slD / syminfo.mintick)
+    strategy.exit("LX", "Long", profit=tpL / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
-    entryConf := bullConf
-    entryMove := bullExpMove
-    entryType := "LONG"
 
 if bear and cooled and flat
     strategy.entry("Short", strategy.short)
-    strategy.exit("SX", "Short", profit=tpShort / syminfo.mintick, loss=slD / syminfo.mintick)
+    strategy.exit("SX", "Short", profit=tpS / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
-    entryConf := bearConf
-    entryMove := bearExpMove
-    entryType := "SHORT"
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CLEAN VISUALS — only meaningful marks
+// VISUALS — boxes + labels with hover tooltips
 // ══════════════════════════════════════════════════════════════════════════════
 
-// OB boxes: color intensity = confidence. Only active zones shown.
-var box buBox = na
-var box beBox = na
+// Demand zones (green) — always visible when active
+var box demBox = na
+if not na(pl)
+    demBox := box.new(demBar, demTop, bar_index + 5, demBtm, border_color=color.new(color.green, 40), bgcolor=color.new(color.green, math.round(92 - longConf * 0.4)))
+if demOk and not na(demBox)
+    box.set_right(demBox, bar_index + 5)
+    box.set_bgcolor(demBox, color.new(color.green, math.round(92 - longConf * 0.4)))
 
-if bullMSB and buOBon
-    buBox := box.new(bar_index - 15, buOBtop, bar_index + 5, buOBbtm, border_color=color.green, bgcolor=color.new(color.green, math.round(90 - bullConf * 0.4)), text_size=size.tiny, text_halign=text.align_right)
+// Supply zones (red) — always visible when active
+var box supBox = na
+if not na(ph)
+    supBox := box.new(supBar, supTop, bar_index + 5, supBtm, border_color=color.new(color.red, 40), bgcolor=color.new(color.red, math.round(92 - shortConf * 0.4)))
+if supOk and not na(supBox)
+    box.set_right(supBox, bar_index + 5)
+    box.set_bgcolor(supBox, color.new(color.red, math.round(92 - shortConf * 0.4)))
 
-if bearMSB and beOBon
-    beBox := box.new(bar_index - 15, beOBtop, bar_index + 5, beOBbtm, border_color=color.red, bgcolor=color.new(color.red, math.round(90 - bearConf * 0.4)), text_size=size.tiny, text_halign=text.align_right)
+// Zone info labels with HOVER TOOLTIP — placed at right edge of zone
+var label demLbl = na
+if not na(pl) and demOk
+    tipDem = "DEMAND ZONE (Long)\n" + "─────────────\n" + "Confidence: " + longTier + " " + str.tostring(math.round(longConf, 0)) + "%\n" + "Exp Move: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(demBtm, 0)) + " – " + str.tostring(math.round(demTop, 0)) + "\n" + "Height: " + str.tostring(math.round(demHeight, 3)) + "%\n" + "Age: " + str.tostring(demAge) + " bars\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib 61.8%: " + (demAtFib ? "YES" : "no") + "\n" + "1h Trend: " + (htfUp ? "UP" : htfDn ? "DOWN" : "FLAT") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "Volume: " + str.tostring(math.round(vr, 2)) + "x"
+    demLbl := label.new(bar_index + 3, demTop, longTier, style=label.style_label_left, color=color.new(color.green, 60), textcolor=color.white, size=size.tiny, tooltip=tipDem)
 
-// Extend active boxes and update text with confidence
-if buOBon and not na(buBox)
-    box.set_right(buBox, bar_index + 5)
-    box.set_text(buBox, bullTier + " " + str.tostring(math.round(bullConf, 0)) + "% → " + str.tostring(math.round(bullExpMove, 1)) + "%")
-    box.set_text_color(buBox, color.green)
+if demOk and not na(demLbl)
+    label.set_x(demLbl, bar_index + 3)
+    label.set_y(demLbl, nz(demTop))
+    tipDem2 = "DEMAND ZONE (Long)\n" + "─────────────\n" + "Confidence: " + longTier + " " + str.tostring(math.round(longConf, 0)) + "%\n" + "Exp Move: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(nz(demBtm), 0)) + " – " + str.tostring(math.round(nz(demTop), 0)) + "\n" + "Height: " + str.tostring(math.round(demHeight, 3)) + "%\n" + "Age: " + str.tostring(demAge) + " bars\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib: " + (demAtFib ? "YES" : "no") + " | 1h: " + (htfUp ? "UP" : "—") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 2)) + "x"
+    label.set_tooltip(demLbl, tipDem2)
+    label.set_text(demLbl, longTier)
 
-if beOBon and not na(beBox)
-    box.set_right(beBox, bar_index + 5)
-    box.set_text(beBox, bearTier + " " + str.tostring(math.round(bearConf, 0)) + "% → " + str.tostring(math.round(bearExpMove, 1)) + "%")
-    box.set_text_color(beBox, color.red)
+var label supLbl = na
+if not na(ph) and supOk
+    tipSup = "SUPPLY ZONE (Short)\n" + "─────────────\n" + "Confidence: " + shortTier + " " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Exp Move: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(supBtm, 0)) + " – " + str.tostring(math.round(supTop, 0)) + "\n" + "Height: " + str.tostring(math.round(supHeight, 3)) + "%\n" + "Age: " + str.tostring(supAge) + " bars\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib 38.2%: " + (supAtFib ? "YES" : "no") + "\n" + "1h Trend: " + (htfUp ? "UP" : htfDn ? "DOWN" : "FLAT") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "Volume: " + str.tostring(math.round(vr, 2)) + "x"
+    supLbl := label.new(bar_index + 3, supBtm, shortTier, style=label.style_label_left, color=color.new(color.red, 60), textcolor=color.white, size=size.tiny, tooltip=tipSup)
 
-// Entry signal labels — only on actual trades, with confidence info
-if entryType == "LONG"
-    tier = bullConf >= 75 ? "A+" : bullConf >= 55 ? "A" : bullConf >= 35 ? "B" : "C"
-    txt = "LONG " + tier + "\n" + str.tostring(math.round(bullConf, 0)) + "% conf\n→ " + str.tostring(math.round(bullExpMove, 1)) + "% exp"
-    label.new(bar_index, low - atr * 0.3, txt, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+if supOk and not na(supLbl)
+    label.set_x(supLbl, bar_index + 3)
+    label.set_y(supLbl, nz(supBtm))
+    tipSup2 = "SUPPLY ZONE (Short)\n" + "─────────────\n" + "Confidence: " + shortTier + " " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Exp Move: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(nz(supBtm), 0)) + " – " + str.tostring(math.round(nz(supTop), 0)) + "\n" + "Height: " + str.tostring(math.round(supHeight, 3)) + "%\n" + "Age: " + str.tostring(supAge) + " bars\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib: " + (supAtFib ? "YES" : "no") + " | 1h: " + (htfDn ? "DN" : "—") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 2)) + "x"
+    label.set_tooltip(supLbl, tipSup2)
+    label.set_text(supLbl, shortTier)
 
-if entryType == "SHORT"
-    tier = bearConf >= 75 ? "A+" : bearConf >= 55 ? "A" : bearConf >= 35 ? "B" : "C"
-    txt = "SHORT " + tier + "\n" + str.tostring(math.round(bearConf, 0)) + "% conf\n→ " + str.tostring(math.round(bearExpMove, 1)) + "% exp"
-    label.new(bar_index, high + atr * 0.3, txt, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+// Entry signal labels with full tooltip breakdown
+if bull and cooled and flat
+    eTip = "LONG ENTRY\n" + "═══════════\n" + "Tier: " + longTier + "\n" + "Confidence: " + str.tostring(math.round(longConf, 0)) + "%\n" + "Expected: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "TP: $" + str.tostring(math.round(tpL, 0)) + " | SL: $" + str.tostring(math.round(slD, 0)) + "\n" + "═══════════\n" + "Zone: " + str.tostring(math.round(nz(demBtm), 0)) + "–" + str.tostring(math.round(nz(demTop), 0)) + "\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib 61.8%: " + (demAtFib ? "YES" : "no") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "MACD: " + str.tostring(math.round(hl, 1)) + "\n" + "Vol: " + str.tostring(math.round(vr, 2)) + "x\n" + "Score: " + str.tostring(math.round(score, 1)) + "\n" + "1h Trend: UP"
+    label.new(bar_index, low - atr * 0.5, "▲ " + longTier, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal, tooltip=eTip)
 
-// Minimal reference lines
+if bear and cooled and flat
+    eTip = "SHORT ENTRY\n" + "═══════════\n" + "Tier: " + shortTier + "\n" + "Confidence: " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Expected: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "TP: $" + str.tostring(math.round(tpS, 0)) + " | SL: $" + str.tostring(math.round(slD, 0)) + "\n" + "═══════════\n" + "Zone: " + str.tostring(math.round(nz(supBtm), 0)) + "–" + str.tostring(math.round(nz(supTop), 0)) + "\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib 38.2%: " + (supAtFib ? "YES" : "no") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "MACD: " + str.tostring(math.round(hl, 1)) + "\n" + "Vol: " + str.tostring(math.round(vr, 2)) + "x\n" + "Score: " + str.tostring(math.round(score, 1)) + "\n" + "1h Trend: DOWN"
+    label.new(bar_index, high + atr * 0.5, "▼ " + shortTier, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal, tooltip=eTip)
+
+// 1h EMA only — no clutter
 plot(e50_1h, "1h EMA50", color.new(color.orange, 50), 2)
-plot(e120,   "EMA120",   color.new(color.yellow, 70), 1)
-
-// No background noise — only structure state
-color bg = na
-if mktBull and score >= 60
-    bg := color.new(color.green, 95)
-if mktBear and score <= 40
-    bg := color.new(color.red, 95)
-bgcolor(bg)
 
 // ── Dashboard ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 20), border_width=1)
-    dir = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
-    struc = mktBull ? "BULL" : mktBear ? "BEAR" : "—"
-    color dc = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
-    color strC = mktBull ? color.green : mktBear ? color.red : color.gray
-    con = votes >= 4 ? "STRONG" : votes >= 3 ? "YES" : votes <= -4 ? "STRONG" : votes <= -3 ? "YES" : "WAIT"
-    color cc = math.abs(votes) >= 4 ? (votes > 0 ? color.green : color.red) : math.abs(votes) >= 3 ? (votes > 0 ? color.green : color.red) : color.orange
-    actConf = bullConf > bearConf ? bullConf : bearConf
-    actTier = bullConf > bearConf ? bullTier : bearTier
-    actMove = bullConf > bearConf ? bullExpMove : bearExpMove
-    color confC = actConf >= 75 ? color.green : actConf >= 55 ? color.yellow : actConf >= 35 ? color.orange : color.gray
+    var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
+    pos = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
+    color pc = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
+    actConf = longConf > shortConf ? longConf : shortConf
+    actTier = longConf > shortConf ? longTier : shortTier
+    actMove = longConf > shortConf ? longMove : shortMove
+    color cfc = actConf >= 75 ? color.green : actConf >= 55 ? color.yellow : actConf >= 35 ? color.orange : color.gray
+    demStr = demOk ? str.tostring(math.round(nz(demBtm), 0)) + "–" + str.tostring(math.round(nz(demTop), 0)) : "—"
+    supStr = supOk ? str.tostring(math.round(nz(supBtm), 0)) + "–" + str.tostring(math.round(nz(supTop), 0)) : "—"
     table.cell(t, 0, 0, "SYGNIF",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 1, 0, "5m BTC",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 0, 1, "Position",    text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1, dir,           text_color=dc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Structure",   text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2, struc,         text_color=strC,        text_size=size.normal)
-    table.cell(t, 0, 3, "Confidence",  text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 3, actTier + " " + str.tostring(math.round(actConf, 0)) + "%", text_color=confC, text_size=size.normal)
-    table.cell(t, 0, 4, "Exp Move",    text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 4, str.tostring(math.round(actMove, 2)) + "%", text_color=confC, text_size=size.normal)
-    table.cell(t, 0, 5, "Consensus",   text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 5, con + " " + str.tostring(votes) + "/7", text_color=cc, text_size=size.small)
-    table.cell(t, 0, 6, "Score",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 6, str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
-    float tpS = strategy.position_size > 0 ? tpLong : tpShort
-    table.cell(t, 0, 7, "TP / SL",     text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7, str.tostring(math.round(tpS, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 8, "ATR",         text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 8, str.tostring(math.round(atr, 0)), text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 9, "Vol",         text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 9, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
+    table.cell(t, 1, 1, pos,           text_color=pc,          text_size=size.normal)
+    table.cell(t, 0, 2, "Confidence",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2, actTier + " " + str.tostring(math.round(actConf, 0)) + "%", text_color=cfc, text_size=size.normal)
+    table.cell(t, 0, 3, "Exp Move",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(math.round(actMove, 2)) + "%", text_color=cfc, text_size=size.normal)
+    table.cell(t, 0, 4, "Demand",      text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 4, demStr,        text_color=demOk ? color.green : color.gray, text_size=size.small)
+    table.cell(t, 0, 5, "Supply",      text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 5, supStr,        text_color=supOk ? color.red : color.gray,   text_size=size.small)
+    table.cell(t, 0, 6, "1h Trend",    text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, htfUp ? "UP" : htfDn ? "DN" : "—", text_color=htfUp ? color.green : htfDn ? color.red : color.gray, text_size=size.tiny)
+    table.cell(t, 0, 7, "Vol",         text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
 
 alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
 alertcondition(bear and cooled and flat, "SYGNIF Short", "SYGNIF: BTC SHORT")
