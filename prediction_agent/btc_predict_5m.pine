@@ -241,15 +241,25 @@ if array.size(sT2) > 0
             array.remove(sL2, i)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FLIP — instant on same bar, candle confirms, no signal in chop
+// FLIP — instant, candle confirms, no chop, cooldown after SL
 // ══════════════════════════════════════════════════════════════════════════════
 isLong  = strategy.position_size > 0
 isShort = strategy.position_size < 0
 
-goLong  = hitDemand and close > open and not choppy
-goShort = hitSupply and close < open and not choppy
+// Cooldown after SL: no re-entry for 6 bars after a stop loss
+var int lastSLbar = 0
+wasLong  = strategy.position_size[1] > 0
+wasShort = strategy.position_size[1] < 0
+isFlat   = strategy.position_size == 0
 
-// Track PnL from closed trades
+// Detect SL hit: was in position, now flat, and no new entry on this bar
+slHit = isFlat and (wasLong or wasShort)
+if slHit
+    lastSLbar := bar_index
+
+slCooled = bar_index - lastSLbar >= 6
+
+// Track PnL
 if strategy.closedtrades > 0
     lastPnl = strategy.closedtrades.profit(strategy.closedtrades - 1)
     if ta.change(strategy.closedtrades) > 0
@@ -260,7 +270,20 @@ if strategy.closedtrades > 0
         else
             losses += 1
 
-// Close position if market turns choppy while in trade
+// Consecutive losses: if last 2 trades were losses, wait longer
+var int consLoss = 0
+if strategy.closedtrades > 0 and ta.change(strategy.closedtrades) > 0
+    if strategy.closedtrades.profit(strategy.closedtrades - 1) < 0
+        consLoss += 1
+    else
+        consLoss := 0
+
+consLossCool = consLoss >= 2 and bar_index - lastSLbar < 20
+
+goLong  = hitDemand and close > open and not choppy and slCooled and not consLossCool
+goShort = hitSupply and close < open and not choppy and slCooled and not consLossCool
+
+// Close in deep chop
 if choppy and (isLong or isShort) and choppyCount >= 3
     strategy.close_all(comment="Chop exit")
 
