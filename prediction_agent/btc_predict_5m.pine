@@ -225,7 +225,9 @@ var int totalTrades = 0
 var int wins = 0
 var int losses = 0
 var float totalPnl = 0.0
-if strategy.closedtrades > 0 and ta.change(strategy.closedtrades) > 0
+// ta.change must run every bar (not only inside a conditional)
+ctClosed = ta.change(strategy.closedtrades)
+if strategy.closedtrades > 0 and ctClosed > 0
     totalTrades += 1
     lp = strategy.closedtrades.profit(strategy.closedtrades - 1)
     totalPnl += lp
@@ -270,12 +272,12 @@ if scalpSell and not isShort and sideways
 // PAC pullback in trend (recovery after pullback into channel)
 if pacBuySignal and not isLong and not zoneLong
     strategy.entry("PB_L", strategy.long)
-    strategy.exit("PBX", "PB_L", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    strategy.exit("PBX_L", "PB_L", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
     label.new(bar_index, low - atr * 0.3, "↑pb", style=label.style_label_up, color=color.new(color.green, 40), textcolor=color.white, size=size.tiny, tooltip="PULLBACK LONG\nTrend recovery above PAC\nTP: $" + str.tostring(math.round(atr, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)))
 
 if pacSellSignal and not isShort and not zoneShort
     strategy.entry("PB_S", strategy.short)
-    strategy.exit("PBX", "PB_S", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
+    strategy.exit("PBX_S", "PB_S", profit=atr * 1.0 / syminfo.mintick, loss=atr * scalpSL / syminfo.mintick)
     label.new(bar_index, high + atr * 0.3, "↓pb", style=label.style_label_down, color=color.new(color.red, 40), textcolor=color.white, size=size.tiny, tooltip="PULLBACK SHORT\nTrend recovery below PAC\nTP: $" + str.tostring(math.round(atr, 0)) + " | SL: $" + str.tostring(math.round(atr * scalpSL, 0)))
 
 // ── Visuals ──
@@ -285,9 +287,9 @@ pL2 = plot(pacL, "PAC Low",  color.new(color.gray, 60), 1)
 fill(pU, pL2, color=sideways ? color.new(color.yellow, 90) : color.new(color.gray, 95))
 plot(pacC, "PAC Mid", color.new(color.red, 60), 1)
 
-// Trend EMAs
-plot(emaFast, "EMA " + str.tostring(fastEma), color.new(color.green, 40), 2)
-plot(emaMed,  "EMA " + str.tostring(medEma),  color.new(color.blue, 40),  2)
+// Trend EMAs (plot title must be const string — lengths are in inputs)
+plot(emaFast, "Trend EMA (fast)", color.new(color.green, 40), 2)
+plot(emaMed,  "Trend EMA (slow)", color.new(color.blue, 40),  2)
 
 // Trend background
 color bg = na
