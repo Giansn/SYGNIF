@@ -13,6 +13,18 @@
 | `docker/Dockerfile.btc_trader` | Wie `Dockerfile.custom` + **`yfinance`** |
 | `user_data/config_btc_spot_dedicated.example.json` | Config-Vorlage (→ `config_btc_spot_dedicated.json`) |
 | `letscrash/BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md` | Netzwerk, :8091, RAM, Compose-Fragment |
+| `letscrash/RULE_AND_DATA_FLOW_LOOP.md` | **Kontinuierlicher** Rule-/Evidence-Loop, Agent-Konsultation, **Datenflüsse** (TV / Bybit / crypto-market-data / yfinance) |
+
+---
+
+## 1b. Datenflüsse (Kurz)
+
+| Richtung | Was |
+|----------|-----|
+| **Ein** | `finance-agent:8091` → Sentiment; `user_data/` → Strategy + Anpassung; Bybit → Kurse |
+| **Aus** | Webhooks → `notification-handler`; Freqtrade REST über Host-Port (z. B. 8282) |
+
+Ausführlich inkl. **TradingView-Pine**, **Indicator-Wishlist**, Schleife *prove / test / rm / apply*: **`RULE_AND_DATA_FLOW_LOOP.md`**.
 
 ---
 

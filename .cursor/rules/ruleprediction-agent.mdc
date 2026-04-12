@@ -1,6 +1,6 @@
 ---
-description: Prediction agent — RAM, briefing :8091, bounded self-learning (canonical; was ruler-prediction-agent)
-globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md
+description: Prediction + briefing + btc_Trader_Docker data flows; consult agents; continuous evidence loop (canonical; was ruler-prediction-agent)
+globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/BTC_TRADER_DOCKER.md
 alwaysApply: false
 ---
 
@@ -10,7 +10,22 @@ alwaysApply: false
 
 ## Scope
 
-Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, or **`.cursor/agents/prediction-agent.md`**.
+Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, **`.cursor/agents/prediction-agent.md`**, **`docker/Dockerfile.btc_trader`**, or **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** / **`letscrash/BTC_TRADER_DOCKER.md`**.
+
+## Consult other agents (set rules with correct data flows)
+
+Before changing **Docker**, **compose**, or **.mdc** rules for prediction/BTC pipelines, cross-check:
+
+| Surface | Path |
+|---------|------|
+| **prediction-agent** | `.cursor/agents/prediction-agent.md` |
+| **market-data** (on-chain/daily bundle) | `.cursor/agents/market-data.md` |
+| **btc-specialist** (Bybit + `btc_specialist/`) | `.cursor/agents/btc-specialist.md` |
+| **finance-agent** (briefing, `bot.py`) | `.cursor/agents/finance-agent.md` |
+| **Worker inherit** | `.cursor/rules/sygnif-agent-inherit.mdc` |
+| **Predict workflow** | `.cursor/rules/sygnif-predict-workflow.mdc` |
+
+**Long-form loop + indicator wishlist + btc_Trader_Docker I/O table:** **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — rules **evolve**; that file is the canonical narrative for the **continuous information → train → propose → prove → test → rm/apply → compare** cycle.
 
 ## Ports (do not fragment)
 

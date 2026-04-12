@@ -45,6 +45,8 @@ On this host: **`~/SYGNIF/.cursor/skills/...`** and **`~/SYGNIF/.cursor/agents/.
 
 When you touch those paths, apply **both** the inherit identity above **and** the **ruleprediction-agent** constraints (single **:8091** listener, no silent live wiring, bounded retrains).
 
+**Continuous rule / data-flow narrative** (optional read for Docker + indicators): **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — information → train → propose → prove → test → remove or apply → compare loop; **btc_Trader_Docker** ingress/egress; TradingView / on-chain wishlist.
+
 | Rule | Path | Role |
 |------|------|------|
 | **ruleprediction-agent** | `.cursor/rules/ruleprediction-agent.mdc` | Ports, RAM, bounded self-learning for prediction + briefing HTTP |
