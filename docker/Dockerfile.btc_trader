@@ -1,0 +1,15 @@
+# btc_Trader_Docker — same Freqtrade base + patches as Dockerfile.custom, plus yfinance.
+# Python packages live ONLY inside this image → no PEP 668 / --break-system-packages on the EC2 host.
+#
+# Build (repo root):
+#   docker build -f docker/Dockerfile.btc_trader -t sygnif-freqtrade-btc:latest .
+#
+# Use with compose service freqtrade-btc-spot (see letscrash/BTC_TRADER_DOCKER.md).
+
+FROM freqtradeorg/freqtrade:stable
+
+RUN pip install --no-cache-dir feedparser pandas_ta yfinance
+
+COPY user_data/status_patch.py /tmp/status_patch.py
+COPY user_data/notification_patch.py /tmp/notification_patch.py
+RUN python3 /tmp/status_patch.py && python3 /tmp/notification_patch.py

@@ -3,6 +3,8 @@
 **Scope:** optional **second** Freqtrade container — **BTC spot only**, same Sygnif stack (strategy, sentiment, notifications), lower RAM footprint than multi-pair spot.  
 **Not implemented** in root `docker-compose.yml` until you merge this design; copy fragments from §6.
 
+**btc_Trader_Docker:** dediziertes Image **`docker/Dockerfile.btc_trader`** (= `Dockerfile.custom` + **`yfinance`** im Container, kein PEP 668/`--break-system-packages` auf dem Host). Build/Rollout: **`letscrash/BTC_TRADER_DOCKER.md`**.
+
 **Naming (Cursor):**
 
 | User slash | Canonical file |
@@ -45,7 +47,7 @@ flowchart LR
 
 | Inherit topic | How the BTC Docker honours it |
 |----------------|--------------------------------|
-| **`SygnifStrategy`**, `user_data/strategies/` | Same image `docker/Dockerfile.custom`; mount **`./user_data`** so strategy file matches main spot bot (or pin a branch-specific copy — still one codebase). |
+| **`SygnifStrategy`**, `user_data/strategies/` | Image **`docker/Dockerfile.btc_trader`** (oder `Dockerfile.custom` wenn identisch ohne `yfinance`); mount **`./user_data`** so strategy file matches main spot bot (or pin a branch-specific copy — still one codebase). |
 | **`strategy_adaptation.json`** | **Shared** `user_data/` → **same** hot-reload file as other bots. **Risk:** two live bots read the same JSON; acceptable if you treat adaptation as **global policy**, dangerous if you want per-bot overrides (would need strategy code change — out of scope). |
 | **`finance_agent/bot.py` semantics** | Not mounted in trader; trader only calls **HTTP** sentiment URL — same as current `freqtrade` / `freqtrade-futures` services. |
 | **Tests / `SygnifStrategy.py` root copy** | Unaffected by Docker; still sync strategy per repo rules. |
@@ -78,7 +80,7 @@ flowchart LR
   freqtrade-btc-spot:
     build:
       context: .
-      dockerfile: "./docker/Dockerfile.custom"
+      dockerfile: "./docker/Dockerfile.btc_trader"
     restart: unless-stopped
     container_name: freqtrade-btc-spot
     networks:
