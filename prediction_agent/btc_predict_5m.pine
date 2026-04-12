@@ -1,11 +1,15 @@
 //@version=6
 strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500)
 
-pivotLen = input.int(5, "Pivot Length", minval=3, maxval=15)
-maxZones = input.int(6, "Max Zones Each Side", minval=2, maxval=10)
+// ── Inputs ──
+srLen    = input.int(20,    "S/R Lookback", minval=10)
+fibLen   = input.int(50,    "Fib Lookback", minval=20)
+zoneAtr  = input.float(0.3, "Zone Thickness (x ATR)", step=0.1)
 slMul    = input.float(1.5, "SL (x ATR)", step=0.5)
+maxZones = input.int(8,     "Max Zones Each Side", minval=3)
 tbl      = input.bool(true, "Dashboard")
 
+// ── Indicators ──
 atr    = ta.atr(14)
 rsiV   = ta.rsi(close, 14)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
@@ -14,9 +18,28 @@ e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 htfUp  = close > e50_1h
 htfDn  = close < e50_1h
 
-ph = ta.pivothigh(pivotLen, pivotLen)
-pl = ta.pivotlow(pivotLen, pivotLen)
+// ══════════════════════════════════════════════════════════════════════════════
+// REAL-TIME ZONES — no pivot delay
+// ══════════════════════════════════════════════════════════════════════════════
 
+// S/R from rolling high/low
+resLvl = ta.highest(high, srLen)
+supLvl = ta.lowest(low, srLen)
+
+// Fibonacci from wider lookback
+fibHi  = ta.highest(high, fibLen)
+fibLo  = ta.lowest(low, fibLen)
+fibRng = fibHi - fibLo
+fib236 = fibHi - fibRng * 0.236
+fib382 = fibHi - fibRng * 0.382
+fib500 = fibHi - fibRng * 0.500
+fib618 = fibHi - fibRng * 0.618
+fib786 = fibHi - fibRng * 0.786
+
+// Zone thickness
+zt = atr * zoneAtr
+
+// ── Zone arrays ──
 var array<float> dT = array.new_float(0)
 var array<float> dB = array.new_float(0)
 var array<int>   dI = array.new_int(0)
@@ -30,15 +53,20 @@ var array<int>   sR = array.new_int(0)
 var array<box>   sX = array.new_box(0)
 var array<label> sL2 = array.new_label(0)
 
-if not na(pl)
-    t2 = math.min(open[pivotLen], close[pivotLen])
-    b2 = low[pivotLen]
-    array.push(dT, t2)
-    array.push(dB, b2)
-    array.push(dI, bar_index - pivotLen)
+// Track last created levels to avoid duplicates
+var float lastDemLvl = 0.0
+var float lastSupLvl = 0.0
+var float lastFibDem = 0.0
+var float lastFibSup = 0.0
+
+// Helper: add demand zone
+addDem(float top, float btm, string src) =>
+    array.push(dT, top)
+    array.push(dB, btm)
+    array.push(dI, bar_index)
     array.push(dR, 0)
-    array.push(dX, box.new(bar_index - pivotLen, t2, bar_index + 5, b2, border_color=color.green, bgcolor=color.new(color.green, 65)))
-    array.push(dL, label.new(bar_index + 3, t2, "D", style=label.style_label_left, color=color.new(color.green, 30), textcolor=color.white, size=size.tiny, tooltip="Demand"))
+    array.push(dX, box.new(bar_index, top, bar_index + 5, btm, border_color=color.green, bgcolor=color.new(color.green, 65)))
+    array.push(dL, label.new(bar_index + 3, top, "D", style=label.style_label_left, color=color.new(color.green, 30), textcolor=color.white, size=size.tiny, tooltip="Demand: " + src))
     if array.size(dT) > maxZones
         array.shift(dT)
         array.shift(dB)
@@ -47,15 +75,13 @@ if not na(pl)
         box.delete(array.shift(dX))
         label.delete(array.shift(dL))
 
-if not na(ph)
-    t2 = high[pivotLen]
-    b2 = math.max(open[pivotLen], close[pivotLen])
-    array.push(sT2, t2)
-    array.push(sB2, b2)
-    array.push(sI, bar_index - pivotLen)
+addSup(float top, float btm, string src) =>
+    array.push(sT2, top)
+    array.push(sB2, btm)
+    array.push(sI, bar_index)
     array.push(sR, 0)
-    array.push(sX, box.new(bar_index - pivotLen, t2, bar_index + 5, b2, border_color=color.red, bgcolor=color.new(color.red, 65)))
-    array.push(sL2, label.new(bar_index + 3, b2, "S", style=label.style_label_left, color=color.new(color.red, 30), textcolor=color.white, size=size.tiny, tooltip="Supply"))
+    array.push(sX, box.new(bar_index, top, bar_index + 5, btm, border_color=color.red, bgcolor=color.new(color.red, 65)))
+    array.push(sL2, label.new(bar_index + 3, btm, "S", style=label.style_label_left, color=color.new(color.red, 30), textcolor=color.white, size=size.tiny, tooltip="Supply: " + src))
     if array.size(sT2) > maxZones
         array.shift(sT2)
         array.shift(sB2)
@@ -64,53 +90,93 @@ if not na(ph)
         box.delete(array.shift(sX))
         label.delete(array.shift(sL2))
 
-// ── Scan all zones: detect overlap, calc confidence, then cleanup ──
+// ── Create zones in real-time ──
+
+// 1. Support bounce: price touches support and closes above → instant demand zone
+supBounce = low <= supLvl + zt and close > supLvl and close > open
+if supBounce and math.abs(supLvl - lastDemLvl) > atr
+    addDem(supLvl + zt, supLvl - zt * 0.5, "S/R Support")
+    lastDemLvl := supLvl
+
+// 2. Resistance rejection: price touches resistance and closes below → instant supply zone
+resReject = high >= resLvl - zt and close < resLvl and close < open
+if resReject and math.abs(resLvl - lastSupLvl) > atr
+    addSup(resLvl + zt * 0.5, resLvl - zt, "S/R Resistance")
+    lastSupLvl := resLvl
+
+// 3. Fib demand: price bounces off 61.8% or 78.6% → demand zone
+fib618bounce = low <= fib618 + zt and close > fib618 and close > open
+fib786bounce = low <= fib786 + zt and close > fib786 and close > open
+if (fib618bounce or fib786bounce) and math.abs((fib618bounce ? fib618 : fib786) - lastFibDem) > atr
+    fibLvl = fib618bounce ? fib618 : fib786
+    addDem(fibLvl + zt, fibLvl - zt * 0.5, fib618bounce ? "Fib 61.8%" : "Fib 78.6%")
+    lastFibDem := fibLvl
+
+// 4. Fib supply: price rejects off 23.6% or 38.2% → supply zone
+fib236reject = high >= fib236 - zt and close < fib236 and close < open
+fib382reject = high >= fib382 - zt and close < fib382 and close < open
+if (fib236reject or fib382reject) and math.abs((fib236reject ? fib236 : fib382) - lastFibSup) > atr
+    fibLvl = fib236reject ? fib236 : fib382
+    addSup(fibLvl + zt * 0.5, fibLvl - zt, fib236reject ? "Fib 23.6%" : "Fib 38.2%")
+    lastFibSup := fibLvl
+
+// 5. Strong candle imprint: big bullish candle body = demand, big bearish = supply
+bodyPct = math.abs(close - open) / close * 100
+bigBull = close > open and bodyPct > 0.15 and vr > 1.5
+bigBear = close < open and bodyPct > 0.15 and vr > 1.5
+
+if bigBull and math.abs(low - lastDemLvl) > atr
+    addDem(math.min(open, close), low, "Strong bullish")
+    lastDemLvl := low
+
+if bigBear and math.abs(high - lastSupLvl) > atr
+    addSup(high, math.max(open, close), "Strong bearish")
+    lastSupLvl := high
+
+// 6. Fib 50% zones (lighter)
+fib500demBounce = low <= fib500 + zt and close > fib500 and close > open
+fib500supReject = high >= fib500 - zt and close < fib500 and close < open
+if fib500demBounce and math.abs(fib500 - lastFibDem) > atr
+    addDem(fib500 + zt, fib500 - zt * 0.5, "Fib 50%")
+    lastFibDem := fib500
+if fib500supReject and math.abs(fib500 - lastFibSup) > atr
+    addSup(fib500 + zt * 0.5, fib500 - zt, "Fib 50%")
+    lastFibSup := fib500
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UPDATE ZONES + DETECT TOUCH
+// ══════════════════════════════════════════════════════════════════════════════
 bool hitDemand = false
 bool hitSupply = false
 float bestDConf = 0.0
 float bestSConf = 0.0
-float bestDTop = na
-float bestDBtm = na
-float bestSTop = na
-float bestSBtm = na
-int bestDRet = 0
-int bestSRet = 0
-int bestDAge = 0
-int bestSAge = 0
 
-// DEMAND: check touch FIRST, then remove broken
 if array.size(dT) > 0
     for i = array.size(dT) - 1 to 0
-        zt = array.get(dT, i)
+        ztt = array.get(dT, i)
         zb = array.get(dB, i)
         zbar = array.get(dI, i)
         zret = array.get(dR, i)
         bx = array.get(dX, i)
         lb = array.get(dL, i)
         age = math.min(bar_index - zbar, 300)
-        ht = (zt - zb) / close * 100
-        conf = math.min(ht * 35 + age * 0.1 + zret * 25 + (htfUp ? 12.0 : 0.0), 100.0)
+        ht = (ztt - zb) / close * 100
+        conf = math.min(ht * 40 + age * 0.15 + zret * 25 + (htfUp ? 12.0 : 0.0), 100.0)
         tier = conf >= 70 ? "A+" : conf >= 50 ? "A" : conf >= 30 ? "B" : "C"
-        exp = math.round(ht * (1 + conf / 100) * 3, 2)
         tr2 = math.round(math.max(70 - conf * 0.45, 20))
         box.set_bgcolor(bx, color.new(color.green, tr2))
         box.set_right(bx, bar_index + 5)
         label.set_x(lb, bar_index + 4)
-        label.set_y(lb, zt)
+        label.set_y(lb, ztt)
         label.set_text(lb, tier)
-        label.set_tooltip(lb, "DEMAND → LONG\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(exp) + "%\nZone: " + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(zt, 0)) + "\nRetests: " + str.tostring(zret) + "x\nAge: " + str.tostring(age) + "b\nRSI: " + str.tostring(math.round(rsiV, 1)))
-        if low <= zt and close > zt
+        exp = math.round(ht * (1 + conf / 100) * 3, 2)
+        label.set_tooltip(lb, "DEMAND → LONG\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(exp) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x | Age: " + str.tostring(age) + "b")
+        if low <= ztt and close > ztt
             array.set(dR, i, zret + 1)
-        // BAR OVERLAP = touch (catches fast drops through zone)
-        if low <= zt and high >= zb
+        if low <= ztt and high >= zb
             hitDemand := true
             if conf > bestDConf
                 bestDConf := conf
-                bestDTop := zt
-                bestDBtm := zb
-                bestDRet := zret
-                bestDAge := age
-        // Remove broken zones AFTER touch check
         if close < zb - atr * 2
             box.set_bgcolor(bx, color.new(color.gray, 92))
             box.set_border_color(bx, color.new(color.gray, 85))
@@ -122,38 +188,33 @@ if array.size(dT) > 0
             array.remove(dX, i)
             array.remove(dL, i)
 
-// SUPPLY: same pattern
 if array.size(sT2) > 0
     for i = array.size(sT2) - 1 to 0
-        zt = array.get(sT2, i)
+        ztt = array.get(sT2, i)
         zb = array.get(sB2, i)
         zbar = array.get(sI, i)
         zret = array.get(sR, i)
         bx = array.get(sX, i)
         lb = array.get(sL2, i)
         age = math.min(bar_index - zbar, 300)
-        ht = (zt - zb) / close * 100
-        conf = math.min(ht * 35 + age * 0.1 + zret * 25 + (htfDn ? 12.0 : 0.0), 100.0)
+        ht = (ztt - zb) / close * 100
+        conf = math.min(ht * 40 + age * 0.15 + zret * 25 + (htfDn ? 12.0 : 0.0), 100.0)
         tier = conf >= 70 ? "A+" : conf >= 50 ? "A" : conf >= 30 ? "B" : "C"
-        exp = math.round(ht * (1 + conf / 100) * 3, 2)
         tr2 = math.round(math.max(70 - conf * 0.45, 20))
         box.set_bgcolor(bx, color.new(color.red, tr2))
         box.set_right(bx, bar_index + 5)
         label.set_x(lb, bar_index + 4)
         label.set_y(lb, zb)
         label.set_text(lb, tier)
-        label.set_tooltip(lb, "SUPPLY → SHORT\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(exp) + "%\nZone: " + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(zt, 0)) + "\nRetests: " + str.tostring(zret) + "x\nAge: " + str.tostring(age) + "b\nRSI: " + str.tostring(math.round(rsiV, 1)))
+        exp = math.round(ht * (1 + conf / 100) * 3, 2)
+        label.set_tooltip(lb, "SUPPLY → SHORT\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(exp) + "%\n" + str.tostring(math.round(zb, 0)) + "–" + str.tostring(math.round(ztt, 0)) + "\nRetests: " + str.tostring(zret) + "x | Age: " + str.tostring(age) + "b")
         if high >= zb and close < zb
             array.set(sR, i, zret + 1)
-        if high >= zb and low <= zt
+        if high >= zb and low <= ztt
             hitSupply := true
             if conf > bestSConf
                 bestSConf := conf
-                bestSTop := zt
-                bestSBtm := zb
-                bestSRet := zret
-                bestSAge := age
-        if close > zt + atr * 2
+        if close > ztt + atr * 2
             box.set_bgcolor(bx, color.new(color.gray, 92))
             box.set_border_color(bx, color.new(color.gray, 85))
             label.delete(lb)
@@ -164,23 +225,20 @@ if array.size(sT2) > 0
             array.remove(sX, i)
             array.remove(sL2, i)
 
-// ── FLIP: candle direction decides priority when both zones hit ──
-isLong  = strategy.position_size > 0
+// ══════════════════════════════════════════════════════════════════════════════
+// FLIP: candle confirms direction
+// ══════════════════════════════════════════════════════════════════════════════
+isLong = strategy.position_size > 0
 isShort = strategy.position_size < 0
-isBullCandle = close > open
-isBearCandle = close < open
-
-// Candle must confirm direction — no long on red candle, no short on green candle
-bool goLong  = hitDemand and isBullCandle
-bool goShort = hitSupply and isBearCandle
+goLong  = hitDemand and close > open
+goShort = hitSupply and close < open
 
 if goLong and not isLong
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", loss=atr * slMul / syminfo.mintick)
     tier = bestDConf >= 70 ? "A+" : bestDConf >= 50 ? "A" : bestDConf >= 30 ? "B" : "C"
-    exp = math.round((nz(bestDTop) - nz(bestDBtm)) / close * 100 * (1 + bestDConf / 100) * 3, 2)
     sz = bestDConf >= 60 ? "BIG" : bestDConf >= 30 ? "MED" : "SMALL"
-    eTip = "LONG " + tier + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "% " + sz + "\nExp: +" + str.tostring(exp) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nZone: " + str.tostring(math.round(nz(bestDBtm), 0)) + "–" + str.tostring(math.round(nz(bestDTop), 0)) + "\nRetests: " + str.tostring(bestDRet) + "x\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
+    eTip = "LONG " + tier + " | " + sz + "\nConf: " + str.tostring(math.round(bestDConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
     clr = bestDConf >= 60 ? color.green : bestDConf >= 30 ? color.new(color.green, 20) : color.new(color.green, 40)
     label.new(bar_index, low - atr * 0.4, "▲" + tier, style=label.style_label_up, color=clr, textcolor=color.white, size=bestDConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
@@ -188,16 +246,20 @@ if goShort and not isShort
     strategy.entry("Short", strategy.short)
     strategy.exit("SX", "Short", loss=atr * slMul / syminfo.mintick)
     tier = bestSConf >= 70 ? "A+" : bestSConf >= 50 ? "A" : bestSConf >= 30 ? "B" : "C"
-    exp = math.round((nz(bestSTop) - nz(bestSBtm)) / close * 100 * (1 + bestSConf / 100) * 3, 2)
     sz = bestSConf >= 60 ? "BIG" : bestSConf >= 30 ? "MED" : "SMALL"
-    eTip = "SHORT " + tier + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "% " + sz + "\nExp: -" + str.tostring(exp) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nZone: " + str.tostring(math.round(nz(bestSBtm), 0)) + "–" + str.tostring(math.round(nz(bestSTop), 0)) + "\nRetests: " + str.tostring(bestSRet) + "x\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
+    eTip = "SHORT " + tier + " | " + sz + "\nConf: " + str.tostring(math.round(bestSConf, 0)) + "%\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 1)) + "x"
     clr = bestSConf >= 60 ? color.red : bestSConf >= 30 ? color.new(color.red, 20) : color.new(color.red, 40)
     label.new(bar_index, high + atr * 0.4, "▼" + tier, style=label.style_label_down, color=clr, textcolor=color.white, size=bestSConf >= 50 ? size.normal : size.small, tooltip=eTip)
 
+// ── Reference lines ──
 plot(e50_1h, "1h EMA50", color.new(color.orange, 50), 2)
+plot(fib382, "Fib 38.2", color.new(color.orange, 70), 1, plot.style_stepline)
+plot(fib500, "Fib 50",   color.new(color.blue, 70),   1, plot.style_stepline)
+plot(fib618, "Fib 61.8", color.new(color.green, 60),  1, plot.style_stepline)
 
+// ── Dashboard ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_width=1)
     pos = isLong ? "LONG" : isShort ? "SHORT" : "FLAT"
     color pc = isLong ? color.green : isShort ? color.red : color.gray
     ac = math.max(bestDConf, bestSConf)
@@ -211,8 +273,10 @@ if tbl and barstate.islast
     table.cell(t, 1, 2, at + " " + str.tostring(math.round(ac, 0)) + "%", text_color=cc, text_size=size.normal)
     table.cell(t, 0, 3, "Zones",    text_color=color.gray,  text_size=size.tiny)
     table.cell(t, 1, 3, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT2)) + "S", text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 4, "RSI/Vol",  text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 4, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 4, "S/R",      text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(math.round(supLvl, 0)) + " / " + str.tostring(math.round(resLvl, 0)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 5, "RSI/Vol",  text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 5, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
 
-alertcondition(hitDemand and not isLong,  "SYGNIF Long",  "SYGNIF: Flip LONG")
-alertcondition(hitSupply and not isShort, "SYGNIF Short", "SYGNIF: Flip SHORT")
+alertcondition(goLong and not isLong,   "SYGNIF Long",  "SYGNIF: LONG")
+alertcondition(goShort and not isShort, "SYGNIF Short", "SYGNIF: SHORT")
