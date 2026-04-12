@@ -3,11 +3,13 @@ strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, defau
 
 // Inputs
 atrP   = input.int(14,    "ATR Period")
+fibLen = input.int(50,    "Fib Lookback Bars", minval=20)
 tpMul  = input.float(2.5, "TP (x ATR)", step=0.5)
 slMul  = input.float(1.5, "SL (x ATR)", step=0.5)
 minSc  = input.int(72,    "Min Score", minval=60, maxval=85)
 cdBars = input.int(24,    "Cooldown Bars", minval=6)
 tbl    = input.bool(true,  "Dashboard")
+fibPlt = input.bool(true,  "Show Fib Levels")
 
 // Core indicators
 rsiV   = ta.rsi(close, 14)
@@ -28,21 +30,58 @@ e12    = ta.ema(close, 12)
 e26    = ta.ema(close, 26)
 e50    = ta.ema(close, 50)
 
-// Higher TF trend: 1h EMA via request
+// Higher TF trend
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
 htfUp  = close > e50_1h and rsi_1h > 45
 htfDn  = close < e50_1h and rsi_1h < 55
 
-// Scoring
-s1 = (rsiV - 50) / 50
-s2 = (rsiF - 50) / 50
-s3 = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
-s4 = ((close - bbL) / (bbU - bbL) - 0.5) * 2
-s5 = math.max(math.min(mom / atr / 3, 1.0), -1.0)
-s6 = math.max(math.min(roc / 3, 1.0), -1.0)
-s7 = -(wr + 50) / 50
-s8 = mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)
+// ── Fibonacci retracement levels ──
+fibHi  = ta.highest(high, fibLen)
+fibLo  = ta.lowest(low, fibLen)
+fibRng = fibHi - fibLo
+
+fib236 = fibHi - fibRng * 0.236
+fib382 = fibHi - fibRng * 0.382
+fib500 = fibHi - fibRng * 0.500
+fib618 = fibHi - fibRng * 0.618
+fib786 = fibHi - fibRng * 0.786
+
+// Fib zone scoring: where is price relative to fib levels?
+// Near 0.618/0.786 retracement in uptrend = strong long zone
+// Near 0.236/0.382 retracement in downtrend = strong short zone
+float fibScore = 0.0
+if close <= fib618 and close >= fib786
+    fibScore := 1.0
+else if close <= fib382 and close > fib618
+    fibScore := 0.5
+else if close <= fib500 and close > fib382
+    fibScore := 0.2
+else if close > fib236
+    fibScore := -0.7
+else if close >= fib382 and close < fib500
+    fibScore := -0.2
+else
+    fibScore := 0.0
+
+// Fib bounce detection: price touched a fib level and reversed
+fibBounce618 = low <= fib618 and close > fib618 and close > open
+fibBounce786 = low <= fib786 and close > fib786 and close > open
+fibReject236 = high >= fib236 and close < fib236 and close < open
+fibReject382 = high >= fib382 and close < fib382 and close < open
+
+fibLongBoost  = fibBounce618 or fibBounce786
+fibShortBoost = fibReject236 or fibReject382
+
+// ── Scoring (11 indicators now: +fib) ──
+s1  = (rsiV - 50) / 50
+s2  = (rsiF - 50) / 50
+s3  = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
+s4  = ((close - bbL) / (bbU - bbL) - 0.5) * 2
+s5  = math.max(math.min(mom / atr / 3, 1.0), -1.0)
+s6  = math.max(math.min(roc / 3, 1.0), -1.0)
+s7  = -(wr + 50) / 50
+s8  = mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)
 float s9 = 0.0
 if close > e12 and e12 > e26
     s9 := 1.0
@@ -51,38 +90,65 @@ else if close < e12 and e12 < e26
 else
     s9 := math.max(math.min((close - e26) / atr * 0.3, 1.0), -1.0)
 s10 = math.max(math.min((close - close[5]) / (atr * 5), 1.0), -1.0)
+s11 = fibScore
 
-raw = s1*15 + s2*10 + s3*15 + s4*8 + s5*10 + s6*5 + s7*8 + s8*5 + s9*14 + s10*10
+raw = s1*13 + s2*8 + s3*13 + s4*7 + s5*9 + s6*4 + s7*7 + s8*4 + s9*12 + s10*8 + s11*15
 score = ta.ema(math.max(math.min((raw/100 + 1) / 2 * 100, 100.0), 0.0), 5)
 
-// Consensus — require ALL 3 agree
+// Consensus — 4 voters now (added fib)
 v1 = score >= 60 ? 1 : score <= 40 ? -1 : 0
 v2 = hl > 0 and close > e26 ? 1 : hl < 0 and close < e26 ? -1 : 0
 v3 = rsiV > 55 and mom > 0 ? 1 : rsiV < 45 and mom < 0 ? -1 : 0
-votes = v1 + v2 + v3
+v4 = fibScore >= 0.5 ? 1 : fibScore <= -0.5 ? -1 : 0
+votes = v1 + v2 + v3 + v4
 
-// Entry conditions: strict
-bull = score >= minSc and votes == 3 and vr > 1.2 and htfUp and close > e50 and rsiV < 70
-bear = score <= (100 - minSc) and votes == -3 and vr > 1.2 and htfDn and close < e50 and rsiV > 30
+// Entry: 3/4 voters + fib bounce bonus can override to 3
+bullBase = score >= minSc and votes >= 3 and vr > 1.2 and htfUp and close > e50 and rsiV < 70
+bearBase = score <= (100 - minSc) and votes <= -3 and vr > 1.2 and htfDn and close < e50 and rsiV > 30
+bull = bullBase or (score >= (minSc - 5) and votes >= 2 and fibLongBoost and htfUp)
+bear = bearBase or (score <= (100 - minSc + 5) and votes <= -2 and fibShortBoost and htfDn)
 
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
 flat   = strategy.position_size == 0
 
-tp     = atr * tpMul
-slD    = atr * slMul
+// Fib-aware TP: target nearest fib level above/below, fallback to ATR
+float tpLong = atr * tpMul
+if close < fib500 and fib382 - close > atr
+    tpLong := fib382 - close
+else if close < fib382 and fib236 - close > atr
+    tpLong := fib236 - close
+else if close < fib618 and fib500 - close > atr
+    tpLong := fib500 - close
+
+float tpShort = atr * tpMul
+if close > fib500 and close - fib618 > atr
+    tpShort := close - fib618
+else if close > fib382 and close - fib500 > atr
+    tpShort := close - fib500
+else if close > fib236 and close - fib382 > atr
+    tpShort := close - fib382
+
+slD = atr * slMul
 
 if bull and cooled and flat
     strategy.entry("Long", strategy.long)
-    strategy.exit("Long X", "Long", profit=tp / syminfo.mintick, loss=slD / syminfo.mintick)
+    strategy.exit("Long X", "Long", profit=tpLong / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
 
 if bear and cooled and flat
     strategy.entry("Short", strategy.short)
-    strategy.exit("Short X", "Short", profit=tp / syminfo.mintick, loss=slD / syminfo.mintick)
+    strategy.exit("Short X", "Short", profit=tpShort / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
 
-// 1h EMA on chart
+// ── Plot fib levels ──
+plot(fibPlt ? fibHi  : na, "Fib 0%",    color.new(color.gray, 60),   1, plot.style_circles)
+plot(fibPlt ? fib236 : na, "Fib 23.6%", color.new(color.yellow, 50), 1, plot.style_cross)
+plot(fibPlt ? fib382 : na, "Fib 38.2%", color.new(color.orange, 40), 1, plot.style_cross)
+plot(fibPlt ? fib500 : na, "Fib 50%",   color.new(color.blue, 40),   1, plot.style_cross)
+plot(fibPlt ? fib618 : na, "Fib 61.8%", color.new(color.green, 30),  2, plot.style_cross)
+plot(fibPlt ? fib786 : na, "Fib 78.6%", color.new(color.lime, 40),   1, plot.style_cross)
+plot(fibPlt ? fibLo  : na, "Fib 100%",  color.new(color.gray, 60),   1, plot.style_circles)
 plot(e50_1h, "1h EMA50", color.new(color.orange, 40), 2)
 
 // Background
@@ -97,27 +163,34 @@ plot(score, "Score", color.new(color.blue, 100), display=display.data_window)
 
 // Dashboard
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 20), border_width=1)
     dir = score >= minSc ? "LONG" : score <= (100 - minSc) ? "SHORT" : "FLAT"
-    con = votes == 3 ? "BULLISH" : votes == -3 ? "BEARISH" : "WAIT"
+    con = votes >= 3 ? "BULLISH" : votes <= -3 ? "BEARISH" : "WAIT"
     color dc = score >= minSc ? color.green : score <= (100 - minSc) ? color.red : color.gray
-    color cc = votes == 3 ? color.green : votes == -3 ? color.red : color.orange
+    color cc = votes >= 3 ? color.green : votes <= -3 ? color.red : color.orange
     htf = htfUp ? "UP" : htfDn ? "DOWN" : "FLAT"
     color hc = htfUp ? color.green : htfDn ? color.red : color.gray
+    fibZ = fibScore >= 0.5 ? "BUY ZONE" : fibScore <= -0.5 ? "SELL ZONE" : "NEUTRAL"
+    color fc = fibScore >= 0.5 ? color.green : fibScore <= -0.5 ? color.red : color.gray
     table.cell(t, 0, 0, "SYGNIF",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 1, 0, "5m BTC",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 0, 1, "Bias",      text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 1, dir,         text_color=dc,          text_size=size.normal)
     table.cell(t, 0, 2, "1h Trend",  text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 2, htf,         text_color=hc,          text_size=size.normal)
-    table.cell(t, 0, 3, "Consensus", text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 3, con,         text_color=cc,          text_size=size.normal)
-    table.cell(t, 0, 4, "Score",     text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 4, str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
-    table.cell(t, 0, 5, "TP / SL",   text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 5, str.tostring(math.round(tp, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 6, "Vol",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 6, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
+    table.cell(t, 0, 3, "Fib Zone",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3, fibZ,        text_color=fc,          text_size=size.normal)
+    table.cell(t, 0, 4, "Consensus", text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 4, con,         text_color=cc,          text_size=size.normal)
+    table.cell(t, 0, 5, "Score",     text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 5, str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
+    table.cell(t, 0, 6, "Fib Score", text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, str.tostring(math.round(fibScore, 2)), text_color=fc, text_size=size.tiny)
+    float tpShow = strategy.position_size > 0 ? tpLong : tpShort
+    table.cell(t, 0, 7, "TP / SL",   text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(tpShow, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 8, "Vol",       text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 8, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
 
 alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
 alertcondition(bear and cooled and flat, "SYGNIF Short", "SYGNIF: BTC SHORT")
