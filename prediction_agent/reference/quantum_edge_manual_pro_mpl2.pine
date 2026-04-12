@@ -1,0 +1,185 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// SYGNIF: stored as research reference for BTC risk / TP ladder ideas — not executed by Freqtrade; see letscrash/BTC_DUMP_PROTECTION_DESIGN.md
+//@version=6
+indicator("QuantumEdge: Manual Pro + Risk Safety", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// --- COLORS ---
+color C_GREEN = #089981, C_RED = #f23645, C_BLUE = #5b9cf6, C_GOLD = #ffcc00, C_GRAY = #b2b5be
+color C_BG_DARK = #0b0e14, C_BG_LABELS = color.new(color.black, 20)
+
+// --- INPUTS ---
+group_risk = "💰 RISK MANAGEMENT"
+totalWallet = input.float(50.0, "Total Bank", group=group_risk)
+riskPercent = input.float(33.0, "% per Trade", group=group_risk, tooltip="How much of your total bank you use as margin for one trade")
+lev         = input.int(20, "Leverage", group=group_risk, tooltip="Leverage used on Bitget")
+
+group_sig = "Signal Settings"
+emaFastLen = input.int(12, "Fast EMA", group=group_sig)
+emaSlowLen = input.int(26, "Slow EMA", group=group_sig)
+minScore   = input.int(80, "Min. Signal Strength %", group=group_sig)
+volMult    = input.float(1.8, "Min. Relative Volume", group=group_sig)
+
+group_tp_sl = "Targets (Manual Levels)"
+atrMult    = input.float(1.5, "Initial SL ATR", group=group_tp_sl)
+tp1Mult    = input.float(1.2, "TP1 ATR (50%)", group=group_tp_sl)
+tp2Mult    = input.float(2.3, "TP2 ATR (30%)", group=group_tp_sl)
+tp3Mult    = input.float(3.5, "TP3 ATR (Start Trail)", group=group_tp_sl)
+trailStep  = input.float(0.8, "Trail Distance ATR", group=group_tp_sl)
+
+// --- CALCULATIONS ---
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+vwapVal = ta.vwap(hlc3)
+atrVal  = ta.atr(14)
+[plusDI, minusDI, adxVal] = ta.dmi(14, 14)
+rsiVal  = ta.rsi(close, 14)
+avgVol  = ta.sma(volume, 20)
+relVol  = volume / avgVol
+vocalSignal = volume > avgVol * volMult
+
+get_metrics() =>
+    float b = 0, float r = 0
+    b += (close > vwapVal ? 25 : 0), r += (close < vwapVal ? 25 : 0)
+    b += (rsiVal > 52 ? 25 : 0), r += (rsiVal < 48 ? 25 : 0)
+    b += (emaFast > emaSlow ? 25 : 0), r += (emaFast < emaSlow ? 25 : 0)
+    b += (adxVal > 20 and plusDI > minusDI ? 25 : 0), r += (adxVal > 20 and minusDI > plusDI ? 25 : 0)
+    [b, r]
+
+[bullPct, bearPct] = get_metrics()
+
+// --- TRADE STATE ---
+var float entryP = na, var float slP = na, var float tp1P = na, var float tp2P = na, var float tp3P = na
+var float initSL = na, var float realizedProfit = 0.0
+var int tDir = 0, var bool tp1H = false, var bool tp2H = false, var bool tp3H = false, var bool isClosed = true
+var int xE = 0, var int xS = 0, var int x1 = 0, var int x2 = 0, var int x3 = 0, var int xExit = 0
+
+marginUsed  = totalWallet * (riskPercent / 100)
+posSizeUSD  = marginUsed * lev
+calc_pnl_val(p, e, d, s) => na(e) or na(p) ? 0.0 : ((p - e) / e) * d * s
+
+// --- SIGNALS ---
+longC_vis  = ta.crossover(emaFast, emaSlow) and bullPct >= minScore and vocalSignal
+shortC_vis = ta.crossunder(emaFast, emaSlow) and bearPct >= minScore and vocalSignal
+
+plotshape(longC_vis,  title="BUY ARROW",  style=shape.triangleup,   location=location.belowbar, color=C_GREEN, size=size.normal, text="BUY")
+plotshape(shortC_vis, title="SELL ARROW", style=shape.triangledown, location=location.abovebar, color=C_RED,   size=size.normal, text="SELL")
+
+longC  = longC_vis and isClosed
+shortC = shortC_vis and isClosed
+
+var bool pendingEntry = false
+var int pendingDir = 0, var int pendingBar = 0
+
+if longC
+    pendingEntry := true, pendingDir := 1, pendingBar := bar_index
+if shortC
+    pendingEntry := true, pendingDir := -1, pendingBar := bar_index
+
+if pendingEntry and bar_index == pendingBar + 1
+    pendingEntry := false, isClosed := false, tDir := pendingDir, entryP := open
+    realizedProfit := 0.0
+    xE := bar_index, xS := bar_index, x1 := bar_index, x2 := bar_index, x3 := bar_index
+    initSL := tDir == 1 ? open - (atrVal * atrMult) : open + (atrVal * atrMult)
+    slP := initSL
+    tp1P := tDir == 1 ? open + (atrVal * tp1Mult) : open - (atrVal * tp1Mult)
+    tp2P := tDir == 1 ? open + (atrVal * tp2Mult) : open - (atrVal * tp2Mult)
+    tp3P := tDir == 1 ? open + (atrVal * tp3Mult) : open - (atrVal * tp3Mult)
+    tp1H := false, tp2H := false, tp3H := false
+
+// Trade Management
+if not na(entryP) and not isClosed
+    if (tDir == 1 and low <= slP) or (tDir == -1 and high >= slP)
+        float remSize = (tp2H ? 0.20 : tp1H ? 0.50 : 1.0) * posSizeUSD
+        realizedProfit += calc_pnl_val(slP, entryP, tDir, remSize)
+        isClosed := true, xExit := bar_index
+    
+    if not isClosed
+        if tDir == 1
+            if high >= tp1P and not tp1H
+                tp1H := true, slP := entryP, xS := bar_index
+                realizedProfit += calc_pnl_val(tp1P, entryP, tDir, posSizeUSD * 0.5)
+            if high >= tp2P and not tp2H
+                tp2H := true, slP := tp1P, xS := bar_index
+                realizedProfit += calc_pnl_val(tp2P, entryP, tDir, posSizeUSD * 0.3)
+            if high >= tp3P
+                tp3H := true
+                float nSL = close - (atrVal * trailStep)
+                if nSL > slP
+                    slP := nSL, xS := bar_index
+        else
+            if low <= tp1P and not tp1H
+                tp1H := true, slP := entryP, xS := bar_index
+                realizedProfit += calc_pnl_val(tp1P, entryP, tDir, posSizeUSD * 0.5)
+            if low <= tp2P and not tp2H
+                tp2H := true, slP := tp1P, xS := bar_index
+                realizedProfit += calc_pnl_val(tp2P, entryP, tDir, posSizeUSD * 0.3)
+            if low <= tp3P
+                tp3H := true
+                float nSL = close + (atrVal * trailStep)
+                if nSL < slP
+                    slP := nSL, xS := bar_index
+
+// --- RISK ANALYSIS ---
+float liqPrice = na
+if not na(entryP)
+    liqPrice := tDir == 1 ? entryP * (1 - (1.0 / lev)) : entryP * (1 + (1.0 / lev))
+
+// --- DASHBOARD TABLE ---
+var table tbDashboard = table.new(position.top_right, 2, 6, bgcolor=C_BG_DARK, border_color=color.new(C_GRAY, 80), border_width=1)
+if barstate.islast
+    float remSize = (isClosed ? 0.0 : (tp2H ? 0.20 : tp1H ? 0.50 : 1.0) * posSizeUSD)
+    float currentRtPnL = realizedProfit + (isClosed ? 0.0 : calc_pnl_val(close, entryP, tDir, remSize))
+    bool isTrusted = (tDir == 1 ? bullPct >= 70 : bearPct >= 70) and adxVal > 20
+    color pnlColor = isTrusted ? C_GREEN : C_BLUE
+
+    table.cell(tbDashboard, 0, 0, "Trade Planning", text_color=color.white, text_size=size.small)
+    table.cell(tbDashboard, 1, 0, "Balance", text_color=color.white, text_size=size.small)
+    table.cell(tbDashboard, 0, 1, "Pos. Size (" + str.tostring(lev) + "x)", text_color=C_GRAY, text_halign=text.align_left)
+    table.cell(tbDashboard, 1, 1, "$" + str.tostring(posSizeUSD, "#"), text_color=C_BLUE, text_halign=text.align_right)
+    table.cell(tbDashboard, 0, 2, "Realized PnL", text_color=C_GOLD, text_halign=text.align_left)
+    table.cell(tbDashboard, 1, 2, "$" + str.tostring(realizedProfit, "#.##"), text_color=C_GOLD, text_halign=text.align_right)
+    table.cell(tbDashboard, 0, 3, "Live PnL", text_color=pnlColor, text_halign=text.align_left)
+    table.cell(tbDashboard, 1, 3, "$" + str.tostring(currentRtPnL, "#.##"), text_color=pnlColor, text_halign=text.align_right)
+    table.cell(tbDashboard, 0, 4, "Margin Req.", text_color=C_GRAY, text_halign=text.align_left)
+    table.cell(tbDashboard, 1, 4, "$" + str.tostring(marginUsed, "#.##"), text_color=C_GOLD, text_halign=text.align_right)
+    table.cell(tbDashboard, 0, 5, "Liq. Price", text_color=C_RED, text_halign=text.align_left)
+    table.cell(tbDashboard, 1, 5, str.tostring(liqPrice, "#.####"), text_color=C_RED, text_halign=text.align_right)
+
+// --- VISUAL INTERFACE (LABELS) ---
+var line lE = na, var line lS = na, var line l1 = na, var line l2 = na, var line l3 = na, var line lRT = na
+var label lbE = na, var label lbS = na, var label lb1 = na, var label lb2 = na, var label lb3 = na, var label lbRT = na
+
+if barstate.islast and not na(entryP)
+    line.delete(lE), line.delete(lS), line.delete(l1), line.delete(l2), line.delete(l3), line.delete(lRT)
+    label.delete(lbE), label.delete(lbS), label.delete(lb1), label.delete(lb2), label.delete(lb3), label.delete(lbRT)
+    
+    xStd = isClosed ? xExit : bar_index + 12
+    lE := line.new(xE, entryP, xStd, entryP, color=C_BLUE, width=2)
+    l1 := line.new(x1, tp1P, xStd, tp1P, color=tp1H ? C_GRAY : color.new(C_GREEN, 50), width=1, style=line.style_dotted)
+    l2 := line.new(x2, tp2P, xStd, tp2P, color=tp2H ? C_GRAY : color.new(C_GREEN, 30), width=1, style=line.style_dotted)
+    l3 := line.new(x3, tp3P, xStd, tp3P, color=tp3H ? C_GOLD : C_GREEN, width=2)
+    lS := line.new(xS, slP, xStd + 8, slP, color=C_RED, width=2, style=line.style_dashed)
+    
+    // Detailed Risk Calculation
+    riskAmtUSD = math.abs(calc_pnl_val(initSL, entryP, tDir, posSizeUSD))
+    riskPctOfMargin = (riskAmtUSD / marginUsed) * 100
+    bool willLiquidate = riskPctOfMargin >= 95.0 // Buffer for exchange fees/spread
+
+    lbE := label.new(xStd, entryP, "ENTRY: " + str.tostring(entryP, "#.####"), color=C_BG_LABELS, textcolor=C_BLUE, style=label.style_label_left)
+    lb1 := label.new(xStd, tp1P, "TP1 (50%): $" + str.tostring(calc_pnl_val(tp1P, entryP, tDir, posSizeUSD * 0.5), "#.##") + (tp1H ? " ✅" : ""), color=C_BG_LABELS, textcolor=tp1H ? C_GRAY : C_GREEN, style=label.style_label_left)
+    lb2 := label.new(xStd, tp2P, "TP2 (30%): $" + str.tostring(calc_pnl_val(tp2P, entryP, tDir, posSizeUSD * 0.3), "#.##") + (tp2H ? " ✅" : ""), color=C_BG_LABELS, textcolor=tp2H ? C_GRAY : C_GREEN, style=label.style_label_left)
+    lb3 := label.new(xStd, tp3P, "TP3 (20%): $" + str.tostring(calc_pnl_val(tp3P, entryP, tDir, posSizeUSD * 0.2), "#.##") + (tp3H ? " 🔥" : ""), color=C_BG_LABELS, textcolor=C_GREEN, style=label.style_label_left)
+    
+    string slWarning = willLiquidate ? "⚠️ LIQUIDATION BEFORE SL" : "INITIAL SL"
+    string riskStr = " (-$" + str.tostring(riskAmtUSD, "#.##") + " / " + str.tostring(riskPctOfMargin, "#") + "% Margin)"
+    string sT = isClosed ? "CLOSED (Total: $" + str.tostring(realizedProfit, "#.##") + ")" : (tp3H ? "TRAIL" : tp2H ? "LOCK TP1" : tp1H ? "BREAK EVEN" : slWarning + riskStr)
+    
+    lbS := label.new(xStd + 8, slP, sT, color=isClosed ? (realizedProfit >= 0 ? C_GREEN : C_RED) : (willLiquidate ? color.new(color.yellow, 20) : C_BG_DARK), textcolor=isClosed ? color.white : (willLiquidate ? color.black : C_RED), style=label.style_label_left)
+
+    if not isClosed
+        float remSize = (tp2H ? 0.20 : tp1H ? 0.50 : 1.0) * posSizeUSD
+        float rtPnL_val = realizedProfit + calc_pnl_val(close, entryP, tDir, remSize)
+        bool isTrusted = (tDir == 1 ? bullPct >= 70 : bearPct >= 70) and adxVal > 20
+        color rtColor = isTrusted ? C_GREEN : C_BLUE
+        lRT := line.new(bar_index, close, bar_index + 6, close, color=rtColor, style=line.style_dashed, width=1)
+        lbRT := label.new(bar_index + 6, close, "LIVE: $" + str.tostring(rtPnL_val, "#.##"), color=rtColor, textcolor=color.white, style=label.style_label_left, size=size.small)

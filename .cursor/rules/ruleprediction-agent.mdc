@@ -1,6 +1,6 @@
 ---
 description: Prediction + briefing + btc_Trader_Docker data flows; consult agents; continuous evidence loop (canonical; was ruler-prediction-agent)
-globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/BTC_TRADER_DOCKER.md
+globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/BTC_TRADER_DOCKER.md,letscrash/BTC_DUMP_PROTECTION_DESIGN.md
 alwaysApply: false
 ---
 
@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## Scope
 
-Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, **`.cursor/agents/prediction-agent.md`**, **`docker/Dockerfile.btc_trader`**, or **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** / **`letscrash/BTC_TRADER_DOCKER.md`**.
+Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, **`.cursor/agents/prediction-agent.md`**, **`docker/Dockerfile.btc_trader`**, or **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** / **`letscrash/BTC_TRADER_DOCKER.md`** / **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`**.
 
 ## Consult other agents (set rules with correct data flows)
 
@@ -26,6 +26,8 @@ Before changing **Docker**, **compose**, or **.mdc** rules for prediction/BTC pi
 | **Predict workflow** | `.cursor/rules/sygnif-predict-workflow.mdc` |
 
 **Long-form loop + indicator wishlist + btc_Trader_Docker I/O table:** **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — rules **evolve**; that file is the canonical narrative for the **continuous information → train → propose → prove → test → rm/apply → compare** cycle.
+
+**BTC dump protection (Pine inspiration → Sygnif, bounded):** **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`** — QuantumEdge + chikaharu MA references under **`prediction_agent/reference/`** (MPL 2.0).
 
 ## Ports (do not fragment)
 

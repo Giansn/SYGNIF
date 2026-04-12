@@ -13,3 +13,12 @@ Files here are **not** executed by Freqtrade. They document **TradingView** logi
 Attribution: **© LuxAlgo** (as in source header).
 
 **TradingView:** [Swing Failure Pattern (SFP) \[LuxAlgo\]](https://www.tradingview.com/script/YmWELClV-Swing-Failure-Pattern-SFP-LuxAlgo/) (open-source on chart; updates may diverge from this file — diff against TV export if needed).
+
+## MPL 2.0 references (Mozilla)
+
+| File | Attribution | Use in SYGNIF |
+|------|-------------|---------------|
+| `quantum_edge_manual_pro_mpl2.pine` | Header only in paste (indicator name **QuantumEdge**); **MPL 2.0** | Inspiration for **BTC dump protection** / staged TP–SL–trail — see `letscrash/BTC_DUMP_PROTECTION_DESIGN.md` |
+| `chikaharu_state_aware_ma_cross_mpl2.pine` | **© chikaharu**, MPL 2.0 | Regime-aware MA cross; defensive `close_all` on crossunder — compare to risk-off / dump exit framing |
+
+If you redistribute **modified** Pine, include MPL notices per [MPL 2.0 FAQ](https://www.mozilla.org/MPL/2.0/).

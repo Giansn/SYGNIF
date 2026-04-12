@@ -68,7 +68,11 @@ flowchart TD
 | **5m Pine spec** | `prediction_agent/btc_predict_5m.pine` | Visual / export alignment; **not** live FT unless ported |
 | **LuxAlgo Swing Failure Pattern** | `prediction_agent/reference/luxalgo_swing_failure_pattern_cc_by_nc_sa_4.pine` | TV v5 reference (pivots, LTF volume %, confirmation); **CC BY-NC-SA 4.0** — **NonCommercial** may block commercial deployment; align semantics with `SygnifStrategy` swing tags only after legal review |
 | **Official TV page** | [YmWELClV](https://www.tradingview.com/script/YmWELClV-Swing-Failure-Pattern-SFP-LuxAlgo/) | Source-of-truth for updates; republishing subject to TV [House Rules](https://www.tradingview.com/support/solutions/43000590599/) |
+| **QuantumEdge-style risk / TP ladder** | `reference/quantum_edge_manual_pro_mpl2.pine` (**MPL 2.0**) | Inspiration for **BTC dump protection** design — `letscrash/BTC_DUMP_PROTECTION_DESIGN.md` |
+| **State-aware MA (chikaharu)** | `reference/chikaharu_state_aware_ma_cross_mpl2.pine` (**MPL 2.0**) | Regime + defensive exit pattern vs dump framing |
 | **Custom TV indicators** you add | document path + data export | Map to JSON columns or manual CSV → runner features |
+
+**BTC dump protection (Sygnif + continuous rules):** **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`** — maps TV ideas to FT tags, adaptation JSON, and the prove/test/apply loop under **`ruleprediction-agent`**.
 
 ### Exchange / CEX
 
