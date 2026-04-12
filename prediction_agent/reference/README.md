@@ -20,5 +20,6 @@ Attribution: **© LuxAlgo** (as in source header).
 |------|-------------|---------------|
 | `quantum_edge_manual_pro_mpl2.pine` | Header only in paste (indicator name **QuantumEdge**); **MPL 2.0** | Inspiration for **BTC dump protection** / staged TP–SL–trail — see `letscrash/BTC_DUMP_PROTECTION_DESIGN.md` |
 | `chikaharu_state_aware_ma_cross_mpl2.pine` | **© chikaharu**, MPL 2.0 | Regime-aware MA cross; defensive `close_all` on crossunder — compare to risk-off / dump exit framing |
+| `chikaharu_trend_volatility_index_tvi_mpl2.pine` | **© chikaharu**, MPL 2.0 | **TVI**: MA-band “scatter” / Gini-style mean diff → synthetic OHLC candles + ATR & HL-range reference; regime / vol expansion context (not Sygnif TA) |
 
 If you redistribute **modified** Pine, include MPL notices per [MPL 2.0 FAQ](https://www.mozilla.org/MPL/2.0/).

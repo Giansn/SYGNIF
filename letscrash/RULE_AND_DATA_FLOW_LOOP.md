@@ -70,6 +70,7 @@ flowchart TD
 | **Official TV page** | [YmWELClV](https://www.tradingview.com/script/YmWELClV-Swing-Failure-Pattern-SFP-LuxAlgo/) | Source-of-truth for updates; republishing subject to TV [House Rules](https://www.tradingview.com/support/solutions/43000590599/) |
 | **QuantumEdge-style risk / TP ladder** | `reference/quantum_edge_manual_pro_mpl2.pine` (**MPL 2.0**) | Inspiration for **BTC dump protection** design — `letscrash/BTC_DUMP_PROTECTION_DESIGN.md` |
 | **State-aware MA (chikaharu)** | `reference/chikaharu_state_aware_ma_cross_mpl2.pine` (**MPL 2.0**) | Regime + defensive exit pattern vs dump framing |
+| **Trend Volatility Index TVI (chikaharu)** | `reference/chikaharu_trend_volatility_index_tvi_mpl2.pine` (**MPL 2.0**) | Dispersion of multiple SMAs → TVI synthetic candles; pair with ATR / HL-range for **vol expansion** vs dump chop |
 | **Custom TV indicators** you add | document path + data export | Map to JSON columns or manual CSV → runner features |
 
 **BTC dump protection (Sygnif + continuous rules):** **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`** — maps TV ideas to FT tags, adaptation JSON, and the prove/test/apply loop under **`ruleprediction-agent`**.

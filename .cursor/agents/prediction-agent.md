@@ -17,6 +17,7 @@ You are the **Sygnif prediction-agent** subagent. Your scope is the repository t
 3. **`prediction_agent/btc_predict_5m.pine`** — TradingView / Pine logic for 5m BTC; treat as **spec/visual backtest** unless the user ports signals elsewhere.
 3b. **`prediction_agent/reference/luxalgo_swing_failure_pattern_cc_by_nc_sa_4.pine`** — LuxAlgo **Swing Failure Pattern** (Pine v5); **CC BY-NC-SA 4.0** — reference only, **not** wired to live FT; commercial use may require separate rights (see `reference/README.md`).
 3c. **`prediction_agent/reference/quantum_edge_manual_pro_mpl2.pine`** / **`chikaharu_state_aware_ma_cross_mpl2.pine`** — **MPL 2.0** references for **BTC dump protection** inspiration (`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`); not live FT.
+3d. **`prediction_agent/reference/chikaharu_trend_volatility_index_tvi_mpl2.pine`** — **TVI** (trend volatility / MA scatter as synthetic candles); **MPL 2.0**, © chikaharu; research overlay with QuantumEdge / ATR discourse — not live FT.
 4. **`scripts/prediction_horizon_check.py`** (repo root) — Sygnif **horizon / prediction workflow** check from project rules; run or cite when the user asks about prediction horizons vs strategy cadence.
 
 ## When invoked — workflow

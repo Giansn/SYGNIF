@@ -8,6 +8,7 @@
 |------|-------------------------------|
 | `prediction_agent/reference/quantum_edge_manual_pro_mpl2.pine` | Wallet % margin, leverage, **ATR** initial SL + **TP1/TP2/TP3** (50% / 30% / 20% notional), **trail** after TP3, **liq vs SL** warning, **bull/bear score** (VWAP, RSI, EMA cross, ADX/DMI), “trusted” filter |
 | `prediction_agent/reference/chikaharu_state_aware_ma_cross_mpl2.pine` | **Regime** `00/01/10/11` from EMA20 slope + price vs MA; **state-dependent** MA pair; **crossunder** → close all (defensive exit — useful for **dump / risk-off** framing) |
+| `prediction_agent/reference/chikaharu_trend_volatility_index_tvi_mpl2.pine` | **TVI**: nonparametric spread of SMA10/20/40/70; **synthetic candles** + ATR + HL-range — use to reason about **volatility expansion** before/after sharp dumps (compare to FT ATR / BB width, not 1:1) |
 
 ---
 

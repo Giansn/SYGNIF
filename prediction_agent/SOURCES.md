@@ -9,6 +9,7 @@ Third-party **prediction-related** files copied for offline study. **Not** wired
 | LuxAlgo Swing Failure Pattern (Pine v5, **CC BY-NC-SA 4.0**) | [TradingView script](https://www.tradingview.com/script/YmWELClV-Swing-Failure-Pattern-SFP-LuxAlgo/) | n/a — see `reference/luxalgo_swing_failure_pattern_cc_by_nc_sa_4.pine` |
 | QuantumEdge-style indicator (Pine v6, **MPL 2.0**) | user-supplied | `reference/quantum_edge_manual_pro_mpl2.pine` |
 | State-aware MA cross strategy (Pine v5, **MPL 2.0**, © chikaharu) | user-supplied | `reference/chikaharu_state_aware_ma_cross_mpl2.pine` |
+| Trend Volatility Index TVI (Pine v6, **MPL 2.0**, © chikaharu) | user-supplied | `reference/chikaharu_trend_volatility_index_tvi_mpl2.pine` |
 
 ## Layout
 
