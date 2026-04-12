@@ -1,228 +1,149 @@
-// ============================================================================
-// SYGNIF BTC Prediction — 5min Timeframe
-// Pine Script v5 — TradingView
-//
-// How to use:
-//   1. Open TradingView -> BTCUSDT (or BTCUSD) on 5m chart
-//   2. Pine Editor -> paste this entire script -> Add to chart
-//   3. Green background = bullish, red = bearish, gray = neutral
-//   4. Table in top-right shows live prediction + breakdown
-//   5. Arrows mark signal flips
-// ============================================================================
-
 //@version=5
-indicator("SYGNIF BTC Predict 5m", overlay=true, max_labels_count=500)
+indicator("SYGNIF BTC Predict", overlay=true)
 
-// --- Inputs ---
-rsiLen       = input.int(14,   "RSI Period")
-rsiFastLen   = input.int(6,    "RSI Fast Period")
-macdFast     = input.int(12,   "MACD Fast")
-macdSlow     = input.int(26,   "MACD Slow")
-macdSig      = input.int(9,    "MACD Signal")
-bbLen        = input.int(20,   "Bollinger Period")
-bbDev        = input.float(2,  "Bollinger StdDev")
-atrLen       = input.int(14,   "ATR Period")
-momLen       = input.int(10,   "Momentum Period")
-rocLen       = input.int(12,   "ROC Period")
-willrLen     = input.int(14,   "Williams %R Period")
-volSmaLen    = input.int(20,   "Volume SMA Period")
-slopeLen     = input.int(5,    "Slope Lookback")
-showTable    = input.bool(true, "Show Dashboard")
-showSignals  = input.bool(true, "Show Arrow Signals")
+// Inputs
+int rsiP    = input.int(14, "RSI")
+int momP    = input.int(10, "Momentum")
+int rocP    = input.int(12, "ROC")
+int wrP     = input.int(14, "Williams %R")
+int bbP     = input.int(20, "Bollinger")
+int atrP    = input.int(14, "ATR")
+int volP    = input.int(20, "Vol SMA")
+int slopeP  = input.int(5,  "Slope Bars")
+bool tbl    = input.bool(true, "Dashboard")
+bool arrows = input.bool(true, "Signals")
 
-// --- Indicators ---
-rsiVal  = ta.rsi(close, rsiLen)
-rsiFast = ta.rsi(close, rsiFastLen)
+// Indicators
+rsiV   = ta.rsi(close, rsiP)
+rsiF   = ta.rsi(close, 6)
+[ml, sl, hl] = ta.macd(close, 12, 26, 9)
+bbM    = ta.sma(close, bbP)
+bbS    = ta.stdev(close, bbP)
+bbU    = bbM + 2 * bbS
+bbL    = bbM - 2 * bbS
+atr    = ta.atr(atrP)
+mom    = close - close[momP]
+roc    = (close - close[rocP]) / close[rocP] * 100
+hh     = ta.highest(high, wrP)
+ll     = ta.lowest(low, wrP)
+wr     = -100 * (hh - close) / (hh - ll)
+vr     = volume / ta.sma(volume, volP)
+e12    = ta.ema(close, 12)
+e26    = ta.ema(close, 26)
 
-[macdLine, signalLine, histLine] = ta.macd(close, macdFast, macdSlow, macdSig)
+// Score each indicator -1..+1
+s_rsi  = (rsiV - 50) / 50
+s_rsiF = (rsiF - 50) / 50
 
-bbMid   = ta.sma(close, bbLen)
-bbStd   = ta.stdev(close, bbLen)
-bbUp    = bbMid + bbDev * bbStd
-bbLo    = bbMid - bbDev * bbStd
-bbPos   = (close - bbLo) / (bbUp - bbLo)
-
-atrVal  = ta.atr(atrLen)
-momVal  = close - close[momLen]
-rocVal  = (close - close[rocLen]) / close[rocLen] * 100
-
-hhWR    = ta.highest(high, willrLen)
-llWR    = ta.lowest(low, willrLen)
-willrVal = -100 * (hhWR - close) / (hhWR - llWR)
-
-volSma   = ta.sma(volume, volSmaLen)
-volRatio = volume / volSma
-
-ema12 = ta.ema(close, 12)
-ema26 = ta.ema(close, 26)
-
-// --- Scoring (-1 to +1 per indicator) ---
-rsiScore     = (rsiVal - 50.0) / 50.0
-rsiFastScore = (rsiFast - 50.0) / 50.0
-
-float macdScore = 0.0
-if histLine > 0
-    macdScore := math.min(histLine / atrVal, 1.0)
+float s_macd = 0
+if hl > 0
+    s_macd := math.min(hl / atr, 1)
 else
-    macdScore := math.max(histLine / atrVal, -1.0)
+    s_macd := math.max(hl / atr, -1)
 
-bbScore   = (bbPos - 0.5) * 2.0
-momNorm   = momVal / atrVal
-momScore  = math.max(math.min(momNorm / 3.0, 1.0), -1.0)
-rocScore  = math.max(math.min(rocVal / 3.0, 1.0), -1.0)
-willrScr  = -(willrVal + 50.0) / 50.0
+s_bb   = ((close - bbL) / (bbU - bbL) - 0.5) * 2
+s_mom  = math.max(math.min(mom / atr / 3, 1), -1)
+s_roc  = math.max(math.min(roc / 3, 1), -1)
+s_wr   = -(wr + 50) / 50
 
-float volScore = 0.0
-if momVal > 0
-    volScore := math.min((volRatio - 1.0) / 2.0, 1.0)
+float s_vol = 0
+if mom > 0
+    s_vol := math.min((vr - 1) / 2, 1)
 else
-    volScore := -math.min((volRatio - 1.0) / 2.0, 1.0)
+    s_vol := -math.min((vr - 1) / 2, 1)
 
-float emaTrend = 0.0
-if close > ema12 and ema12 > ema26
-    emaTrend := 1.0
-else if close < ema12 and ema12 < ema26
-    emaTrend := -1.0
+float s_ema = 0
+if close > e12 and e12 > e26
+    s_ema := 1
+else if close < e12 and e12 < e26
+    s_ema := -1
 else
-    emaTrend := (close - ema26) / atrVal * 0.3
+    s_ema := (close - e26) / atr * 0.3
 
-slopeRaw   = (close - close[slopeLen]) / (atrVal * slopeLen)
-slopeScore = math.max(math.min(slopeRaw, 1.0), -1.0)
+s_slope = math.max(math.min((close - close[slopeP]) / (atr * slopeP), 1), -1)
 
-// --- Weighted composite -> 0..100 ---
-rawScore = (rsiScore     * 15.0 +
-            rsiFastScore * 10.0 +
-            macdScore    * 15.0 +
-            bbScore      *  8.0 +
-            momScore     * 10.0 +
-            rocScore     *  5.0 +
-            willrScr     *  8.0 +
-            volScore     *  5.0 +
-            emaTrend     * 14.0 +
-            slopeScore   * 10.0) / 100.0
+// Composite 0..100
+raw = (s_rsi * 15 + s_rsiF * 10 + s_macd * 15 + s_bb * 8 + s_mom * 10 + s_roc * 5 + s_wr * 8 + s_vol * 5 + s_ema * 14 + s_slope * 10) / 100
+score = ta.ema(math.max(math.min((raw + 1) / 2 * 100, 100), 0), 3)
 
-compositeScore = math.max(math.min((rawScore + 1.0) / 2.0 * 100.0, 100.0), 0.0)
-smoothScore    = ta.ema(compositeScore, 3)
+// Direction
+bull = score >= 60
+bear = score <= 40
+conf = math.abs(score - 50) * 2
 
-// --- Prediction ---
-isBull = smoothScore >= 60.0
-isBear = smoothScore <= 40.0
-conf   = math.abs(smoothScore - 50.0) * 2.0
+// Consensus (3 voters)
+int v1 = bull ? 1 : bear ? -1 : 0
+int v2 = 0
+if hl > 0 and close > e26
+    v2 := 1
+if hl < 0 and close < e26
+    v2 := -1
+int v3 = 0
+if rsiV > 55 and mom > 0
+    v3 := 1
+if rsiV < 45 and mom < 0
+    v3 := -1
+int votes = v1 + v2 + v3
 
-string dirLabel = "NEUTRAL"
-if isBull
-    dirLabel := "UP"
-if isBear
-    dirLabel := "DOWN"
+// Background
+color bg = color.new(color.gray, 95)
+if bull
+    bg := color.new(color.green, 90)
+if bear
+    bg := color.new(color.red, 90)
+bgcolor(bg)
 
-// --- Consensus (3 voters) ---
-int vote1 = isBull ? 1 : isBear ? -1 : 0
+// Arrows on flips
+lo = bull and not bull[1] and arrows
+sh = bear and not bear[1] and arrows
+plotshape(lo, "Buy",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(sh, "Sell", shape.triangledown, location.abovebar, color.red,   size=size.small)
 
-int vote2 = 0
-if histLine > 0 and close > ema26
-    vote2 := 1
-if histLine < 0 and close < ema26
-    vote2 := -1
+// Data window
+plot(score, "Score", color.new(color.blue, 100), display=display.data_window)
+plot(conf,  "Conf",  color.new(color.blue, 100), display=display.data_window)
 
-int vote3 = 0
-if rsiVal > 55 and momVal > 0
-    vote3 := 1
-if rsiVal < 45 and momVal < 0
-    vote3 := -1
+// Dashboard
+if tbl and barstate.islast
+    var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
 
-int totalVotes = vote1 + vote2 + vote3
+    string dir = bull ? "UP" : bear ? "DOWN" : "—"
+    string con = votes >= 2 ? "BULLISH" : votes <= -2 ? "BEARISH" : "MIXED"
 
-string consLabel = "MIXED"
-if totalVotes >= 2
-    consLabel := "BULLISH"
-if totalVotes <= -2
-    consLabel := "BEARISH"
+    color dc = color.gray
+    if bull
+        dc := color.green
+    if bear
+        dc := color.red
 
-// --- Background ---
-color bgCol = color.new(color.gray, 95)
-if isBull
-    bgCol := color.new(color.green, 90)
-if isBear
-    bgCol := color.new(color.red, 90)
-bgcolor(bgCol)
+    color cc = color.orange
+    if votes >= 2
+        cc := color.green
+    if votes <= -2
+        cc := color.red
 
-// --- Signal arrows ---
-longEntry  = isBull and not isBull[1] and showSignals
-shortEntry = isBear and not isBear[1] and showSignals
+    color rc = rsiV > 60 ? color.green : rsiV < 40 ? color.red : color.white
+    color mc = hl > 0 ? color.green : color.red
+    color wc = wr < -80 ? color.green : wr > -20 ? color.red : color.white
+    color vc = vr > 1.5 ? color.green : color.white
 
-plotshape(longEntry,  title="Buy Signal",  style=shape.triangleup,   location=location.belowbar, color=color.green, size=size.small)
-plotshape(shortEntry, title="Sell Signal", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.small)
+    table.cell(t, 0, 0, "SYGNIF",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0, "5m BTC",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1, "Direction",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1, dir,           text_color=dc,          text_size=size.normal)
+    table.cell(t, 0, 2, "Confidence",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(math.round(conf, 1)) + "%", text_color=dc, text_size=size.normal)
+    table.cell(t, 0, 3, "Consensus",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3, con,           text_color=cc,          text_size=size.normal)
+    table.cell(t, 0, 4, "RSI",          text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(math.round(rsiV, 1)), text_color=rc, text_size=size.tiny)
+    table.cell(t, 0, 5, "MACD",         text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 5, str.tostring(math.round(hl, 1)),   text_color=mc, text_size=size.tiny)
+    table.cell(t, 0, 6, "W%R",          text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, str.tostring(math.round(wr, 1)),   text_color=wc, text_size=size.tiny)
+    table.cell(t, 0, 7, "Vol",          text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7, str.tostring(math.round(vr, 2)) + "x", text_color=vc, text_size=size.tiny)
 
-// --- Data window ---
-plot(smoothScore, "Prediction Score", color=color.new(color.blue, 100), display=display.data_window)
-plot(conf,        "Confidence %",     color=color.new(color.blue, 100), display=display.data_window)
-
-// --- Dashboard Table ---
-if showTable and barstate.islast
-    var tbl = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 20), border_width=1)
-
-    color dirColor = color.gray
-    if isBull
-        dirColor := color.green
-    if isBear
-        dirColor := color.red
-
-    color consColor = color.orange
-    if totalVotes >= 2
-        consColor := color.green
-    if totalVotes <= -2
-        consColor := color.red
-
-    color rsiColor = color.white
-    if rsiVal > 60
-        rsiColor := color.green
-    if rsiVal < 40
-        rsiColor := color.red
-
-    color macdColor = color.red
-    if histLine > 0
-        macdColor := color.green
-
-    color wrColor = color.white
-    if willrVal < -80
-        wrColor := color.green
-    if willrVal > -20
-        wrColor := color.red
-
-    color volColor = color.white
-    if volRatio > 1.5
-        volColor := color.green
-
-    table.cell(tbl, 0, 0, "SYGNIF Predict", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(tbl, 1, 0, "5m BTC",          text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-
-    table.cell(tbl, 0, 1, "Direction",  text_color=color.gray,  text_size=size.small)
-    table.cell(tbl, 1, 1, dirLabel,     text_color=dirColor,    text_size=size.normal)
-
-    table.cell(tbl, 0, 2, "Confidence", text_color=color.gray,  text_size=size.small)
-    table.cell(tbl, 1, 2, str.tostring(math.round(conf, 1)) + "%", text_color=dirColor, text_size=size.normal)
-
-    table.cell(tbl, 0, 3, "Score",      text_color=color.gray,  text_size=size.small)
-    table.cell(tbl, 1, 3, str.tostring(math.round(smoothScore, 1)) + " / 100", text_color=color.white, text_size=size.small)
-
-    table.cell(tbl, 0, 4, "Consensus",  text_color=color.gray,  text_size=size.small)
-    table.cell(tbl, 1, 4, consLabel,    text_color=consColor,   text_size=size.normal)
-
-    table.cell(tbl, 0, 5, "",           text_color=color.gray,  text_size=size.tiny)
-    table.cell(tbl, 1, 5, "",           text_color=color.gray,  text_size=size.tiny)
-
-    table.cell(tbl, 0, 6, "RSI",        text_color=color.gray,  text_size=size.tiny)
-    table.cell(tbl, 1, 6, str.tostring(math.round(rsiVal, 1)),     text_color=rsiColor,  text_size=size.tiny)
-
-    table.cell(tbl, 0, 7, "MACD Hist",  text_color=color.gray,  text_size=size.tiny)
-    table.cell(tbl, 1, 7, str.tostring(math.round(histLine, 1)),   text_color=macdColor, text_size=size.tiny)
-
-    table.cell(tbl, 0, 8, "Will %R",    text_color=color.gray,  text_size=size.tiny)
-    table.cell(tbl, 1, 8, str.tostring(math.round(willrVal, 1)),   text_color=wrColor,   text_size=size.tiny)
-
-    table.cell(tbl, 0, 9, "Vol Ratio",  text_color=color.gray,  text_size=size.tiny)
-    table.cell(tbl, 1, 9, str.tostring(math.round(volRatio, 2)) + "x", text_color=volColor, text_size=size.tiny)
-
-// --- Alerts ---
-alertcondition(longEntry,  title="SYGNIF Buy",  message="SYGNIF 5m: BTC flipped BULLISH")
-alertcondition(shortEntry, title="SYGNIF Sell", message="SYGNIF 5m: BTC flipped BEARISH")
+// Alerts
+alertcondition(lo, "SYGNIF Buy",  "SYGNIF 5m: BTC BULLISH")
+alertcondition(sh, "SYGNIF Sell", "SYGNIF 5m: BTC BEARISH")
