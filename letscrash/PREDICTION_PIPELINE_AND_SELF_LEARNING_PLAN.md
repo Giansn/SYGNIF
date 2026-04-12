@@ -86,7 +86,7 @@
 - `finance_agent/bot.py` — `_briefing`, HTTP routes, env flags.
 - `docker-compose.yml` — env pass-through, depends_on, resource limits.
 - `trade_overseer/` — only if overseer should parse new JSON fields.
-- `.cursor/agents/prediction-agent.md` + `.cursor/rules/ruler-prediction-agent.mdc` — keep docs aligned with actual wiring.
+- `.cursor/agents/prediction-agent.md` + `.cursor/rules/ruleprediction-agent.mdc` (canonical; former `ruler-prediction-agent.mdc`) — keep docs aligned with actual wiring.
 
 ---
 

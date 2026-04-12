@@ -26,6 +26,7 @@ Do **not** use removed **`~/.claude/skills/finance-agent/`**. Sygnif skills live
 |-------|----------------------|------|
 | **finance-agent** | `.cursor/skills/finance-agent/SKILL.md` | Unified Sygnif domain + **Telegram** command parity (`finance_agent/bot.py`). |
 | **btc-specialist** | `.cursor/skills/btc-specialist/SKILL.md` | BTC-only analysis: `btc_specialist/` pulls, JSON snapshots, Bybit patterns — not a second bot. |
+| **create-btc-agent** | `.cursor/skills/create-btc-agent/SKILL.md` | Scaffold new BTC-related Cursor agents/skills + registry updates — not live BTC analysis. |
 
 **Cursor Agent** (delegated BTC-only persona — prefer over skill alone when routing BTC work):
 
@@ -34,6 +35,19 @@ Do **not** use removed **`~/.claude/skills/finance-agent/`**. Sygnif skills live
 | **btc-specialist** | `.cursor/agents/btc-specialist.md` |
 
 On this host: **`~/SYGNIF/.cursor/skills/...`** and **`~/SYGNIF/.cursor/agents/...`**.
+
+## Workflow with **ruleprediction-agent** (this inherit doc)
+
+**`sygnif-agent-inherit.mdc`** (this file) and **`.cursor/rules/ruleprediction-agent.mdc`** are used **together** in the worker workflow:
+
+1. **Always-on prediction loop:** `.cursor/rules/sygnif-predict-workflow.mdc` — Predict → Analyze → Proofread → Adjust; horizon check when relevant.
+2. **File-scoped prediction / briefing / RAM:** **`.cursor/rules/ruleprediction-agent.mdc`** — same content as the retired name **`ruler-prediction-agent.mdc`**; **`/ruleprediction-agent`** = **`/ruler-prediction-agent`**. It auto-attaches when globs match (`prediction_agent/**`, `scripts/prediction_horizon_check.py`, `finance_agent/http_main.py`, `.cursor/agents/prediction-agent.md`).
+
+When you touch those paths, apply **both** the inherit identity above **and** the **ruleprediction-agent** constraints (single **:8091** listener, no silent live wiring, bounded retrains).
+
+| Rule | Path | Role |
+|------|------|------|
+| **ruleprediction-agent** | `.cursor/rules/ruleprediction-agent.mdc` | Ports, RAM, bounded self-learning for prediction + briefing HTTP |
 
 ## Adaptive strategy tuning (bounded)
 
