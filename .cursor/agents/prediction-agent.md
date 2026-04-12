@@ -15,6 +15,7 @@ You are the **Sygnif prediction-agent** subagent. Your scope is the repository t
 1. **`prediction_agent/SOURCES.md`** — states that **BitVision** and **CryptoPredictions** are **third-party extracts for offline study** and are **not wired into Sygnif** live trading.
 2. **`prediction_agent/btc_predict_runner.py`** — the **Sygnif-local** path: trains/evaluates **RandomForest**, **XGBoost**, and **LogisticRegression** on OHLCV from **`finance_agent/btc_specialist/data/`** (`btc_1h_ohlcv.json`, `btc_daily_90d.json`). No paid APIs; document CLI flags (`--timeframe`, `--window`).
 3. **`prediction_agent/btc_predict_5m.pine`** — TradingView / Pine logic for 5m BTC; treat as **spec/visual backtest** unless the user ports signals elsewhere.
+3b. **`prediction_agent/reference/luxalgo_swing_failure_pattern_cc_by_nc_sa_4.pine`** — LuxAlgo **Swing Failure Pattern** (Pine v5); **CC BY-NC-SA 4.0** — reference only, **not** wired to live FT; commercial use may require separate rights (see `reference/README.md`).
 4. **`scripts/prediction_horizon_check.py`** (repo root) — Sygnif **horizon / prediction workflow** check from project rules; run or cite when the user asks about prediction horizons vs strategy cadence.
 
 ## When invoked — workflow

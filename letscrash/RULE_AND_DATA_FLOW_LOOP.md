@@ -66,6 +66,8 @@ flowchart TD
 | Item | Location | Use |
 |------|----------|-----|
 | **5m Pine spec** | `prediction_agent/btc_predict_5m.pine` | Visual / export alignment; **not** live FT unless ported |
+| **LuxAlgo Swing Failure Pattern** | `prediction_agent/reference/luxalgo_swing_failure_pattern_cc_by_nc_sa_4.pine` | TV v5 reference (pivots, LTF volume %, confirmation); **CC BY-NC-SA 4.0** — **NonCommercial** may block commercial deployment; align semantics with `SygnifStrategy` swing tags only after legal review |
+| **Official TV page** | [YmWELClV](https://www.tradingview.com/script/YmWELClV-Swing-Failure-Pattern-SFP-LuxAlgo/) | Source-of-truth for updates; republishing subject to TV [House Rules](https://www.tradingview.com/support/solutions/43000590599/) |
 | **Custom TV indicators** you add | document path + data export | Map to JSON columns or manual CSV → runner features |
 
 ### Exchange / CEX
