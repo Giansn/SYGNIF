@@ -1,13 +1,16 @@
 //@version=6
-strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500)
+strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=5, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500, pyramiding=3)
 
 // ── Inputs ──
-pivotLen = input.int(5,     "Pivot Length", minval=3, maxval=15)
-maxZones = input.int(5,     "Max Zones Each Side", minval=2, maxval=10)
-tpMul    = input.float(2.0, "TP (x ATR)", step=0.5)
-slMul    = input.float(1.2, "SL (x ATR)", step=0.5)
-cdBars   = input.int(20,    "Cooldown Bars", minval=6)
-tbl      = input.bool(true, "Dashboard")
+pivotLen  = input.int(5,     "Pivot Length", minval=3, maxval=15)
+maxZones  = input.int(6,     "Max Zones Each Side", minval=2, maxval=10)
+tpMul     = input.float(2.0, "Base TP (x ATR)", step=0.5)
+slMul     = input.float(1.2, "SL (x ATR)", step=0.5)
+cdBars    = input.int(8,     "Cooldown Bars", minval=3)
+sizeSmall = input.float(3,   "Size % Small Signal", step=1)
+sizeMed   = input.float(6,   "Size % Medium Signal", step=1)
+sizeBig   = input.float(10,  "Size % Big Signal", step=1)
+tbl       = input.bool(true, "Dashboard")
 
 // ── Indicators ──
 atr    = ta.atr(14)
@@ -18,243 +21,186 @@ vr     = volume / ta.sma(volume, 20)
 e12    = ta.ema(close, 12)
 e26    = ta.ema(close, 26)
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
-rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
-htfUp  = close > e50_1h and rsi_1h > 45
-htfDn  = close < e50_1h and rsi_1h < 55
+htfUp  = close > e50_1h
+htfDn  = close < e50_1h
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ZONE ARRAYS — store multiple demand/supply zones
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Pivots → zones ──
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 
-var array<float> demTops  = array.new_float(0)
-var array<float> demBtms  = array.new_float(0)
-var array<int>   demBars  = array.new_int(0)
-var array<int>   demRets  = array.new_int(0)
-var array<box>   demBoxes = array.new_box(0)
-var array<label> demLbls  = array.new_label(0)
+var array<float> dT = array.new_float(0)
+var array<float> dB = array.new_float(0)
+var array<int>   dI = array.new_int(0)
+var array<int>   dR = array.new_int(0)
+var array<box>   dX = array.new_box(0)
+var array<label> dL = array.new_label(0)
 
-var array<float> supTops  = array.new_float(0)
-var array<float> supBtms  = array.new_float(0)
-var array<int>   supBars  = array.new_int(0)
-var array<int>   supRets  = array.new_int(0)
-var array<box>   supBoxes = array.new_box(0)
-var array<label> supLbls  = array.new_label(0)
+var array<float> sT = array.new_float(0)
+var array<float> sB = array.new_float(0)
+var array<int>   sI = array.new_int(0)
+var array<int>   sR = array.new_int(0)
+var array<box>   sX = array.new_box(0)
+var array<label> sL = array.new_label(0)
 
-// New demand zone on pivot low
 if not na(pl)
-    dTop = math.min(open[pivotLen], close[pivotLen])
-    dBtm = low[pivotLen]
-    dBar = bar_index - pivotLen
-    array.push(demTops, dTop)
-    array.push(demBtms, dBtm)
-    array.push(demBars, dBar)
-    array.push(demRets, 0)
-    b = box.new(dBar, dTop, bar_index + 5, dBtm, border_color=color.green, bgcolor=color.new(color.green, 75))
-    array.push(demBoxes, b)
-    lb = label.new(bar_index + 3, dTop, "D", style=label.style_label_left, color=color.new(color.green, 50), textcolor=color.white, size=size.tiny, tooltip="New demand zone")
-    array.push(demLbls, lb)
-    if array.size(demTops) > maxZones
-        array.shift(demTops)
-        array.shift(demBtms)
-        array.shift(demBars)
-        array.shift(demRets)
-        box.delete(array.shift(demBoxes))
-        label.delete(array.shift(demLbls))
+    top = math.min(open[pivotLen], close[pivotLen])
+    btm = low[pivotLen]
+    array.push(dT, top)
+    array.push(dB, btm)
+    array.push(dI, bar_index - pivotLen)
+    array.push(dR, 0)
+    array.push(dX, box.new(bar_index - pivotLen, top, bar_index + 5, btm, border_color=color.green, bgcolor=color.new(color.green, 70)))
+    array.push(dL, label.new(bar_index + 3, top, "C", style=label.style_label_left, color=color.new(color.green, 40), textcolor=color.white, size=size.tiny, tooltip="New demand"))
+    if array.size(dT) > maxZones
+        array.shift(dT)
+        array.shift(dB)
+        array.shift(dI)
+        array.shift(dR)
+        box.delete(array.shift(dX))
+        label.delete(array.shift(dL))
 
-// New supply zone on pivot high
 if not na(ph)
-    sTop = high[pivotLen]
-    sBtm = math.max(open[pivotLen], close[pivotLen])
-    sBar = bar_index - pivotLen
-    array.push(supTops, sTop)
-    array.push(supBtms, sBtm)
-    array.push(supBars, sBar)
-    array.push(supRets, 0)
-    b = box.new(sBar, sTop, bar_index + 5, sBtm, border_color=color.red, bgcolor=color.new(color.red, 75))
-    array.push(supBoxes, b)
-    lb = label.new(bar_index + 3, sBtm, "S", style=label.style_label_left, color=color.new(color.red, 50), textcolor=color.white, size=size.tiny, tooltip="New supply zone")
-    array.push(supLbls, lb)
-    if array.size(supTops) > maxZones
-        array.shift(supTops)
-        array.shift(supBtms)
-        array.shift(supBars)
-        array.shift(supRets)
-        box.delete(array.shift(supBoxes))
-        label.delete(array.shift(supLbls))
+    top = high[pivotLen]
+    btm = math.max(open[pivotLen], close[pivotLen])
+    array.push(sT, top)
+    array.push(sB, btm)
+    array.push(sI, bar_index - pivotLen)
+    array.push(sR, 0)
+    array.push(sX, box.new(bar_index - pivotLen, top, bar_index + 5, btm, border_color=color.red, bgcolor=color.new(color.red, 70)))
+    array.push(sL, label.new(bar_index + 3, btm, "C", style=label.style_label_left, color=color.new(color.red, 40), textcolor=color.white, size=size.tiny, tooltip="New supply"))
+    if array.size(sT) > maxZones
+        array.shift(sT)
+        array.shift(sB)
+        array.shift(sI)
+        array.shift(sR)
+        box.delete(array.shift(sX))
+        label.delete(array.shift(sL))
 
-// ══════════════════════════════════════════════════════════════════════════════
-// UPDATE ZONES — extend, count retests, remove broken, calc confidence
-// ══════════════════════════════════════════════════════════════════════════════
-float bestLongConf  = 0.0
-float bestShortConf = 0.0
-bool  touchDemand   = false
-bool  touchSupply   = false
-int   touchDemIdx   = -1
-int   touchSupIdx   = -1
-
-// Demand zones
-if array.size(demTops) > 0
-    for i = array.size(demTops) - 1 to 0
-        dTop = array.get(demTops, i)
-        dBtm = array.get(demBtms, i)
-        dBar = array.get(demBars, i)
-        dRet = array.get(demRets, i)
-        bx   = array.get(demBoxes, i)
-        lb   = array.get(demLbls, i)
-
-        broken = close < dBtm - atr * 0.3
-
-        if broken
-            box.set_bgcolor(bx, color.new(color.gray, 90))
-            box.set_border_color(bx, color.new(color.gray, 80))
-            label.delete(lb)
-            array.remove(demTops, i)
-            array.remove(demBtms, i)
-            array.remove(demBars, i)
-            array.remove(demRets, i)
-            array.remove(demBoxes, i)
-            array.remove(demLbls, i)
-            continue
-
-        // Retest: price touches zone and bounces
-        if low <= dTop and close > dTop
-            array.set(demRets, i, dRet + 1)
-            dRet += 1
-
-        // Extend box
-        box.set_right(bx, bar_index + 5)
-
-        // Confidence
-        age = math.min(bar_index - dBar, 300)
-        height = (dTop - dBtm) / close * 100
-        conf = math.min(height * 30 + age * 0.12 + dRet * 20 + (htfUp ? 15.0 : 0.0) + (rsiV < 40 ? 10.0 : 0.0), 100.0)
-
-        // Color intensity by confidence
-        transp = math.round(math.max(80 - conf * 0.5, 30))
-        box.set_bgcolor(bx, color.new(color.green, transp))
-
-        // Update label
-        tier = conf >= 75 ? "A+" : conf >= 55 ? "A" : conf >= 35 ? "B" : "C"
-        expM = atr * tpMul / close * 100 * (1 + conf / 150)
-        label.set_x(lb, bar_index + 4)
-        label.set_y(lb, dTop)
-        label.set_text(lb, tier)
-        tip = "DEMAND (Long)\n─────────\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(dBtm, 0)) + "–" + str.tostring(math.round(dTop, 0)) + "\nRetests: " + str.tostring(dRet) + "x\nAge: " + str.tostring(age) + " bars\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
-        label.set_tooltip(lb, tip)
-
-        // Price touching zone?
-        if low <= dTop and low >= dBtm and conf > bestLongConf
-            bestLongConf := conf
-            touchDemand := true
-            touchDemIdx := i
-
-// Supply zones
-if array.size(supTops) > 0
-    for i = array.size(supTops) - 1 to 0
-        sTop = array.get(supTops, i)
-        sBtm = array.get(supBtms, i)
-        sBar = array.get(supBars, i)
-        sRet = array.get(supRets, i)
-        bx   = array.get(supBoxes, i)
-        lb   = array.get(supLbls, i)
-
-        broken = close > sTop + atr * 0.3
-
-        if broken
-            box.set_bgcolor(bx, color.new(color.gray, 90))
-            box.set_border_color(bx, color.new(color.gray, 80))
-            label.delete(lb)
-            array.remove(supTops, i)
-            array.remove(supBtms, i)
-            array.remove(supBars, i)
-            array.remove(supRets, i)
-            array.remove(supBoxes, i)
-            array.remove(supLbls, i)
-            continue
-
-        if high >= sBtm and close < sBtm
-            array.set(supRets, i, sRet + 1)
-            sRet += 1
-
-        box.set_right(bx, bar_index + 5)
-
-        age = math.min(bar_index - sBar, 300)
-        height = (sTop - sBtm) / close * 100
-        conf = math.min(height * 30 + age * 0.12 + sRet * 20 + (htfDn ? 15.0 : 0.0) + (rsiV > 60 ? 10.0 : 0.0), 100.0)
-
-        transp = math.round(math.max(80 - conf * 0.5, 30))
-        box.set_bgcolor(bx, color.new(color.red, transp))
-
-        tier = conf >= 75 ? "A+" : conf >= 55 ? "A" : conf >= 35 ? "B" : "C"
-        expM = atr * tpMul / close * 100 * (1 + conf / 150)
-        label.set_x(lb, bar_index + 4)
-        label.set_y(lb, sBtm)
-        label.set_text(lb, tier)
-        tip = "SUPPLY (Short)\n─────────\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(sBtm, 0)) + "–" + str.tostring(math.round(sTop, 0)) + "\nRetests: " + str.tostring(sRet) + "x\nAge: " + str.tostring(age) + " bars\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
-        label.set_tooltip(lb, tip)
-
-        if high >= sBtm and high <= sTop and conf > bestShortConf
-            bestShortConf := conf
-            touchSupply := true
-            touchSupIdx := i
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ENTRIES — price touches zone + confluence
-// ══════════════════════════════════════════════════════════════════════════════
-bull = touchDemand and bestLongConf >= 30 and htfUp and rsiV < 65 and close > open and vr > 0.7
-bear = touchSupply and bestShortConf >= 30 and htfDn and rsiV > 35 and close < open and vr > 0.7
-
+// ── Update zones + fire signals on EVERY touch ──
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
-flat   = strategy.position_size == 0
 
-tpL = atr * tpMul * (1 + bestLongConf / 200)
-tpS = atr * tpMul * (1 + bestShortConf / 200)
-slD = atr * slMul
+// Demand zones → long signals
+if array.size(dT) > 0
+    for i = array.size(dT) - 1 to 0
+        zTop = array.get(dT, i)
+        zBtm = array.get(dB, i)
+        zBar = array.get(dI, i)
+        zRet = array.get(dR, i)
+        bx   = array.get(dX, i)
+        lb   = array.get(dL, i)
 
-if bull and cooled and flat
-    strategy.entry("Long", strategy.long)
-    strategy.exit("LX", "Long", profit=tpL / syminfo.mintick, loss=slD / syminfo.mintick)
-    lastEntry := bar_index
-    tier = bestLongConf >= 75 ? "A+" : bestLongConf >= 55 ? "A" : bestLongConf >= 35 ? "B" : "C"
-    expM = atr * tpMul / close * 100 * (1 + bestLongConf / 150)
-    eTip = "LONG ENTRY\n═══════════\nTier: " + tier + "\nConf: " + str.tostring(math.round(bestLongConf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nTP: $" + str.tostring(math.round(tpL, 0)) + "\nSL: $" + str.tostring(math.round(slD, 0)) + "\n═══════════\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nMACD: " + str.tostring(math.round(hl, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x\n1h: UP"
-    label.new(bar_index, low - atr * 0.5, "▲ " + tier + " " + str.tostring(math.round(bestLongConf, 0)) + "%", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal, tooltip=eTip)
+        if close < zBtm - atr * 0.5
+            box.set_bgcolor(bx, color.new(color.gray, 92))
+            box.set_border_color(bx, color.new(color.gray, 85))
+            label.delete(lb)
+            array.remove(dT, i)
+            array.remove(dB, i)
+            array.remove(dI, i)
+            array.remove(dR, i)
+            array.remove(dX, i)
+            array.remove(dL, i)
+            continue
 
-if bear and cooled and flat
-    strategy.entry("Short", strategy.short)
-    strategy.exit("SX", "Short", profit=tpS / syminfo.mintick, loss=slD / syminfo.mintick)
-    lastEntry := bar_index
-    tier = bestShortConf >= 75 ? "A+" : bestShortConf >= 55 ? "A" : bestShortConf >= 35 ? "B" : "C"
-    expM = atr * tpMul / close * 100 * (1 + bestShortConf / 150)
-    eTip = "SHORT ENTRY\n═══════════\nTier: " + tier + "\nConf: " + str.tostring(math.round(bestShortConf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nTP: $" + str.tostring(math.round(tpS, 0)) + "\nSL: $" + str.tostring(math.round(slD, 0)) + "\n═══════════\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nMACD: " + str.tostring(math.round(hl, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x\n1h: DOWN"
-    label.new(bar_index, high + atr * 0.5, "▼ " + tier + " " + str.tostring(math.round(bestShortConf, 0)) + "%", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal, tooltip=eTip)
+        age = math.min(bar_index - zBar, 300)
+        ht  = (zTop - zBtm) / close * 100
+        conf = math.min(ht * 35 + age * 0.1 + zRet * 25 + (htfUp ? 12.0 : 0.0), 100.0)
+        tier = conf >= 70 ? "A+" : conf >= 50 ? "A" : conf >= 30 ? "B" : "C"
+        expM = atr * tpMul / close * 100 * (1 + conf / 150)
+
+        tr = math.round(math.max(75 - conf * 0.5, 25))
+        box.set_bgcolor(bx, color.new(color.green, tr))
+        box.set_right(bx, bar_index + 5)
+        label.set_x(lb, bar_index + 4)
+        label.set_y(lb, zTop)
+        label.set_text(lb, tier)
+        tip = "DEMAND (Long)\n─────────\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(zBtm, 0)) + "–" + str.tostring(math.round(zTop, 0)) + "\nHeight: " + str.tostring(math.round(ht, 3)) + "%\nAge: " + str.tostring(age) + " bars\nRetests: " + str.tostring(zRet) + "x\nRSI: " + str.tostring(math.round(rsiV, 1))
+        label.set_tooltip(lb, tip)
+
+        // Retest count
+        if low <= zTop and close > zTop and not (low <= zTop and low >= zBtm)
+            array.set(dR, i, zRet + 1)
+
+        // SIGNAL on touch: price enters zone + bullish candle
+        touched = low <= zTop and low >= zBtm and close > open
+        if touched and cooled
+            sz = conf >= 60 ? sizeBig : conf >= 35 ? sizeMed : sizeSmall
+            tp = atr * tpMul * (1 + conf / 200)
+            strategy.entry("L" + str.tostring(i), strategy.long, qty=sz / 100 * strategy.equity / close)
+            strategy.exit("LX" + str.tostring(i), "L" + str.tostring(i), profit=tp / syminfo.mintick, loss=atr * slMul / syminfo.mintick)
+            lastEntry := bar_index
+
+            eTip = "LONG " + tier + "\n═══════\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nSize: " + str.tostring(math.round(sz, 1)) + "%\nTP: $" + str.tostring(math.round(tp, 0)) + "\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
+            label.new(bar_index, low - atr * 0.4, "▲" + tier, style=label.style_label_up, color=conf >= 60 ? color.green : conf >= 35 ? color.new(color.green, 30) : color.new(color.green, 50), textcolor=color.white, size=conf >= 60 ? size.normal : size.small, tooltip=eTip)
+
+// Supply zones → short signals
+if array.size(sT) > 0
+    for i = array.size(sT) - 1 to 0
+        zTop = array.get(sT, i)
+        zBtm = array.get(sB, i)
+        zBar = array.get(sI, i)
+        zRet = array.get(sR, i)
+        bx   = array.get(sX, i)
+        lb   = array.get(sL, i)
+
+        if close > zTop + atr * 0.5
+            box.set_bgcolor(bx, color.new(color.gray, 92))
+            box.set_border_color(bx, color.new(color.gray, 85))
+            label.delete(lb)
+            array.remove(sT, i)
+            array.remove(sB, i)
+            array.remove(sI, i)
+            array.remove(sR, i)
+            array.remove(sX, i)
+            array.remove(sL, i)
+            continue
+
+        age = math.min(bar_index - zBar, 300)
+        ht  = (zTop - zBtm) / close * 100
+        conf = math.min(ht * 35 + age * 0.1 + zRet * 25 + (htfDn ? 12.0 : 0.0), 100.0)
+        tier = conf >= 70 ? "A+" : conf >= 50 ? "A" : conf >= 30 ? "B" : "C"
+        expM = atr * tpMul / close * 100 * (1 + conf / 150)
+
+        tr = math.round(math.max(75 - conf * 0.5, 25))
+        box.set_bgcolor(bx, color.new(color.red, tr))
+        box.set_right(bx, bar_index + 5)
+        label.set_x(lb, bar_index + 4)
+        label.set_y(lb, zBtm)
+        label.set_text(lb, tier)
+        tip = "SUPPLY (Short)\n─────────\n" + tier + " " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(zBtm, 0)) + "–" + str.tostring(math.round(zTop, 0)) + "\nHeight: " + str.tostring(math.round(ht, 3)) + "%\nAge: " + str.tostring(age) + " bars\nRetests: " + str.tostring(zRet) + "x\nRSI: " + str.tostring(math.round(rsiV, 1))
+        label.set_tooltip(lb, tip)
+
+        if high >= zBtm and close < zBtm and not (high >= zBtm and high <= zTop)
+            array.set(sR, i, zRet + 1)
+
+        touched = high >= zBtm and high <= zTop and close < open
+        if touched and cooled
+            sz = conf >= 60 ? sizeBig : conf >= 35 ? sizeMed : sizeSmall
+            tp = atr * tpMul * (1 + conf / 200)
+            strategy.entry("S" + str.tostring(i), strategy.short, qty=sz / 100 * strategy.equity / close)
+            strategy.exit("SX" + str.tostring(i), "S" + str.tostring(i), profit=tp / syminfo.mintick, loss=atr * slMul / syminfo.mintick)
+            lastEntry := bar_index
+
+            eTip = "SHORT " + tier + "\n═══════\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nSize: " + str.tostring(math.round(sz, 1)) + "%\nTP: $" + str.tostring(math.round(tp, 0)) + "\nSL: $" + str.tostring(math.round(atr * slMul, 0)) + "\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
+            label.new(bar_index, high + atr * 0.4, "▼" + tier, style=label.style_label_down, color=conf >= 60 ? color.red : conf >= 35 ? color.new(color.red, 30) : color.new(color.red, 50), textcolor=color.white, size=conf >= 60 ? size.normal : size.small, tooltip=eTip)
 
 // ── Trend line ──
 plot(e50_1h, "1h EMA50", color.new(color.orange, 50), 2)
 
 // ── Dashboard ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 20), border_width=1)
     pos = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
     color pc = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
-    actConf = math.max(bestLongConf, bestShortConf)
-    actTier = actConf >= 75 ? "A+" : actConf >= 55 ? "A" : actConf >= 35 ? "B" : actConf > 0 ? "C" : "—"
-    color cfc = actConf >= 75 ? color.green : actConf >= 55 ? color.yellow : actConf >= 35 ? color.orange : color.gray
-    table.cell(t, 0, 0, "SYGNIF",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 1, 0, "5m BTC",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1, "Position",   text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1, pos,          text_color=pc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Best Zone",  text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2, actTier + " " + str.tostring(math.round(actConf, 0)) + "%", text_color=cfc, text_size=size.normal)
-    table.cell(t, 0, 3, "Demand",     text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 3, str.tostring(array.size(demTops)) + " zones", text_color=color.green, text_size=size.tiny)
-    table.cell(t, 0, 4, "Supply",     text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 4, str.tostring(array.size(supTops)) + " zones", text_color=color.red,   text_size=size.tiny)
-    table.cell(t, 0, 5, "1h / Vol",   text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 5, (htfUp ? "UP" : htfDn ? "DN" : "—") + " | " + str.tostring(math.round(vr, 2)) + "x", text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 0, "SYGNIF",   text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0, "5m BTC",   text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1, "Position", text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1, pos,        text_color=pc,          text_size=size.normal)
+    table.cell(t, 0, 2, "Zones",    text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(array.size(dT)) + "D " + str.tostring(array.size(sT)) + "S", text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 3, "1h Trend", text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 3, htfUp ? "UP" : htfDn ? "DN" : "—", text_color=htfUp ? color.green : htfDn ? color.red : color.gray, text_size=size.tiny)
+    table.cell(t, 0, 4, "RSI/Vol",  text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(math.round(rsiV, 0)) + " | " + str.tostring(math.round(vr, 1)) + "x", text_color=color.white, text_size=size.tiny)
 
-alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
-alertcondition(bear and cooled and flat, "SYGNIF Short", "SYGNIF: BTC SHORT")
+alertcondition(strategy.position_size > strategy.position_size[1], "SYGNIF Entry", "SYGNIF: New entry")
