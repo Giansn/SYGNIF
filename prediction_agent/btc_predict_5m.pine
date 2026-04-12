@@ -2,225 +2,259 @@
 strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000, max_boxes_count=500, max_labels_count=500)
 
 // ── Inputs ──
-pivotLen = input.int(7,     "Pivot Length", minval=3)
-tpMul    = input.float(2.5, "TP (x ATR)", step=0.5)
-slMul    = input.float(1.5, "SL (x ATR)", step=0.5)
-minConf  = input.int(40,    "Min Confidence to Trade", minval=20, maxval=80)
+pivotLen = input.int(5,     "Pivot Length", minval=3, maxval=15)
+maxZones = input.int(5,     "Max Zones Each Side", minval=2, maxval=10)
+tpMul    = input.float(2.0, "TP (x ATR)", step=0.5)
+slMul    = input.float(1.2, "SL (x ATR)", step=0.5)
 cdBars   = input.int(20,    "Cooldown Bars", minval=6)
 tbl      = input.bool(true, "Dashboard")
 
 // ── Indicators ──
-rsiV = ta.rsi(close, 14)
-rsiF = ta.rsi(close, 6)
+atr    = ta.atr(14)
+rsiV   = ta.rsi(close, 14)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
-atr  = ta.atr(14)
-mom  = close - close[10]
-vr   = volume / ta.sma(volume, 20)
-e12  = ta.ema(close, 12)
-e26  = ta.ema(close, 26)
-e50  = ta.ema(close, 50)
-
-// ── Higher TF ──
+mom    = close - close[10]
+vr     = volume / ta.sma(volume, 20)
+e12    = ta.ema(close, 12)
+e26    = ta.ema(close, 26)
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
 htfUp  = close > e50_1h and rsi_1h > 45
 htfDn  = close < e50_1h and rsi_1h < 55
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ZONE DETECTION — pivot swing highs/lows become zones
+// ZONE ARRAYS — store multiple demand/supply zones
 // ══════════════════════════════════════════════════════════════════════════════
 ph = ta.pivothigh(pivotLen, pivotLen)
 pl = ta.pivotlow(pivotLen, pivotLen)
 
-// Supply zone (resistance): candle body-to-wick at pivot high
-var float supTop = na
-var float supBtm = na
-var int   supBar = 0
-var int   supRet = 0
-var bool  supOk  = true
+var array<float> demTops  = array.new_float(0)
+var array<float> demBtms  = array.new_float(0)
+var array<int>   demBars  = array.new_int(0)
+var array<int>   demRets  = array.new_int(0)
+var array<box>   demBoxes = array.new_box(0)
+var array<label> demLbls  = array.new_label(0)
 
-if not na(ph)
-    supTop := high[pivotLen]
-    supBtm := math.max(open[pivotLen], close[pivotLen])
-    supBar := bar_index - pivotLen
-    supRet := 0
-    supOk  := true
+var array<float> supTops  = array.new_float(0)
+var array<float> supBtms  = array.new_float(0)
+var array<int>   supBars  = array.new_int(0)
+var array<int>   supRets  = array.new_int(0)
+var array<box>   supBoxes = array.new_box(0)
+var array<label> supLbls  = array.new_label(0)
 
-// Demand zone (support): candle body-to-wick at pivot low
-var float demTop = na
-var float demBtm = na
-var int   demBar = 0
-var int   demRet = 0
-var bool  demOk  = true
-
+// New demand zone on pivot low
 if not na(pl)
-    demTop := math.min(open[pivotLen], close[pivotLen])
-    demBtm := low[pivotLen]
-    demBar := bar_index - pivotLen
-    demRet := 0
-    demOk  := true
+    dTop = math.min(open[pivotLen], close[pivotLen])
+    dBtm = low[pivotLen]
+    dBar = bar_index - pivotLen
+    array.push(demTops, dTop)
+    array.push(demBtms, dBtm)
+    array.push(demBars, dBar)
+    array.push(demRets, 0)
+    b = box.new(dBar, dTop, bar_index + 5, dBtm, border_color=color.green, bgcolor=color.new(color.green, 75))
+    array.push(demBoxes, b)
+    lb = label.new(bar_index + 3, dTop, "D", style=label.style_label_left, color=color.new(color.green, 50), textcolor=color.white, size=size.tiny, tooltip="New demand zone")
+    array.push(demLbls, lb)
+    if array.size(demTops) > maxZones
+        array.shift(demTops)
+        array.shift(demBtms)
+        array.shift(demBars)
+        array.shift(demRets)
+        box.delete(array.shift(demBoxes))
+        label.delete(array.shift(demLbls))
 
-// Count retests
-if supOk and not na(supTop) and high >= supBtm and close < supBtm
-    supRet += 1
-if demOk and not na(demBtm) and low <= demTop and close > demTop
-    demRet += 1
-
-// Zone broken = invalidated
-if supOk and not na(supTop) and close > supTop + atr * 0.3
-    supOk := false
-if demOk and not na(demBtm) and close < demBtm - atr * 0.3
-    demOk := false
-
-// Price inside zone
-inDemand = demOk and close >= demBtm and close <= demTop
-inSupply = supOk and close >= supBtm and close <= supTop
+// New supply zone on pivot high
+if not na(ph)
+    sTop = high[pivotLen]
+    sBtm = math.max(open[pivotLen], close[pivotLen])
+    sBar = bar_index - pivotLen
+    array.push(supTops, sTop)
+    array.push(supBtms, sBtm)
+    array.push(supBars, sBar)
+    array.push(supRets, 0)
+    b = box.new(sBar, sTop, bar_index + 5, sBtm, border_color=color.red, bgcolor=color.new(color.red, 75))
+    array.push(supBoxes, b)
+    lb = label.new(bar_index + 3, sBtm, "S", style=label.style_label_left, color=color.new(color.red, 50), textcolor=color.white, size=size.tiny, tooltip="New supply zone")
+    array.push(supLbls, lb)
+    if array.size(supTops) > maxZones
+        array.shift(supTops)
+        array.shift(supBtms)
+        array.shift(supBars)
+        array.shift(supRets)
+        box.delete(array.shift(supBoxes))
+        label.delete(array.shift(supLbls))
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CONFIDENCE — builds per zone from width, age, retests, confluence
+// UPDATE ZONES — extend, count retests, remove broken, calc confidence
 // ══════════════════════════════════════════════════════════════════════════════
-demHeight = demOk ? (demTop - demBtm) / close * 100 : 0.0
-supHeight = supOk ? (supTop - supBtm) / close * 100 : 0.0
-demAge    = demOk ? math.min(bar_index - demBar, 200) : 0
-supAge    = supOk ? math.min(bar_index - supBar, 200) : 0
+float bestLongConf  = 0.0
+float bestShortConf = 0.0
+bool  touchDemand   = false
+bool  touchSupply   = false
+int   touchDemIdx   = -1
+int   touchSupIdx   = -1
 
-// Fib confluence: is the zone near a key fib level?
-fibHi  = ta.highest(high, 50)
-fibLo  = ta.lowest(low, 50)
-fibRng = fibHi - fibLo
-fib618 = fibHi - fibRng * 0.618
-fib382 = fibHi - fibRng * 0.382
+// Demand zones
+if array.size(demTops) > 0
+    for i = array.size(demTops) - 1 to 0
+        dTop = array.get(demTops, i)
+        dBtm = array.get(demBtms, i)
+        dBar = array.get(demBars, i)
+        dRet = array.get(demRets, i)
+        bx   = array.get(demBoxes, i)
+        lb   = array.get(demLbls, i)
 
-demAtFib = demOk and demBtm <= fib618 + atr * 0.5 and demBtm >= fib618 - atr * 0.5
-supAtFib = supOk and supTop >= fib382 - atr * 0.5 and supTop <= fib382 + atr * 0.5
+        broken = close < dBtm - atr * 0.3
 
-// Build confidence 0-100
-float longConf = 0.0
-if demOk
-    longConf := math.min(demHeight * 25 + demAge * 0.15 + demRet * 20 + (htfUp ? 15.0 : 0.0) + (demAtFib ? 15.0 : 0.0) + (rsiV < 40 ? 10.0 : 0.0), 100.0)
+        if broken
+            box.set_bgcolor(bx, color.new(color.gray, 90))
+            box.set_border_color(bx, color.new(color.gray, 80))
+            label.delete(lb)
+            array.remove(demTops, i)
+            array.remove(demBtms, i)
+            array.remove(demBars, i)
+            array.remove(demRets, i)
+            array.remove(demBoxes, i)
+            array.remove(demLbls, i)
+            continue
 
-float shortConf = 0.0
-if supOk
-    shortConf := math.min(supHeight * 25 + supAge * 0.15 + supRet * 20 + (htfDn ? 15.0 : 0.0) + (supAtFib ? 15.0 : 0.0) + (rsiV > 60 ? 10.0 : 0.0), 100.0)
+        // Retest: price touches zone and bounces
+        if low <= dTop and close > dTop
+            array.set(demRets, i, dRet + 1)
+            dRet += 1
 
-// Expected move % = ATR-based, scaled by confidence
-longMove  = longConf > 0 ? atr * tpMul / close * 100 * (1 + longConf / 150) : 0.0
-shortMove = shortConf > 0 ? atr * tpMul / close * 100 * (1 + shortConf / 150) : 0.0
+        // Extend box
+        box.set_right(bx, bar_index + 5)
 
-// Tier
-string longTier  = longConf >= 75 ? "A+" : longConf >= 55 ? "A" : longConf >= 35 ? "B" : longConf > 0 ? "C" : "—"
-string shortTier = shortConf >= 75 ? "A+" : shortConf >= 55 ? "A" : shortConf >= 35 ? "B" : shortConf > 0 ? "C" : "—"
+        // Confidence
+        age = math.min(bar_index - dBar, 300)
+        height = (dTop - dBtm) / close * 100
+        conf = math.min(height * 30 + age * 0.12 + dRet * 20 + (htfUp ? 15.0 : 0.0) + (rsiV < 40 ? 10.0 : 0.0), 100.0)
 
-// ── Quick directional score ──
-dirScore = (rsiV - 50) / 50 * 15 + (rsiF - 50) / 50 * 10 + (hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)) * 15 + math.max(math.min(mom / atr / 3, 1.0), -1.0) * 15 + (close > e12 and e12 > e26 ? 1.0 : close < e12 and e12 < e26 ? -1.0 : 0.0) * 15 + (htfUp ? 1.0 : htfDn ? -1.0 : 0.0) * 15 + (mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)) * 15
-score = ta.ema(math.max(math.min((dirScore / 100 + 1) / 2 * 100, 100.0), 0.0), 5)
+        // Color intensity by confidence
+        transp = math.round(math.max(80 - conf * 0.5, 30))
+        box.set_bgcolor(bx, color.new(color.green, transp))
 
-// ── Entry conditions ──
-bull = inDemand and longConf >= minConf and htfUp and score >= 55 and rsiV < 65 and vr > 0.8
-bear = inSupply and shortConf >= minConf and htfDn and score <= 45 and rsiV > 35 and vr > 0.8
+        // Update label
+        tier = conf >= 75 ? "A+" : conf >= 55 ? "A" : conf >= 35 ? "B" : "C"
+        expM = atr * tpMul / close * 100 * (1 + conf / 150)
+        label.set_x(lb, bar_index + 4)
+        label.set_y(lb, dTop)
+        label.set_text(lb, tier)
+        tip = "DEMAND (Long)\n─────────\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(dBtm, 0)) + "–" + str.tostring(math.round(dTop, 0)) + "\nRetests: " + str.tostring(dRet) + "x\nAge: " + str.tostring(age) + " bars\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
+        label.set_tooltip(lb, tip)
+
+        // Price touching zone?
+        if low <= dTop and low >= dBtm and conf > bestLongConf
+            bestLongConf := conf
+            touchDemand := true
+            touchDemIdx := i
+
+// Supply zones
+if array.size(supTops) > 0
+    for i = array.size(supTops) - 1 to 0
+        sTop = array.get(supTops, i)
+        sBtm = array.get(supBtms, i)
+        sBar = array.get(supBars, i)
+        sRet = array.get(supRets, i)
+        bx   = array.get(supBoxes, i)
+        lb   = array.get(supLbls, i)
+
+        broken = close > sTop + atr * 0.3
+
+        if broken
+            box.set_bgcolor(bx, color.new(color.gray, 90))
+            box.set_border_color(bx, color.new(color.gray, 80))
+            label.delete(lb)
+            array.remove(supTops, i)
+            array.remove(supBtms, i)
+            array.remove(supBars, i)
+            array.remove(supRets, i)
+            array.remove(supBoxes, i)
+            array.remove(supLbls, i)
+            continue
+
+        if high >= sBtm and close < sBtm
+            array.set(supRets, i, sRet + 1)
+            sRet += 1
+
+        box.set_right(bx, bar_index + 5)
+
+        age = math.min(bar_index - sBar, 300)
+        height = (sTop - sBtm) / close * 100
+        conf = math.min(height * 30 + age * 0.12 + sRet * 20 + (htfDn ? 15.0 : 0.0) + (rsiV > 60 ? 10.0 : 0.0), 100.0)
+
+        transp = math.round(math.max(80 - conf * 0.5, 30))
+        box.set_bgcolor(bx, color.new(color.red, transp))
+
+        tier = conf >= 75 ? "A+" : conf >= 55 ? "A" : conf >= 35 ? "B" : "C"
+        expM = atr * tpMul / close * 100 * (1 + conf / 150)
+        label.set_x(lb, bar_index + 4)
+        label.set_y(lb, sBtm)
+        label.set_text(lb, tier)
+        tip = "SUPPLY (Short)\n─────────\nConf: " + str.tostring(math.round(conf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nZone: " + str.tostring(math.round(sBtm, 0)) + "–" + str.tostring(math.round(sTop, 0)) + "\nRetests: " + str.tostring(sRet) + "x\nAge: " + str.tostring(age) + " bars\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x"
+        label.set_tooltip(lb, tip)
+
+        if high >= sBtm and high <= sTop and conf > bestShortConf
+            bestShortConf := conf
+            touchSupply := true
+            touchSupIdx := i
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENTRIES — price touches zone + confluence
+// ══════════════════════════════════════════════════════════════════════════════
+bull = touchDemand and bestLongConf >= 30 and htfUp and rsiV < 65 and close > open and vr > 0.7
+bear = touchSupply and bestShortConf >= 30 and htfDn and rsiV > 35 and close < open and vr > 0.7
 
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
 flat   = strategy.position_size == 0
 
-tpL = atr * tpMul * (1 + longConf / 200)
-tpS = atr * tpMul * (1 + shortConf / 200)
+tpL = atr * tpMul * (1 + bestLongConf / 200)
+tpS = atr * tpMul * (1 + bestShortConf / 200)
 slD = atr * slMul
 
 if bull and cooled and flat
     strategy.entry("Long", strategy.long)
     strategy.exit("LX", "Long", profit=tpL / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
+    tier = bestLongConf >= 75 ? "A+" : bestLongConf >= 55 ? "A" : bestLongConf >= 35 ? "B" : "C"
+    expM = atr * tpMul / close * 100 * (1 + bestLongConf / 150)
+    eTip = "LONG ENTRY\n═══════════\nTier: " + tier + "\nConf: " + str.tostring(math.round(bestLongConf, 0)) + "%\nExp: +" + str.tostring(math.round(expM, 2)) + "%\nTP: $" + str.tostring(math.round(tpL, 0)) + "\nSL: $" + str.tostring(math.round(slD, 0)) + "\n═══════════\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nMACD: " + str.tostring(math.round(hl, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x\n1h: UP"
+    label.new(bar_index, low - atr * 0.5, "▲ " + tier + " " + str.tostring(math.round(bestLongConf, 0)) + "%", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal, tooltip=eTip)
 
 if bear and cooled and flat
     strategy.entry("Short", strategy.short)
     strategy.exit("SX", "Short", profit=tpS / syminfo.mintick, loss=slD / syminfo.mintick)
     lastEntry := bar_index
+    tier = bestShortConf >= 75 ? "A+" : bestShortConf >= 55 ? "A" : bestShortConf >= 35 ? "B" : "C"
+    expM = atr * tpMul / close * 100 * (1 + bestShortConf / 150)
+    eTip = "SHORT ENTRY\n═══════════\nTier: " + tier + "\nConf: " + str.tostring(math.round(bestShortConf, 0)) + "%\nExp: -" + str.tostring(math.round(expM, 2)) + "%\nTP: $" + str.tostring(math.round(tpS, 0)) + "\nSL: $" + str.tostring(math.round(slD, 0)) + "\n═══════════\nRSI: " + str.tostring(math.round(rsiV, 1)) + "\nMACD: " + str.tostring(math.round(hl, 1)) + "\nVol: " + str.tostring(math.round(vr, 2)) + "x\n1h: DOWN"
+    label.new(bar_index, high + atr * 0.5, "▼ " + tier + " " + str.tostring(math.round(bestShortConf, 0)) + "%", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal, tooltip=eTip)
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VISUALS — boxes + labels with hover tooltips
-// ══════════════════════════════════════════════════════════════════════════════
-
-// Demand zones (green) — always visible when active
-var box demBox = na
-if not na(pl)
-    demBox := box.new(demBar, demTop, bar_index + 5, demBtm, border_color=color.new(color.green, 40), bgcolor=color.new(color.green, math.round(92 - longConf * 0.4)))
-if demOk and not na(demBox)
-    box.set_right(demBox, bar_index + 5)
-    box.set_bgcolor(demBox, color.new(color.green, math.round(92 - longConf * 0.4)))
-
-// Supply zones (red) — always visible when active
-var box supBox = na
-if not na(ph)
-    supBox := box.new(supBar, supTop, bar_index + 5, supBtm, border_color=color.new(color.red, 40), bgcolor=color.new(color.red, math.round(92 - shortConf * 0.4)))
-if supOk and not na(supBox)
-    box.set_right(supBox, bar_index + 5)
-    box.set_bgcolor(supBox, color.new(color.red, math.round(92 - shortConf * 0.4)))
-
-// Zone info labels with HOVER TOOLTIP — placed at right edge of zone
-var label demLbl = na
-if not na(pl) and demOk
-    tipDem = "DEMAND ZONE (Long)\n" + "─────────────\n" + "Confidence: " + longTier + " " + str.tostring(math.round(longConf, 0)) + "%\n" + "Exp Move: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(demBtm, 0)) + " – " + str.tostring(math.round(demTop, 0)) + "\n" + "Height: " + str.tostring(math.round(demHeight, 3)) + "%\n" + "Age: " + str.tostring(demAge) + " bars\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib 61.8%: " + (demAtFib ? "YES" : "no") + "\n" + "1h Trend: " + (htfUp ? "UP" : htfDn ? "DOWN" : "FLAT") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "Volume: " + str.tostring(math.round(vr, 2)) + "x"
-    demLbl := label.new(bar_index + 3, demTop, longTier, style=label.style_label_left, color=color.new(color.green, 60), textcolor=color.white, size=size.tiny, tooltip=tipDem)
-
-if demOk and not na(demLbl)
-    label.set_x(demLbl, bar_index + 3)
-    label.set_y(demLbl, nz(demTop))
-    tipDem2 = "DEMAND ZONE (Long)\n" + "─────────────\n" + "Confidence: " + longTier + " " + str.tostring(math.round(longConf, 0)) + "%\n" + "Exp Move: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(nz(demBtm), 0)) + " – " + str.tostring(math.round(nz(demTop), 0)) + "\n" + "Height: " + str.tostring(math.round(demHeight, 3)) + "%\n" + "Age: " + str.tostring(demAge) + " bars\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib: " + (demAtFib ? "YES" : "no") + " | 1h: " + (htfUp ? "UP" : "—") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 2)) + "x"
-    label.set_tooltip(demLbl, tipDem2)
-    label.set_text(demLbl, longTier)
-
-var label supLbl = na
-if not na(ph) and supOk
-    tipSup = "SUPPLY ZONE (Short)\n" + "─────────────\n" + "Confidence: " + shortTier + " " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Exp Move: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(supBtm, 0)) + " – " + str.tostring(math.round(supTop, 0)) + "\n" + "Height: " + str.tostring(math.round(supHeight, 3)) + "%\n" + "Age: " + str.tostring(supAge) + " bars\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib 38.2%: " + (supAtFib ? "YES" : "no") + "\n" + "1h Trend: " + (htfUp ? "UP" : htfDn ? "DOWN" : "FLAT") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "Volume: " + str.tostring(math.round(vr, 2)) + "x"
-    supLbl := label.new(bar_index + 3, supBtm, shortTier, style=label.style_label_left, color=color.new(color.red, 60), textcolor=color.white, size=size.tiny, tooltip=tipSup)
-
-if supOk and not na(supLbl)
-    label.set_x(supLbl, bar_index + 3)
-    label.set_y(supLbl, nz(supBtm))
-    tipSup2 = "SUPPLY ZONE (Short)\n" + "─────────────\n" + "Confidence: " + shortTier + " " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Exp Move: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "─────────────\n" + "Zone: " + str.tostring(math.round(nz(supBtm), 0)) + " – " + str.tostring(math.round(nz(supTop), 0)) + "\n" + "Height: " + str.tostring(math.round(supHeight, 3)) + "%\n" + "Age: " + str.tostring(supAge) + " bars\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib: " + (supAtFib ? "YES" : "no") + " | 1h: " + (htfDn ? "DN" : "—") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + " | Vol: " + str.tostring(math.round(vr, 2)) + "x"
-    label.set_tooltip(supLbl, tipSup2)
-    label.set_text(supLbl, shortTier)
-
-// Entry signal labels with full tooltip breakdown
-if bull and cooled and flat
-    eTip = "LONG ENTRY\n" + "═══════════\n" + "Tier: " + longTier + "\n" + "Confidence: " + str.tostring(math.round(longConf, 0)) + "%\n" + "Expected: +" + str.tostring(math.round(longMove, 2)) + "%\n" + "TP: $" + str.tostring(math.round(tpL, 0)) + " | SL: $" + str.tostring(math.round(slD, 0)) + "\n" + "═══════════\n" + "Zone: " + str.tostring(math.round(nz(demBtm), 0)) + "–" + str.tostring(math.round(nz(demTop), 0)) + "\n" + "Retests: " + str.tostring(demRet) + "x\n" + "Fib 61.8%: " + (demAtFib ? "YES" : "no") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "MACD: " + str.tostring(math.round(hl, 1)) + "\n" + "Vol: " + str.tostring(math.round(vr, 2)) + "x\n" + "Score: " + str.tostring(math.round(score, 1)) + "\n" + "1h Trend: UP"
-    label.new(bar_index, low - atr * 0.5, "▲ " + longTier, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.normal, tooltip=eTip)
-
-if bear and cooled and flat
-    eTip = "SHORT ENTRY\n" + "═══════════\n" + "Tier: " + shortTier + "\n" + "Confidence: " + str.tostring(math.round(shortConf, 0)) + "%\n" + "Expected: -" + str.tostring(math.round(shortMove, 2)) + "%\n" + "TP: $" + str.tostring(math.round(tpS, 0)) + " | SL: $" + str.tostring(math.round(slD, 0)) + "\n" + "═══════════\n" + "Zone: " + str.tostring(math.round(nz(supBtm), 0)) + "–" + str.tostring(math.round(nz(supTop), 0)) + "\n" + "Retests: " + str.tostring(supRet) + "x\n" + "Fib 38.2%: " + (supAtFib ? "YES" : "no") + "\n" + "RSI: " + str.tostring(math.round(rsiV, 1)) + "\n" + "MACD: " + str.tostring(math.round(hl, 1)) + "\n" + "Vol: " + str.tostring(math.round(vr, 2)) + "x\n" + "Score: " + str.tostring(math.round(score, 1)) + "\n" + "1h Trend: DOWN"
-    label.new(bar_index, high + atr * 0.5, "▼ " + shortTier, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.normal, tooltip=eTip)
-
-// 1h EMA only — no clutter
+// ── Trend line ──
 plot(e50_1h, "1h EMA50", color.new(color.orange, 50), 2)
 
 // ── Dashboard ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_width=1)
     pos = strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT"
     color pc = strategy.position_size > 0 ? color.green : strategy.position_size < 0 ? color.red : color.gray
-    actConf = longConf > shortConf ? longConf : shortConf
-    actTier = longConf > shortConf ? longTier : shortTier
-    actMove = longConf > shortConf ? longMove : shortMove
+    actConf = math.max(bestLongConf, bestShortConf)
+    actTier = actConf >= 75 ? "A+" : actConf >= 55 ? "A" : actConf >= 35 ? "B" : actConf > 0 ? "C" : "—"
     color cfc = actConf >= 75 ? color.green : actConf >= 55 ? color.yellow : actConf >= 35 ? color.orange : color.gray
-    demStr = demOk ? str.tostring(math.round(nz(demBtm), 0)) + "–" + str.tostring(math.round(nz(demTop), 0)) : "—"
-    supStr = supOk ? str.tostring(math.round(nz(supBtm), 0)) + "–" + str.tostring(math.round(nz(supTop), 0)) : "—"
-    table.cell(t, 0, 0, "SYGNIF",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 1, 0, "5m BTC",      text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1, "Position",    text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1, pos,           text_color=pc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Confidence",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 0, 0, "SYGNIF",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0, "5m BTC",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1, "Position",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1, pos,          text_color=pc,          text_size=size.normal)
+    table.cell(t, 0, 2, "Best Zone",  text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 2, actTier + " " + str.tostring(math.round(actConf, 0)) + "%", text_color=cfc, text_size=size.normal)
-    table.cell(t, 0, 3, "Exp Move",    text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 3, str.tostring(math.round(actMove, 2)) + "%", text_color=cfc, text_size=size.normal)
-    table.cell(t, 0, 4, "Demand",      text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 4, demStr,        text_color=demOk ? color.green : color.gray, text_size=size.small)
-    table.cell(t, 0, 5, "Supply",      text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 5, supStr,        text_color=supOk ? color.red : color.gray,   text_size=size.small)
-    table.cell(t, 0, 6, "1h Trend",    text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 6, htfUp ? "UP" : htfDn ? "DN" : "—", text_color=htfUp ? color.green : htfDn ? color.red : color.gray, text_size=size.tiny)
-    table.cell(t, 0, 7, "Vol",         text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
+    table.cell(t, 0, 3, "Demand",     text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 3, str.tostring(array.size(demTops)) + " zones", text_color=color.green, text_size=size.tiny)
+    table.cell(t, 0, 4, "Supply",     text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(array.size(supTops)) + " zones", text_color=color.red,   text_size=size.tiny)
+    table.cell(t, 0, 5, "1h / Vol",   text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 5, (htfUp ? "UP" : htfDn ? "DN" : "—") + " | " + str.tostring(math.round(vr, 2)) + "x", text_color=color.white, text_size=size.tiny)
 
 alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
 alertcondition(bear and cooled and flat, "SYGNIF Short", "SYGNIF: BTC SHORT")
