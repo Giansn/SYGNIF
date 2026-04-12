@@ -1,34 +1,33 @@
 //@version=6
-indicator("SYGNIF BTC Predict", overlay=true)
+strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000)
 
-rsiP   = input.int(14, "RSI")
-momP   = input.int(10, "Momentum")
-rocP   = input.int(12, "ROC")
-wrP    = input.int(14, "Williams %R")
-bbP    = input.int(20, "Bollinger")
-atrP   = input.int(14, "ATR")
-volP   = input.int(20, "Vol SMA")
-slpP   = input.int(5,  "Slope Bars")
+// Inputs
+atrP   = input.int(14,   "ATR Period")
+atrMul = input.float(1.5,"TP Multiplier (ATR)")
+slMul  = input.float(1.0,"SL Multiplier (ATR)")
+minSc  = input.int(65,   "Entry Score Min", minval=55, maxval=80)
+cdBars = input.int(6,    "Cooldown Bars", minval=1)
 tbl    = input.bool(true, "Dashboard")
-arw    = input.bool(true, "Signals")
 
-rsiV   = ta.rsi(close, rsiP)
+// Indicators
+rsiV   = ta.rsi(close, 14)
 rsiF   = ta.rsi(close, 6)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
-bbM    = ta.sma(close, bbP)
-bbS    = ta.stdev(close, bbP)
+bbM    = ta.sma(close, 20)
+bbS    = ta.stdev(close, 20)
 bbU    = bbM + 2 * bbS
 bbL    = bbM - 2 * bbS
 atr    = ta.atr(atrP)
-mom    = close - close[momP]
-roc    = (close - close[rocP]) / close[rocP] * 100
-hh     = ta.highest(high, wrP)
-ll     = ta.lowest(low, wrP)
-wr     = -100 * (hh - close) / (hh - ll)
-vr     = volume / ta.sma(volume, volP)
+mom    = close - close[10]
+roc    = (close - close[12]) / close[12] * 100
+hhW    = ta.highest(high, 14)
+llW    = ta.lowest(low, 14)
+wr     = -100 * (hhW - close) / (hhW - llW)
+vr     = volume / ta.sma(volume, 20)
 e12    = ta.ema(close, 12)
 e26    = ta.ema(close, 26)
 
+// Scoring
 s1 = (rsiV - 50) / 50
 s2 = (rsiF - 50) / 50
 s3 = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
@@ -37,66 +36,81 @@ s5 = math.max(math.min(mom / atr / 3, 1.0), -1.0)
 s6 = math.max(math.min(roc / 3, 1.0), -1.0)
 s7 = -(wr + 50) / 50
 s8 = mom > 0 ? math.min((vr - 1) / 2, 1.0) : -math.min((vr - 1) / 2, 1.0)
-
 float s9 = 0.0
 if close > e12 and e12 > e26
     s9 := 1.0
 else if close < e12 and e12 < e26
     s9 := -1.0
 else
-    s9 := (close - e26) / atr * 0.3
-
-s10 = math.max(math.min((close - close[slpP]) / (atr * slpP), 1.0), -1.0)
+    s9 := math.max(math.min((close - e26) / atr * 0.3, 1.0), -1.0)
+s10 = math.max(math.min((close - close[5]) / (atr * 5), 1.0), -1.0)
 
 raw = s1*15 + s2*10 + s3*15 + s4*8 + s5*10 + s6*5 + s7*8 + s8*5 + s9*14 + s10*10
 score = ta.ema(math.max(math.min((raw/100 + 1) / 2 * 100, 100.0), 0.0), 3)
 
-bull = score >= 60
-bear = score <= 40
-conf = math.abs(score - 50) * 2
-
-v1 = bull ? 1 : bear ? -1 : 0
+// Consensus
+v1 = score >= 60 ? 1 : score <= 40 ? -1 : 0
 v2 = hl > 0 and close > e26 ? 1 : hl < 0 and close < e26 ? -1 : 0
 v3 = rsiV > 55 and mom > 0 ? 1 : rsiV < 45 and mom < 0 ? -1 : 0
 votes = v1 + v2 + v3
 
-color bg = color.new(color.gray, 95)
-if bull
-    bg := color.new(color.green, 90)
-if bear
-    bg := color.new(color.red, 90)
+// Filters: strong score + consensus + volume + cooldown
+bull = score >= minSc and votes >= 2 and vr > 1.0
+bear = score <= (100 - minSc) and votes <= -2 and vr > 1.0
+
+var int lastEntry = 0
+cooledOff = bar_index - lastEntry >= cdBars
+
+// ATR-based TP and SL
+tp = atr * atrMul
+sl_dist = atr * slMul
+
+// Entries
+flat = strategy.position_size == 0
+
+if bull and cooledOff and flat
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long TP/SL", "Long", profit=tp / syminfo.mintick, loss=sl_dist / syminfo.mintick)
+    lastEntry := bar_index
+
+if bear and cooledOff and flat
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short TP/SL", "Short", profit=tp / syminfo.mintick, loss=sl_dist / syminfo.mintick)
+    lastEntry := bar_index
+
+// Background
+color bg = color.new(color.gray, 97)
+if score >= 60
+    bg := color.new(color.green, 93)
+if score <= 40
+    bg := color.new(color.red, 93)
 bgcolor(bg)
 
-lo = bull and not bull[1] and arw
-sh = bear and not bear[1] and arw
-plotshape(lo, "Buy",  shape.triangleup,   location.belowbar, color.green, size=size.small)
-plotshape(sh, "Sell", shape.triangledown, location.abovebar, color.red,   size=size.small)
-
+// Data window
 plot(score, "Score", color.new(color.blue, 100), display=display.data_window)
-plot(conf,  "Conf",  color.new(color.blue, 100), display=display.data_window)
 
+// Dashboard
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 20), border_width=1)
-    dir = bull ? "UP" : bear ? "DOWN" : "—"
+    var t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 20), border_width=1)
+    dir = score >= 60 ? "LONG" : score <= 40 ? "SHORT" : "FLAT"
     con = votes >= 2 ? "BULLISH" : votes <= -2 ? "BEARISH" : "MIXED"
-    color dc = bull ? color.green : bear ? color.red : color.gray
+    color dc = score >= 60 ? color.green : score <= 40 ? color.red : color.gray
     color cc = votes >= 2 ? color.green : votes <= -2 ? color.red : color.orange
     table.cell(t, 0, 0, "SYGNIF",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
     table.cell(t, 1, 0, "5m BTC",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1, "Direction",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 0, 1, "Bias",      text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 1, dir,         text_color=dc,          text_size=size.normal)
-    table.cell(t, 0, 2, "Confidence", text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2, str.tostring(math.round(conf, 1)) + "%", text_color=dc, text_size=size.normal)
-    table.cell(t, 0, 3, "Consensus",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 0, 2, "Score",     text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(math.round(score, 1)), text_color=dc, text_size=size.normal)
+    table.cell(t, 0, 3, "Consensus", text_color=color.gray,  text_size=size.small)
     table.cell(t, 1, 3, con,         text_color=cc,          text_size=size.normal)
-    table.cell(t, 0, 4, "RSI",        text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 4, str.tostring(math.round(rsiV, 1)), text_color=rsiV > 60 ? color.green : rsiV < 40 ? color.red : color.white, text_size=size.tiny)
-    table.cell(t, 0, 5, "MACD",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 5, str.tostring(math.round(hl, 1)), text_color=hl > 0 ? color.green : color.red, text_size=size.tiny)
-    table.cell(t, 0, 6, "W%R",        text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 6, str.tostring(math.round(wr, 1)), text_color=wr < -80 ? color.green : wr > -20 ? color.red : color.white, text_size=size.tiny)
-    table.cell(t, 0, 7, "Vol",        text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.5 ? color.green : color.white, text_size=size.tiny)
+    table.cell(t, 0, 4, "ATR",       text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 4, str.tostring(math.round(atr, 1)),  text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 5, "TP",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 5, str.tostring(math.round(tp, 1)),   text_color=color.green,  text_size=size.tiny)
+    table.cell(t, 0, 6, "SL",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 6, str.tostring(math.round(sl_dist, 1)), text_color=color.red, text_size=size.tiny)
 
-alertcondition(lo, "SYGNIF Buy",  "SYGNIF 5m: BTC BULLISH")
-alertcondition(sh, "SYGNIF Sell", "SYGNIF 5m: BTC BEARISH")
+// Alerts
+alertcondition(bull and cooledOff and flat, "SYGNIF Long",  "SYGNIF: BTC LONG entry")
+alertcondition(bear and cooledOff and flat, "SYGNIF Short", "SYGNIF: BTC SHORT entry")
