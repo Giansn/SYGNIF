@@ -1,19 +1,22 @@
 //@version=6
 strategy("SYGNIF BTC 5m", overlay=true, margin_long=100, margin_short=100, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_value=0.06, slippage=2, initial_capital=10000)
 
-// Inputs
+// ── Inputs ──
 atrP   = input.int(14,    "ATR Period")
-fibLen = input.int(50,    "Fib Lookback Bars", minval=20)
-liqLen = input.int(30,    "Liq Swing Lookback", minval=10)
+fibLen = input.int(50,    "Fib Lookback", minval=20)
+liqLen = input.int(30,    "Liq Lookback", minval=10)
+srLen  = input.int(48,    "S/R Lookback (swing)", minval=20)
+srStab = input.int(3,     "S/R Stability Bars", minval=2)
+sfVol  = input.float(3.0, "Swing Fail Vol Filter %", step=0.5)
 tpMul  = input.float(2.5, "TP (x ATR)", step=0.5)
 slMul  = input.float(1.5, "SL (x ATR)", step=0.5)
 minSc  = input.int(72,    "Min Score", minval=60, maxval=85)
 cdBars = input.int(24,    "Cooldown Bars", minval=6)
 tbl    = input.bool(true,  "Dashboard")
-fibPlt = input.bool(true,  "Show Fib Levels")
-liqPlt = input.bool(true,  "Show Liq Levels")
+fibPlt = input.bool(true,  "Show Fib")
+liqPlt = input.bool(true,  "Show Liq")
 
-// Core indicators
+// ── Core indicators ──
 rsiV   = ta.rsi(close, 14)
 rsiF   = ta.rsi(close, 6)
 [ml, sl, hl] = ta.macd(close, 12, 26, 9)
@@ -31,8 +34,9 @@ vr     = volume / ta.sma(volume, 20)
 e12    = ta.ema(close, 12)
 e26    = ta.ema(close, 26)
 e50    = ta.ema(close, 50)
+e120   = ta.ema(close, 120)
 
-// Higher TF trend
+// ── Higher TF trend ──
 e50_1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50))
 rsi_1h = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
 htfUp  = close > e50_1h and rsi_1h > 45
@@ -53,75 +57,73 @@ if close <= fib618 and close >= fib786
     fibScore := 1.0
 else if close <= fib382 and close > fib618
     fibScore := 0.5
-else if close <= fib500 and close > fib382
-    fibScore := 0.2
 else if close > fib236
     fibScore := -0.7
-else if close >= fib382 and close < fib500
-    fibScore := -0.2
+else if close <= fib500 and close > fib382
+    fibScore := 0.2
 
 fibLongBoost  = (low <= fib618 and close > fib618 and close > open) or (low <= fib786 and close > fib786 and close > open)
 fibShortBoost = (high >= fib236 and close < fib236 and close < open) or (high >= fib382 and close < fib382 and close < open)
 
-// ── Liquidation pattern estimation ──
-// Swing highs/lows = where leveraged traders entered. Their liquidation
-// prices sit at predictable distances based on common leverage tiers.
+// ── Liquidation estimation ──
 swHi = ta.highest(high, liqLen)
 swLo = ta.lowest(low, liqLen)
-
-// Estimated liquidation levels: where longs/shorts get wiped
-// Longs entered near swing low → liquidated below it by 1/leverage
-liq100x_lo = swLo * (1 - 1.0/100)  // 100x longs: -1%
-liq50x_lo  = swLo * (1 - 1.0/50)   // 50x longs:  -2%
-liq25x_lo  = swLo * (1 - 1.0/25)   // 25x longs:  -4%
-liq10x_lo  = swLo * (1 - 1.0/10)   // 10x longs:  -10%
-
-// Shorts entered near swing high → liquidated above it
-liq100x_hi = swHi * (1 + 1.0/100)
+liq50x_lo  = swLo * (1 - 1.0/50)
+liq25x_lo  = swLo * (1 - 1.0/25)
 liq50x_hi  = swHi * (1 + 1.0/50)
 liq25x_hi  = swHi * (1 + 1.0/25)
-liq10x_hi  = swHi * (1 + 1.0/10)
-
-// Distance from price to nearest liq cluster (normalized by ATR)
 distToLongLiq  = (close - liq25x_lo) / atr
 distToShortLiq = (liq25x_hi - close) / atr
-
-// Liquidation sweep detection: price wicks below/above liq level then reverses
-// This is the "stop hunt" / "liquidity grab" pattern
-liqSweepLong = low <= liq50x_lo and close > swLo and close > open and vr > 1.3
+liqSweepLong  = low <= liq50x_lo and close > swLo and close > open and vr > 1.3
 liqSweepShort = high >= liq50x_hi and close < swHi and close < open and vr > 1.3
-
-// Liquidation cascade: rapid move + extreme volume = forced liquidations happening
-volSpike   = vr > 2.5
-priceDropPct = (close[3] - low) / close[3] * 100
-pricePumpPct = (high - close[3]) / close[3] * 100
-liqCascadeDown = volSpike and priceDropPct > 1.5
-liqCascadeUp   = volSpike and pricePumpPct > 1.5
-
-// Post-cascade reversal: cascade just finished, price stabilizing = entry opportunity
-liqCascadeBuyOpp  = liqCascadeDown[1] and close > open and rsiF < 35
-liqCascadeSellOpp = liqCascadeUp[1] and close < open and rsiF > 65
-
-// Liquidation magnet: price is being pulled toward a liq cluster
-liqMagnetDown = distToLongLiq < 3 and mom < 0 and vr > 1.0
+volSpike      = vr > 2.5
+liqCascDown   = volSpike and (close[3] - low) / close[3] * 100 > 1.5
+liqCascUp     = volSpike and (high - close[3]) / close[3] * 100 > 1.5
+liqCascBuy    = liqCascDown[1] and close > open and rsiF < 35
+liqCascSell   = liqCascUp[1] and close < open and rsiF > 65
+liqMagnetDn   = distToLongLiq < 3 and mom < 0 and vr > 1.0
 liqMagnetUp   = distToShortLiq < 3 and mom > 0 and vr > 1.0
 
-// Liq score for composite (-1 to +1)
 float liqScore = 0.0
-if liqSweepLong or liqCascadeBuyOpp
+if liqSweepLong or liqCascBuy
     liqScore := 1.0
-else if liqSweepShort or liqCascadeSellOpp
+else if liqSweepShort or liqCascSell
     liqScore := -1.0
-else if liqMagnetDown
+else if liqMagnetDn
     liqScore := -0.5
 else if liqMagnetUp
     liqScore := 0.5
-else if distToLongLiq < 2
-    liqScore := -0.3
-else if distToShortLiq < 2
-    liqScore := 0.3
 
-// ── Scoring (12 indicators: +fib +liq) ──
+// ── Failure Swing detection (Heavy91 / Sygnif adapted) ──
+// S/R from lookback, excluding current bar
+resist = ta.highest(high[1], srLen)
+supprt = ta.lowest(low[1], srLen)
+
+// Volatility filter: price must be far enough from EMA120 (avoid chop entries)
+volPct = math.abs(close - e120) / e120 * 100
+sfVolOk = volPct > sfVol
+
+// Stability: S/R level unchanged for N bars (flat, real level)
+resistStable = true
+supprtStable = true
+for i = 1 to srStab
+    if resist[i] != resist
+        resistStable := false
+    if supprt[i] != supprt
+        supprtStable := false
+
+// The actual failure swing: wick breaks S/R but candle closes back inside
+fsLong  = supprtStable and low <= supprt and close > supprt and close > open and sfVolOk
+fsShort = resistStable and high >= resist and close < resist and close < open and sfVolOk
+
+// Swing fail score for composite
+float sfScore = 0.0
+if fsLong
+    sfScore := 1.0
+else if fsShort
+    sfScore := -1.0
+
+// ── Scoring (13 indicators) ──
 s1  = (rsiV - 50) / 50
 s2  = (rsiF - 50) / 50
 s3  = hl > 0 ? math.min(hl / atr, 1.0) : math.max(hl / atr, -1.0)
@@ -140,35 +142,46 @@ else
 s10 = math.max(math.min((close - close[5]) / (atr * 5), 1.0), -1.0)
 s11 = fibScore
 s12 = liqScore
+s13 = sfScore
 
-// Weights: 12 indicators summing to 100
-raw = s1*11 + s2*7 + s3*11 + s4*6 + s5*8 + s6*4 + s7*6 + s8*4 + s9*10 + s10*7 + s11*13 + s12*13
+// Weights sum to 100
+raw = s1*10 + s2*6 + s3*10 + s4*5 + s5*7 + s6*3 + s7*5 + s8*3 + s9*9 + s10*6 + s11*12 + s12*12 + s13*12
 score = ta.ema(math.max(math.min((raw/100 + 1) / 2 * 100, 100.0), 0.0), 5)
 
-// Consensus — 5 voters
+// ── Consensus — 6 voters ──
 v1 = score >= 60 ? 1 : score <= 40 ? -1 : 0
 v2 = hl > 0 and close > e26 ? 1 : hl < 0 and close < e26 ? -1 : 0
 v3 = rsiV > 55 and mom > 0 ? 1 : rsiV < 45 and mom < 0 ? -1 : 0
 v4 = fibScore >= 0.5 ? 1 : fibScore <= -0.5 ? -1 : 0
 v5 = liqScore >= 0.5 ? 1 : liqScore <= -0.5 ? -1 : 0
-votes = v1 + v2 + v3 + v4 + v5
+v6 = sfScore >= 0.5 ? 1 : sfScore <= -0.5 ? -1 : 0
+votes = v1 + v2 + v3 + v4 + v5 + v6
 
-// Entry conditions
-bullBase = score >= minSc and votes >= 3 and vr > 1.2 and htfUp and close > e50 and rsiV < 70
-bearBase = score <= (100 - minSc) and votes <= -3 and vr > 1.2 and htfDn and close < e50 and rsiV > 30
-// Sweep entries: liq sweep + fib bounce + trend = high-conviction entry even with lower score
+// ── Entry conditions ──
+// Standard: high composite + 4/6 voters + filters
+bullBase = score >= minSc and votes >= 4 and vr > 1.2 and htfUp and close > e50 and rsiV < 70
+bearBase = score <= (100 - minSc) and votes <= -4 and vr > 1.2 and htfDn and close < e50 and rsiV > 30
+
+// Failure swing standalone: the swing fail itself is high-conviction, needs fewer voters
+sfLongEntry  = fsLong and htfUp and vr > 1.0 and votes >= 2 and rsiV < 45
+sfShortEntry = fsShort and htfDn and vr > 1.0 and votes <= -2 and rsiV > 55
+
+// Sweep + fib confluence
 sweepLong  = liqSweepLong and fibLongBoost and htfUp and rsiV < 40
 sweepShort = liqSweepShort and fibShortBoost and htfDn and rsiV > 60
-bull = bullBase or (score >= (minSc - 5) and votes >= 2 and fibLongBoost and htfUp) or sweepLong
-bear = bearBase or (score <= (100 - minSc + 5) and votes <= -2 and fibShortBoost and htfDn) or sweepShort
+
+bull = bullBase or sfLongEntry or sweepLong
+bear = bearBase or sfShortEntry or sweepShort
 
 var int lastEntry = 0
 cooled = bar_index - lastEntry >= cdBars
 flat   = strategy.position_size == 0
 
-// Fib-aware TP
+// ── TP: fib-aware or EMA120 for swing fails, fallback ATR ──
 float tpLong = atr * tpMul
-if close < fib500 and fib382 - close > atr
+if fsLong and e120 > close and e120 - close > atr
+    tpLong := e120 - close
+else if close < fib500 and fib382 - close > atr
     tpLong := fib382 - close
 else if close < fib382 and fib236 - close > atr
     tpLong := fib236 - close
@@ -176,7 +189,9 @@ else if close < fib618 and fib500 - close > atr
     tpLong := fib500 - close
 
 float tpShort = atr * tpMul
-if close > fib500 and close - fib618 > atr
+if fsShort and close > e120 and close - e120 > atr
+    tpShort := close - e120
+else if close > fib500 and close - fib618 > atr
     tpShort := close - fib618
 else if close > fib382 and close - fib500 > atr
     tpShort := close - fib500
@@ -202,18 +217,18 @@ plot(fibPlt ? fib500 : na, "Fib 50%",   color.new(color.blue, 40),   1, plot.sty
 plot(fibPlt ? fib618 : na, "Fib 61.8%", color.new(color.green, 30),  2, plot.style_cross)
 plot(fibPlt ? fib786 : na, "Fib 78.6%", color.new(color.lime, 40),   1, plot.style_cross)
 plot(e50_1h, "1h EMA50", color.new(color.orange, 40), 2)
+plot(e120,   "EMA120",   color.new(color.yellow, 50), 1)
+plot(resist, "Resist",   color.new(color.red, 40),    1, plot.style_stepline)
+plot(supprt, "Support",  color.new(color.green, 40),   1, plot.style_stepline)
+plot(liqPlt ? liq25x_lo : na, "Liq 25x L", color.new(color.red, 40),  1, plot.style_cross)
+plot(liqPlt ? liq25x_hi : na, "Liq 25x S", color.new(color.aqua, 40), 1, plot.style_cross)
 
-// Liq levels: red dashes below (long liqs), blue dashes above (short liqs)
-plot(liqPlt ? liq25x_lo : na, "Liq 25x Long", color.new(color.red, 30),  1, plot.style_cross)
-plot(liqPlt ? liq50x_lo : na, "Liq 50x Long", color.new(color.red, 50),  1, plot.style_cross)
-plot(liqPlt ? liq25x_hi : na, "Liq 25x Short",color.new(color.aqua, 30), 1, plot.style_cross)
-plot(liqPlt ? liq50x_hi : na, "Liq 50x Short",color.new(color.aqua, 50), 1, plot.style_cross)
+// Swing fail markers
+plotshape(fsLong,  "SF Long",  shape.cross, location.belowbar, color.new(color.lime, 0),    size=size.small)
+plotshape(fsShort, "SF Short", shape.cross, location.abovebar, color.new(color.fuchsia, 0),  size=size.small)
+plotshape(liqSweepLong,  "Liq Sweep L",  shape.diamond, location.belowbar, color.new(color.lime, 30),    size=size.tiny)
+plotshape(liqSweepShort, "Liq Sweep S",  shape.diamond, location.abovebar, color.new(color.fuchsia, 30),  size=size.tiny)
 
-// Sweep markers on chart
-plotshape(liqSweepLong,  "Liq Sweep Long",  shape.diamond, location.belowbar, color.new(color.lime, 0),  size=size.tiny)
-plotshape(liqSweepShort, "Liq Sweep Short", shape.diamond, location.abovebar, color.new(color.fuchsia, 0), size=size.tiny)
-
-// Background
 color bg = color.new(color.gray, 97)
 if score >= 60
     bg := color.new(color.green, 93)
@@ -223,42 +238,46 @@ bgcolor(bg)
 
 plot(score, "Score", color.new(color.blue, 100), display=display.data_window)
 
-// Dashboard
+// ── Dashboard ──
 if tbl and barstate.islast
-    var t = table.new(position.top_right, 2, 11, bgcolor=color.new(color.black, 20), border_width=1)
+    var t = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 20), border_width=1)
     dir = score >= minSc ? "LONG" : score <= (100 - minSc) ? "SHORT" : "FLAT"
-    con = votes >= 3 ? "BULLISH" : votes <= -3 ? "BEARISH" : "WAIT"
+    con = votes >= 4 ? "STRONG" : votes >= 3 ? "BULLISH" : votes <= -4 ? "STRONG" : votes <= -3 ? "BEARISH" : "WAIT"
     color dc = score >= minSc ? color.green : score <= (100 - minSc) ? color.red : color.gray
-    color cc = votes >= 3 ? color.green : votes <= -3 ? color.red : color.orange
+    color cc = math.abs(votes) >= 4 ? (votes > 0 ? color.green : color.red) : math.abs(votes) >= 3 ? (votes > 0 ? color.green : color.red) : color.orange
     htf = htfUp ? "UP" : htfDn ? "DOWN" : "FLAT"
     color hc = htfUp ? color.green : htfDn ? color.red : color.gray
     fibZ = fibScore >= 0.5 ? "BUY ZONE" : fibScore <= -0.5 ? "SELL ZONE" : "NEUTRAL"
     color fc = fibScore >= 0.5 ? color.green : fibScore <= -0.5 ? color.red : color.gray
-    liqZ = liqScore >= 0.5 ? "SWEPT" : liqScore <= -0.5 ? "SWEPT" : liqMagnetDown ? "MAGNET DN" : liqMagnetUp ? "MAGNET UP" : "CLEAR"
-    color lc = liqScore >= 0.5 ? color.green : liqScore <= -0.5 ? color.red : math.abs(liqScore) > 0.2 ? color.orange : color.gray
-    table.cell(t, 0, 0,  "SYGNIF",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 1, 0,  "5m BTC",    text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
-    table.cell(t, 0, 1,  "Bias",      text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 1,  dir,         text_color=dc,          text_size=size.normal)
-    table.cell(t, 0, 2,  "1h Trend",  text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 2,  htf,         text_color=hc,          text_size=size.normal)
-    table.cell(t, 0, 3,  "Fib Zone",  text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 3,  fibZ,        text_color=fc,          text_size=size.normal)
-    table.cell(t, 0, 4,  "Liq Status",text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 4,  liqZ,        text_color=lc,          text_size=size.normal)
-    table.cell(t, 0, 5,  "Consensus", text_color=color.gray,  text_size=size.small)
-    table.cell(t, 1, 5,  con,         text_color=cc,          text_size=size.normal)
-    table.cell(t, 0, 6,  "Score",     text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 6,  str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
-    table.cell(t, 0, 7,  "Fib",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 7,  str.tostring(math.round(fibScore, 2)), text_color=fc, text_size=size.tiny)
-    table.cell(t, 0, 8,  "Liq",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 8,  str.tostring(math.round(liqScore, 2)), text_color=lc, text_size=size.tiny)
+    liqZ = liqScore >= 0.5 ? "SWEPT" : liqScore <= -0.5 ? "SWEPT" : liqMagnetDn ? "MAGNET" : liqMagnetUp ? "MAGNET" : "CLEAR"
+    color lc = math.abs(liqScore) >= 0.5 ? (liqScore > 0 ? color.green : color.red) : math.abs(liqScore) > 0.2 ? color.orange : color.gray
+    sfZ = fsLong ? "LONG" : fsShort ? "SHORT" : "—"
+    color sc2 = fsLong ? color.green : fsShort ? color.red : color.gray
+    table.cell(t, 0, 0,  "SYGNIF",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 1, 0,  "5m BTC",     text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 30))
+    table.cell(t, 0, 1,  "Bias",       text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 1,  dir,          text_color=dc,          text_size=size.normal)
+    table.cell(t, 0, 2,  "1h Trend",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 2,  htf,          text_color=hc,          text_size=size.normal)
+    table.cell(t, 0, 3,  "Swing Fail", text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 3,  sfZ,          text_color=sc2,         text_size=size.normal)
+    table.cell(t, 0, 4,  "Fib Zone",   text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 4,  fibZ,         text_color=fc,          text_size=size.normal)
+    table.cell(t, 0, 5,  "Liq Status", text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 5,  liqZ,         text_color=lc,          text_size=size.normal)
+    table.cell(t, 0, 6,  "Consensus",  text_color=color.gray,  text_size=size.small)
+    table.cell(t, 1, 6,  con + " " + str.tostring(votes) + "/6", text_color=cc, text_size=size.small)
+    table.cell(t, 0, 7,  "Score",      text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 7,  str.tostring(math.round(score, 1)), text_color=dc, text_size=size.tiny)
     float tpShow = strategy.position_size > 0 ? tpLong : tpShort
-    table.cell(t, 0, 9,  "TP / SL",   text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 9,  str.tostring(math.round(tpShow, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
-    table.cell(t, 0, 10, "Vol",       text_color=color.gray,  text_size=size.tiny)
-    table.cell(t, 1, 10, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
+    table.cell(t, 0, 8,  "TP / SL",    text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 8,  str.tostring(math.round(tpShow, 0)) + " / " + str.tostring(math.round(slD, 0)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 9,  "S/R",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 9,  str.tostring(math.round(supprt, 0)) + " / " + str.tostring(math.round(resist, 0)), text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 10, "ATR",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 10, str.tostring(math.round(atr, 0)),   text_color=color.white, text_size=size.tiny)
+    table.cell(t, 0, 11, "Vol",        text_color=color.gray,  text_size=size.tiny)
+    table.cell(t, 1, 11, str.tostring(math.round(vr, 2)) + "x", text_color=vr > 1.2 ? color.green : color.white, text_size=size.tiny)
 
 alertcondition(bull and cooled and flat, "SYGNIF Long",  "SYGNIF: BTC LONG")
 alertcondition(bear and cooled and flat, "SYGNIF Short", "SYGNIF: BTC SHORT")
