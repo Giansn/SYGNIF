@@ -7,7 +7,7 @@ Adds **tag-specific** entry/exit paths for **BTC-0.1-R01–R03**: each path is s
 ``confirm_trade_entry`` (see ``letscrash/BTC_Strategy_0.1.md`` §7).
 **R03** = **scalping pattern** (pullback sleeve + scalp TP/RSI exits in ``custom_exit``).
 
-**Futures (USDT linear):** **leverage** is **not** set manually — inherited ``SygnifStrategy.leverage()`` (major tier, short cap, ATR vol scaling). **Entries / exits** run on **strategy math** (this class + parent); RPC ``forceenter`` is optional operator override only.
+**Futures (USDT linear):** **leverage** is **not** set manually — inherited ``SygnifStrategy.leverage()`` (major tier, short cap, ATR vol scaling). **Entries / exits** run on **strategy math** (this class + parent); RPC ``forceenter`` is optional operator override only. With ``position_adjustment_enable`` in config, **scale-in** (multiple fills on the **same** trade) is allowed for R01–R03 and ``manual_*`` tags — not venue **hedge mode** long+short on one symbol under Freqtrade’s Bybit one-way default.
 
 **Research data path:** **Nautilus** container (compose profile ``btc-nautilus``) processes Bybit/BTC feeds into ``finance_agent/btc_specialist/data/`` for training + **ruleprediction** — see ``letscrash/RULE_AND_DATA_FLOW_LOOP.md`` §3.
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Optional
 
 import pandas as pd
 from freqtrade.persistence import Trade
@@ -40,6 +41,13 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
     """Sygnif stack + BTC 0.1 rule tags, bucket cap, R01/R02/R03 exits; leverage from parent."""
 
     max_slots_btc_0_1_r03 = 3
+    # --- Position adjustment (scale-in on same pair; NOT exchange hedge long+short) ---
+    # Freqtrade sets Bybit **one-way** mode at startup; ``adjust_trade_position`` adds stake
+    # to the **existing** trade (multiple fills / DCA), not a separate opposite leg.
+    DCA_ELIGIBLE_TAGS = frozenset(_SygnifStrategyBase.DCA_ELIGIBLE_TAGS) | frozenset(
+        {b01.TAG_R01, b01.TAG_R02, b01.TAG_R03}
+    )
+    DCA_MAX_ENTRIES = 3
     # Futures: allow opens when whitelist is BTC-only (``_active_volume_pairs`` < 3).
     # ``btc_analysis_consensus`` = RPC from ``scripts/btc_analysis_forceenter.py`` (prediction JSON + R01 gate).
     _tags_bypass_volume_regime = frozenset(
@@ -203,6 +211,49 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
             side,
             **kwargs,
         )
+
+    def adjust_trade_position(
+        self,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        min_stake: Optional[float],
+        max_stake: float,
+        current_entry_rate: float,
+        current_exit_rate: float,
+        current_entry_profit: float,
+        current_exit_profit: float,
+        **kwargs,
+    ) -> Optional[float]:
+        """Same-pair scale-in (parent DCA math) for R01–R03 + ``manual_*`` RPC tags."""
+        tag = trade.enter_tag or ""
+        if not (
+            tag in self.DCA_ELIGIBLE_TAGS
+            or tag.startswith("manual_")
+            or tag.startswith("BTC-0.1-R")
+        ):
+            return None
+
+        filled = trade.nr_of_successful_entries
+        if filled > int(getattr(self, "DCA_MAX_ENTRIES", 3)):
+            return None
+        if current_profit > float(getattr(self, "DCA_DRAWDOWN_STEP", -0.03)):
+            return None
+
+        original_stake = trade.stake_amount / max(filled, 1)
+        dca_stake = original_stake * float(getattr(self, "DCA_SCALE_FACTOR", 0.5))
+        dca_stake = max(min_stake or 0, min(dca_stake, max_stake))
+
+        logger.info(
+            "BTC-0.1 scale-in: %s tag=%s entries=%d profit=%.2f%% → +%.2f USDT",
+            trade.pair,
+            tag,
+            filled,
+            current_profit * 100,
+            dca_stake,
+        )
+        return dca_stake
 
     def custom_stoploss(
         self,

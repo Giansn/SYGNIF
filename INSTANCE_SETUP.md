@@ -82,7 +82,7 @@ Edit both configs and set:
 | Force enter from BTC analysis JSON | `scripts/btc_analysis_forceenter.py` |
 | Force enter from 24h movement JSON | `scripts/ft_btc_0_1_from_24h_forecast.py` |
 
-Paper config **`user_data/config_btc_strategy_0_1_paper_market.json`** uses **`max_open_trades`: 100** for headroom; single-pair mode still yields **one open BTC position** unless you add pairs or enable position adjustment. Strategy slot caps (R01–R03) still apply.
+Paper config **`user_data/config_btc_strategy_0_1_paper_market.json`** uses **`max_open_trades`: 100** for headroom; **`position_adjustment_enable`: true** allows **`BTC_Strategy_0_1.adjust_trade_position`** scale-ins (DCA-style) on the same BTC trade — not simultaneous long+short on one symbol (Freqtrade+Bybit one-way). Strategy slot caps (R01–R03) still apply on new entries.
 
 **Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
 

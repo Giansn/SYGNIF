@@ -89,7 +89,7 @@ Rebuild after changing **`Dockerfile.custom`**, the patch script, or **Freqtrade
 | Force enter from **BTC analysis** JSON (runner + channel + R01 gate) | `scripts/btc_analysis_forceenter.py` |
 | Force enter from **24h movement** JSON (`FORECAST_FORCEENTER_OK=YES`) | `scripts/ft_btc_0_1_from_24h_forecast.py` |
 
-**Concurrency:** `user_data/config_btc_strategy_0_1_paper_market.json` sets **`max_open_trades`: 100** so you can experiment on paper within Freqtrade’s global cap. **`BTC_Strategy_0_1.confirm_trade_entry`** still applies **per-tag slot caps** (R01/R02/R03). With the default **single-pair** `BTC/USDT:USDT` whitelist and **`position_adjustment_enable`: false**, you still get **at most one open position per pair** — raising `max_open_trades` mainly matters for **multi-pair** whitelists or if you later enable position stacking.
+**Concurrency:** `user_data/config_btc_strategy_0_1_paper_market.json` sets **`max_open_trades`: 100** so you can experiment on paper within Freqtrade’s global cap. **`BTC_Strategy_0_1.confirm_trade_entry`** still applies **per-tag slot caps** (R01/R02/R03). With the default **single-pair** `BTC/USDT:USDT` whitelist you still have **one Freqtrade trade object per pair**; **`position_adjustment_enable`: true** + **`adjust_trade_position`** allow **multiple entry fills (scale-in / DCA)** on that same trade when drawdown passes the parent **`DCA_DRAWDOWN_STEP`** threshold — **not** simultaneous long **and** short on the same symbol (Freqtrade sets Bybit **one-way** mode at startup per [Freqtrade Bybit notes](https://www.freqtrade.io/en/stable/exchanges/#bybit)). For a true offsetting leg, use a **second bot/subaccount** (e.g. spot vs perp) or manual venue hedge outside Freqtrade.
 
 Requirements:
 
