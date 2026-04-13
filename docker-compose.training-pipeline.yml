@@ -1,0 +1,34 @@
+# Training channel Docker — data inflow (``btc_1h_ohlcv.json`` / ``btc_daily_90d.json``; from host: Nautilus ``bybit_nautilus_spot_btc_training_feed.py``) → recognition + risk JSON outflow.
+#
+# Use together with the main compose file so `sygnif_backend` is defined (do not run this file alone):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.training-pipeline.yml up -d --build sygnif-training-pipeline
+#
+# Logs:
+#   docker logs sygnif-training-pipeline --tail 80
+#
+# Output on host (rw volume):
+#   prediction_agent/btc_prediction_output.json   (from runner)
+#   prediction_agent/training_channel_output.json
+
+services:
+  sygnif-training-pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.training_pipeline
+    image: sygnif-training-pipeline:latest
+    container_name: sygnif-training-pipeline
+    restart: unless-stopped
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./prediction_agent:/app/prediction_agent:rw"
+      - "./finance_agent:/app/finance_agent:ro"
+    environment:
+      SKIP_PREDICT_RUNNER: "0"
+      RUNNER_TIMEFRAME: "${TRAINING_TIMEFRAME:-1h}"
+      WINDOW: "${TRAINING_WINDOW:-5}"
+      TEST_RATIO: "${TRAINING_TEST_RATIO:-0.2}"
+      TRAINING_LOOP_SECONDS: "${TRAINING_LOOP_SECONDS:-21600}"

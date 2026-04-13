@@ -1,8 +1,7 @@
 """Tests for runtime strategy adaptation (JSON bounds)."""
+
 import sys
 from pathlib import Path
-
-import pytest
 
 ud = Path(__file__).resolve().parent.parent / "user_data"
 sys.path.insert(0, str(ud))

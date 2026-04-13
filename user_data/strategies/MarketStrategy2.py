@@ -775,6 +775,9 @@ class MarketStrategy2(IStrategy):
     )
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
+    # See ``SygnifStrategy._tags_bypass_volume_regime`` — subclasses may set for BTC rule tags.
+    _tags_bypass_volume_regime: frozenset = frozenset()
+
     # Claude layer (same attr name as SygnifStrategy — populate_entry_trend uses self.claude)
     claude = MarketStrategy2Sentiment()
 
@@ -1995,6 +1998,7 @@ class MarketStrategy2(IStrategy):
         # NT Lesson 5: global volume regime gate (premium tags bypass)
         if (self.config.get("trading_mode", "") == "futures"
                 and tag not in self.PREMIUM_TAGS
+                and tag not in getattr(self, "_tags_bypass_volume_regime", frozenset())
                 and self._active_volume_pairs < self.MIN_ACTIVE_VOLUME_PAIRS):
             logger.info(
                 "Volume regime: only %d/%d pairs active, blocking %s on %s",
@@ -2003,7 +2007,10 @@ class MarketStrategy2(IStrategy):
             return False
 
         # Futures: minimum average volume gate (filter micro caps, swing bypasses)
-        if self.config.get("trading_mode", "") == "futures" and tag not in self._swing_tags and self.dp:
+        if (self.config.get("trading_mode", "") == "futures"
+                and tag not in self._swing_tags
+                and tag not in getattr(self, "_tags_bypass_volume_regime", frozenset())
+                and self.dp):
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(df) > 0 and not self._futures_volume_gate_passes(df):
                 last = df.iloc[-1]

@@ -1,7 +1,14 @@
 ---
+# `prediction_agent/` is mounted into `finance-agent` (+ baked in image) for `btc_predict_runner.py`
+# and study trees; outputs `btc_prediction_output.json` on the host mount.
 # Inter-service URLs and Docker network name come from `.env` (see `.env.example`).
 # Use default service DNS names (finance-agent, freqtrade, …) on SYGNIF_DOCKER_NETWORK_NAME.
 # Pre-created “Sygnif Network” bridge: merge docker-compose.sygnif-network.yml (see that file).
+#
+# **Default stack (no profile):** `finance-agent` + `notification-handler` only.
+# **Main Sygnif spot/futures + overseer:** `docker compose --profile main-traders up -d`
+# **BTC spot + Nautilus research:** merge `docker-compose.btc-nautilus-research.yml` (see file header).
+#
 # To use a finance-agent already running on the EC2 host, set in .env e.g.
 #   SYGNIF_SENTIMENT_HTTP_URL=http://host.docker.internal:8091/sygnif/sentiment
 #   FINANCE_AGENT_BRIEFING_URL=http://host.docker.internal:8091/briefing
@@ -30,12 +37,19 @@ services:
       - "127.0.0.1:8091:8091"
     volumes:
       - "./user_data/finance_agent:/app/finance_agent_models:ro"
+      # Live code + btc_specialist JSON (OHLCV) — overrides image COPY for /app/finance_agent
+      - "./finance_agent:/app/finance_agent:ro"
+      # prediction_agent: rw so btc_predict_runner can write btc_prediction_output.json on host
+      - "./prediction_agent:/app/prediction_agent:rw"
       # Fused Cursor/Telegram KB for `/finance-agent` LLM (see `load_finance_agent_kb` in bot.py)
       - "./.cursor/agents/finance-agent.md:/app/kb/finance-agent.md:ro"
     environment:
       FINANCE_AGENT_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_HTTP_PORT: "8091"
       FINANCE_AGENT_KB_FILE: "/app/kb/finance-agent.md"
+      # /ruleprediction-agent: append R01–R03 + fresh btc_prediction line to GET /briefing (see ruleprediction_briefing.py)
+      SYGNIF_BRIEFING_INCLUDE_RULE_PREDICT: "1"
+      SYGNIF_BRIEFING_INCLUDE_BTC_PREDICT: "1"
       # Jupyter on the EC2 host (nn-zero-to-hero); enables /training and /training/status probes from the container
       ORTHOGONAL_TRAINING_HOST: "host.docker.internal"
       ORTHOGONAL_TRAINING_PORT: "8890"
@@ -53,6 +67,7 @@ services:
       start_period: 60s
 
   freqtrade:
+    profiles: ["main-traders"]
     build:
       context: .
       dockerfile: "./docker/Dockerfile.custom"
@@ -68,7 +83,8 @@ services:
     env_file:
       - .env
     ports:
-      - "0.0.0.0:8080:8080"
+      # Spot Freqtrade API: host 8181 → container listen_port (config.json api_server 8080)
+      - "0.0.0.0:8181:8080"
     environment:
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
     depends_on:
@@ -84,11 +100,13 @@ services:
       --strategy SygnifStrategy
 
   freqtrade-futures:
+    profiles: ["main-traders"]
     build:
       context: .
       dockerfile: "./docker/Dockerfile.custom"
     restart: unless-stopped
     container_name: freqtrade-futures
+    entrypoint: ["/bin/sh", "-c"]
     networks:
       - sygnif_backend
     extra_hosts:
@@ -102,6 +120,39 @@ services:
       - "0.0.0.0:8081:8081"
     environment:
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
+      SYGNIF_PROFILE: btc_trend
+    depends_on:
+      finance-agent:
+        condition: service_started
+      notification-handler:
+        condition: service_started
+    command:
+      - "python3 /freqtrade/user_data/bybit_ccxt_demo_patch.py && exec /home/ftuser/.local/bin/freqtrade trade --strategy BTC_Strategy_0_1 --logfile /freqtrade/user_data/logs/freqtrade-futures.log --db-url sqlite:////freqtrade/user_data/tradesv3-futures-btc01-demo.sqlite --config /freqtrade/user_data/config_futures.json"
+
+  # BTC_Strategy_0_1 — futures, BTC/USDT:USDT only (see user_data/config_btc_strategy_0_1_paper_market.json).
+  # Start: docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1
+  # API: host 127.0.0.1:8185 → container :8085 (JWT in config; keys like main futures: exchange.key/secret or dry_run).
+  freqtrade-btc-0-1:
+    profiles: ["btc-0-1"]
+    build:
+      context: .
+      dockerfile: "./docker/Dockerfile.custom"
+    restart: unless-stopped
+    container_name: freqtrade-btc-0-1
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+      - "./trade_overseer:/freqtrade/trade_overseer"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8185:8085"
+    environment:
+      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
+      SYGNIF_PROFILE: btc_trend
     depends_on:
       finance-agent:
         condition: service_started
@@ -109,9 +160,10 @@ services:
         condition: service_started
     command: >
       trade
-      --logfile /freqtrade/user_data/logs/freqtrade-futures.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3-futures.sqlite
-      --config /freqtrade/user_data/config_futures.json
+      --logfile /freqtrade/user_data/logs/freqtrade-btc-0-1.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3-btc01-paper.sqlite
+      --config /freqtrade/user_data/config_btc_strategy_0_1_paper_market.json
+      --strategy BTC_Strategy_0_1
 
   notification-handler:
     build:
@@ -138,6 +190,7 @@ services:
   # Trade overseer: same Docker network as Freqtrade APIs (not 127.0.0.1 from host).
   # NPU/OpenVINO: run overseer on host if needed; this image is requests-only.
   trade-overseer:
+    profiles: ["main-traders"]
     build:
       context: .
       dockerfile: "./trade_overseer/Dockerfile"

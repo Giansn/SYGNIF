@@ -7,8 +7,8 @@ Models used (all free, local, no API keys):
   2. XGBoost       (xgboost)  — continuous next-bar mean price
   3. LogisticRegression (sklearn) — binary next-bar direction (+1 up / 0 down)
 
-Data: finance_agent/btc_specialist/data/btc_1h_ohlcv.json  (Bybit 1h candles)
-      finance_agent/btc_specialist/data/btc_daily_90d.json  (Bybit daily candles)
+Data: ../finance_agent/btc_specialist/data/btc_1h_ohlcv.json  (Bybit 1h candles)
+      ../finance_agent/btc_specialist/data/btc_daily_90d.json  (Bybit daily candles)
 
 Usage:
   python3 btc_predict_runner.py              # defaults to 1h data
@@ -34,7 +34,8 @@ from sklearn.metrics import (
 import xgboost as xgb
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(SCRIPT_DIR, "../../finance_agent/btc_specialist/data")
+# Repo layout: <SYGNIF>/prediction_agent/this.py  →  data in <SYGNIF>/finance_agent/...
+DATA_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "finance_agent", "btc_specialist", "data"))
 
 # ---------------------------------------------------------------------------
 # Data loading

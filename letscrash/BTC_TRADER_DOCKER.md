@@ -10,7 +10,7 @@
 
 | Pfad | Rolle |
 |------|--------|
-| `docker/Dockerfile.btc_trader` | Wie `Dockerfile.custom` + **`yfinance`** |
+| `docker/Dockerfile.btc_trader` | Wie `Dockerfile.custom` + **`yfinance`** + **`pybit`** (Bybit HTTP/WS SDK) |
 | `user_data/config_btc_spot_dedicated.example.json` | Config-Vorlage (→ `config_btc_spot_dedicated.json`) |
 | `letscrash/BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md` | Netzwerk, :8091, RAM, Compose-Fragment |
 | `letscrash/RULE_AND_DATA_FLOW_LOOP.md` | **Kontinuierlicher** Rule-/Evidence-Loop, Agent-Konsultation, **Datenflüsse** (TV / Bybit / crypto-market-data / yfinance) |
@@ -43,6 +43,18 @@ Nutze **`dockerfile: ./docker/Dockerfile.btc_trader`** und **`image: sygnif-freq
 
 Wichtig: weiterhin **`SYGNIF_SENTIMENT_HTTP_URL`** → `http://finance-agent:8091/sygnif/sentiment`, **`user_data`**-Mount, **`--config`** → `config_btc_spot_dedicated.json`, **`--db-url`** → eigenes SQLite (siehe Design-Doc §6).
 
+### 3b. Minimal merge (BTC spot + Nautilus)
+
+Fertiges Overlay: **`docker-compose.btc-nautilus-research.yml`** — startet **`freqtrade-btc-spot`** und **`nautilus-research`** auf `sygnif_backend` zusammen mit dem Haupt-Stack. Der **`nautilus-research`**-Service läuft mit **`python3 …/bybit_nautilus_spot_btc_training_feed.py --loop`**: Nautilus-**`BybitHttpClient`** (Bars, Ticker, Trades, Orderbuch-Deltas, Status, optional Fees) — **nur Spot BTC/USDT** — schreibt u. a. **`btc_1h_ohlcv.json`** / **`btc_daily_90d.json`** für **`training_pipeline/channel_training.py`** + **`btc_predict_runner`**, plus **`nautilus_spot_btc_market_bundle.json`** und **`btc_1h_ohlcv_nautilus_bybit.json`** (Regime). Intervall **`NAUTILUS_BYBIT_POLL_SEC`**, Standard **`NAUTILUS_BYBIT_DEMO=true`** im Merge-Compose.
+
+```bash
+cd ~/SYGNIF
+docker compose -f docker-compose.yml -f docker-compose.btc-nautilus-research.yml up -d --build freqtrade-btc-spot nautilus-research
+```
+
+REST-Check: `curl -sS http://127.0.0.1:8282/api/v1/ping` (JWT nur für geschützte Endpunkte nötig).  
+Sink-Log: `docker logs nautilus-research --tail 20` (eine JSON-Zeile pro erfolgreichem Pull).
+
 ---
 
 ## 4. Wann doch venv / pipx auf dem Host?
@@ -56,7 +68,8 @@ Wichtig: weiterhin **`SYGNIF_SENTIMENT_HTTP_URL`** → `http://finance-agent:809
 
 ## 5. Rollout-Checkliste
 
-- [ ] `config_btc_spot_dedicated.json` aus Example erzeugt, Keys gesetzt.  
+- [ ] `config_btc_spot_dedicated.json` aus Example erzeugt (`cp …example.json …` + `openssl` für `jwt_secret_key` / `api_server.password`), **Bybit spot**: `ccxt_config.options.defaultType` = `"spot"`, `stoploss_on_exchange` = `false`.  
+- [ ] **Live Bybit:** Keys in `exchange.key` / `exchange.secret` (oder `dry_run: true` ohne Keys). **Bybit demo:** `config_btc_spot_dedicated.bybit_demo.example.json` als Vorlage (`urls.api` → `api-demo.bybit.com`).  
 - [ ] Image gebaut; `docker compose … up -d` für neuen Service.  
 - [ ] `curl` auf API-Port (z. B. **8282**) `/api/v1/ping`.  
 - [ ] Webhooks / `trading_mode` mit `notification_handler` abgestimmt.  

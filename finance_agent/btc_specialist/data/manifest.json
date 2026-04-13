@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-04-11T21:28:28Z",
+  "generated_utc": "2026-04-12T22:43:24Z",
   "source": "Bybit v5 public market API (spot); optional Crypto APIs BTC mainnet + market-data; optional NewHedge altcoins correlation; optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)",
   "symbol": "BTCUSDT",
   "files": [
@@ -7,6 +7,7 @@
     "btc_1h_ohlcv.json",
     "btc_daily_90d.json",
     "btc_sygnif_ta_snapshot.json",
+    "btc_cryptoapis_foundation.json",
     "btc_crypto_market_data.json",
     "crypto_market_data_daily_analysis.md",
     "btc_specialist_dashboard.json"

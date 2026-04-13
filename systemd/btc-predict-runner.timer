@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly run of btc_predict_runner.py (after typical candle close cadence)
+Documentation=file:///home/ubuntu/SYGNIF/prediction_agent/btc_predict_runner.py
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=1min
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

@@ -1,12 +1,11 @@
 """Tests for entry-tag loss streak detection (sentiment_health_watch)."""
+
 from __future__ import annotations
 
 import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-
-import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))

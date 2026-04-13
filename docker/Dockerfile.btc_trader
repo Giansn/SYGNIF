@@ -1,4 +1,4 @@
-# btc_Trader_Docker — same Freqtrade base + patches as Dockerfile.custom, plus yfinance.
+# btc_Trader_Docker — same Freqtrade base + patches as Dockerfile.custom, plus yfinance + pybit.
 # Python packages live ONLY inside this image → no PEP 668 / --break-system-packages on the EC2 host.
 #
 # Build (repo root):
@@ -8,7 +8,8 @@
 
 FROM freqtradeorg/freqtrade:stable
 
-RUN pip install --no-cache-dir feedparser pandas_ta yfinance
+# xgboost: optional SygnifStrategy path (ml_signal_ensemble); matches finance-agent stack
+RUN pip install --no-cache-dir feedparser pandas_ta yfinance "pybit>=5.15.0" xgboost
 
 COPY user_data/status_patch.py /tmp/status_patch.py
 COPY user_data/notification_patch.py /tmp/notification_patch.py

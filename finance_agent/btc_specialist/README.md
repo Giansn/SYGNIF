@@ -14,7 +14,14 @@ Bitcoin-only persona for Sygnif: same TA stack as `finance_agent/bot.py`, Bybit 
 | `data/btc_cryptoapis_foundation.json` | Optional [Crypto APIs](https://cryptoapis.io): BTC mainnet last block + market-data asset + BTC/USD ref — *not* Sygnif TA (`cryptoapi_Token` in `.env`) |
 | `data/btc_crypto_market_data.json` | Optional: all **README** daily JSONs from [crypto-market-data](https://github.com/ErcinDedeoglu/crypto-market-data) (**CC BY 4.0**) — *not* Sygnif TA |
 | `data/crypto_market_data_daily_analysis.md` | Markdown summary of those series (same refresh path) |
+| `data/btc_macro_yfinance_daily.json` | Optional: Yahoo **BTC OHLCV + SPY / VIX / TLT / GLD** from 2009 calendar (BTC rows only ~2014+); `training_pipeline/pull_btc_macro_history.py` |
+| `data/btc_macro_crash_correlation.json` | Same pull: **GFC / COVID / 2022**-style windows + rolling BTC–SPY correlation summary |
+| `data/btc_1h_ohlcv_long.json` | Optional: **Bybit** 1h spot klines (paginated, up to `--1h-bars`); does not replace the 200-bar file above |
+| `data/btc_daily_ohlcv_long.json` | Optional: **Bybit** daily klines (paginated, up to `--daily-bars`) |
+| `data/btc_coingecko_market_chart.json` | Optional: **CoinGecko** `market_chart/range` (chunked `requests`; set `COINGECKO_API_KEY` for Pro host) |
+| `data/btc_extended_history_manifest.json` | Row counts + CoinGecko status from `pull_btc_extended_history.py` |
 | `scripts/pull_btc_context.py` | Refreshes Bybit bundle + optional NewHedge + **full** crypto-market-data pull + `.md` |
+| `scripts/pull_btc_extended_history.py` | **Research:** long Bybit history (1000/call pagination) + optional CoinGecko chunks — see script docstring |
 | `scripts/run_crypto_market_data_daily.py` | **Lightweight daily-only** pull (same JSON + `.md`); intended for **cron 1×/day** |
 | `scripts/refresh_btc_dashboard_json.py` | Regenerates **`btc_specialist_dashboard.json`** (finance-agent KB + Cursor LLM when enabled) |
 | `PROMPT.md` | System prompt stub for a dedicated sub-agent |
@@ -26,6 +33,8 @@ From repo root (`SYGNIF`):
 
 ```bash
 python3 finance_agent/btc_specialist/scripts/pull_btc_context.py
+# long history (separate JSON files; use --coingecko-days for a small CoinGecko test):
+python3 finance_agent/btc_specialist/scripts/pull_btc_extended_history.py --1h-bars 8000 --daily-bars 1500 --coingecko-days 90
 # or on-chain/derivatives only (README datasets, ~31 files):
 python3 finance_agent/btc_specialist/scripts/run_crypto_market_data_daily.py
 ```

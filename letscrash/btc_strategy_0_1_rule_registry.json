@@ -1,0 +1,36 @@
+{
+  "schema": "btc_strategy_0_1_rule_registry",
+  "version": 1,
+  "reference_equity_usdt": 10000,
+  "rule_proof_bucket": {
+    "fraction_of_equity": 0.3333333333333333,
+    "notional_cap_usdt": 3333.33,
+    "description": "One-third of 10k reference equity for tagged rule-competition only. Concurrent trades allowed within bucket if venue margin permits; cap is sum of open risk/stake in bucket, not a fixed max_open_trades count.",
+    "tag_key": "rule_tag",
+    "allowed_tags": ["BTC-0.1-R01", "BTC-0.1-R02", "BTC-0.1-R03"]
+  },
+  "rules": [
+    {
+      "id": "BTC-0.1-R01",
+      "kind": "governance",
+      "rule_tag": "BTC-0.1-R01",
+      "tags": ["training-channel", "next-bar", "runner-alignment", "L0"],
+      "log": "letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md §5"
+    },
+    {
+      "id": "BTC-0.1-R02",
+      "kind": "governance",
+      "rule_tag": "BTC-0.1-R02",
+      "tags": ["htf-regime", "risk_off", "pine-overlay-gate", "L1"],
+      "log": "letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md §6"
+    },
+    {
+      "id": "BTC-0.1-R03",
+      "kind": "sleeve",
+      "rule_tag": "BTC-0.1-R03",
+      "tags": ["justunclel-pac-pullback", "capital-bucket-third", "journal-by-tag", "L1"],
+      "log": "letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md §7",
+      "pine_reference": "prediction_agent/reference/justunclel_scalping_pullback_tool_r1_1_v4.pine; prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine"
+    }
+  ]
+}

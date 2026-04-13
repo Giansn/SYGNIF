@@ -23,3 +23,19 @@ Attribution: **© LuxAlgo** (as in source header).
 | `chikaharu_trend_volatility_index_tvi_mpl2.pine` | **© chikaharu**, MPL 2.0 | **TVI**: MA-band “scatter” / Gini-style mean diff → synthetic OHLC candles + ATR & HL-range reference; regime / vol expansion context (not Sygnif TA) |
 
 If you redistribute **modified** Pine, include MPL notices per [MPL 2.0 FAQ](https://www.mozilla.org/MPL/2.0/).
+
+## BullByte — Pro Scalper AI (Pine v6)
+
+| File | Attribution | License / use |
+|------|-------------|----------------|
+| `bullbyte_pro_scalper_ai_mpl2.pine` | **© BullByte** (header in file) | **MPL 2.0** — archival copy for research; **not** executed by Freqtrade. |
+
+**SYGNIF mapping:** **BTC-0.1-R03** sleeve research — composite oscillator + latching signals vs **JustUncleL** PAC / `btc_predict_5m.pine` scalping semantics. Optional **AI forecast** branch is **off** in saved defaults; enable only after understanding threshold shift behaviour.
+
+## JustUncleL — Scalping PullBack Tool (Pine v4 study)
+
+| File | Attribution | License / use |
+|------|-------------|----------------|
+| `justunclel_scalping_pullback_tool_r1_1_v4.pine` | **JustUncleL** (header in file; R1.1, 4-Feb-2020) | **Archival copy** from public Pine paste — **not** executed by Freqtrade. **Confirm** TradingView / author terms before **commercial** redistribution or paid signals. |
+
+**SYGNIF mapping:** PAC pullback recovery (`TrendDirection`, `pacExitU` / `pacExitL`, optional HA via `security`) — see `letscrash/BTC_Strategy_0.1.md` and `letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md` §7. Compare to `prediction_agent/btc_predict_5m.pine` (similar PAC/EMA stack; different entry packaging).

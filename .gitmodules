@@ -1,3 +1,6 @@
 [submodule "network"]
 	path = network
 	url = https://github.com/Giansn/Network.git
+[submodule "ann_text_project"]
+	path = ann_text_project
+	url = https://github.com/Giansn/ann-text-project.git

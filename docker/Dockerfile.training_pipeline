@@ -1,0 +1,26 @@
+# Sygnif training channel: OHLCV inflow → btc_predict_runner + recognition JSON outflow.
+# Build: docker build -f docker/Dockerfile.training_pipeline -t sygnif-training-pipeline:latest .
+#
+# Run with docker-compose.training-pipeline.yml (merge with base network).
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY training_pipeline/requirements.txt /app/training_pipeline/requirements.txt
+RUN pip install --no-cache-dir -r /app/training_pipeline/requirements.txt
+
+COPY training_pipeline /app/training_pipeline
+COPY prediction_agent/btc_predict_runner.py /app/prediction_agent/btc_predict_runner.py
+
+RUN chmod +x /app/training_pipeline/docker_entry.sh
+
+ENV PYTHONPATH=/app/prediction_agent:/app \
+    PREDICTION_AGENT_DIR=/app/prediction_agent \
+    BTC_PREDICT_RUNNER=/app/prediction_agent/btc_predict_runner.py
+
+ENTRYPOINT ["/app/training_pipeline/docker_entry.sh"]

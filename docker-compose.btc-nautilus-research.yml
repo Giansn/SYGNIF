@@ -1,0 +1,87 @@
+# -----------------------------------------------------------------------------
+# BTC spot Freqtrade (`Dockerfile.btc_trader`) + **Nautilus** research sink (same host dirs).
+#
+# **Default main stack** leaves Sygnif spot/futures + overseer off (`profiles: main-traders` in
+# `docker-compose.yml`). Bring up shared deps + this merge:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.btc-nautilus-research.yml up -d --build \
+#     finance-agent notification-handler freqtrade-btc-spot nautilus-research
+#
+# **Wire:** `nautilus-research` writes JSON under `finance_agent/btc_specialist/data/`; the same
+# tree is mounted read-only on `freqtrade-btc-spot` at `/freqtrade/user_data/btc_specialist_data`
+# (`NAUTILUS_BTC_DATA_DIR`) for strategies / tooling.
+#
+# Prereqs:
+#   - `user_data/config_btc_spot_dedicated.json` (copy from `config_btc_spot_dedicated.example.json`, set keys / JWT / API password).
+#   - Host API: **8282** → container **8080** (matches CORS in the example config).
+# -----------------------------------------------------------------------------
+
+services:
+  freqtrade-btc-spot:
+    build:
+      context: .
+      dockerfile: "./docker/Dockerfile.btc_trader"
+    image: sygnif-freqtrade-btc:latest
+    restart: unless-stopped
+    container_name: freqtrade-btc-spot
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+      - "./trade_overseer:/freqtrade/trade_overseer"
+      # Nautilus sink (rw in nautilus-research) — same JSON OHLCV + bundle for FT-side reads
+      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8282:8080"
+    environment:
+      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
+      NAUTILUS_BTC_DATA_DIR: "/freqtrade/user_data/btc_specialist_data"
+    depends_on:
+      finance-agent:
+        condition: service_started
+      notification-handler:
+        condition: service_started
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade-btc-spot.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3-btc-spot.sqlite
+      --config /freqtrade/user_data/config_btc_spot_dedicated.json
+      --strategy SygnifStrategy
+
+  nautilus-research:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nautilus_research
+    image: sygnif-nautilus-research:latest
+    restart: unless-stopped
+    container_name: nautilus-research
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./finance_agent:/lab/finance_agent:ro"
+      # RW: Nautilus ``BybitHttpClient`` sink → ``btc_1h_ohlcv_nautilus_bybit.json`` (inflow for regime + btc-specialist)
+      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
+      - "./research/nautilus_lab:/lab/workspace:rw"
+      - "./user_data:/lab/user_data:ro"
+      - "./prediction_agent:/lab/prediction_agent:ro"
+    env_file:
+      - .env
+    environment:
+      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
+      SYGNIF_SPOT_NOTIONAL_USDT: "${SYGNIF_SPOT_NOTIONAL_USDT:-100}"
+      NAUTILUS_BTC_OHLCV_DIR: "/lab/btc_specialist_data"
+      NAUTILUS_BYBIT_POLL_SEC: "${NAUTILUS_BYBIT_POLL_SEC:-3600}"
+      NAUTILUS_BTC_BAR_LIMIT: "${NAUTILUS_BTC_BAR_LIMIT:-900}"
+      # BTC+nautilus merge defaults to Bybit **demo** API; override in `.env` for mainnet public bars.
+      NAUTILUS_BYBIT_DEMO: "${NAUTILUS_BYBIT_DEMO:-true}"
+      NAUTILUS_BYBIT_TESTNET: "${NAUTILUS_BYBIT_TESTNET:-false}"
+      NAUTILUS_TRAINING_BAR_LIMIT_1H: "${NAUTILUS_TRAINING_BAR_LIMIT_1H:-1600}"
+      NAUTILUS_TRAINING_BAR_LIMIT_1D: "${NAUTILUS_TRAINING_BAR_LIMIT_1D:-120}"
+    # Nautilus spot BTC/USDT → ``btc_1h_ohlcv.json`` + ``btc_daily_90d.json`` + bundle (training channel inflow).
+    command: ["python3", "/lab/workspace/bybit_nautilus_spot_btc_training_feed.py", "--loop"]

@@ -1,32 +1,28 @@
 """Tests for entry_performance.py — tag-level performance analysis."""
+
 import json
 import os
 import sqlite3
 import sys
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "trade_overseer"))
 
 from entry_performance import (
-    classify,
-    aggregate,
-    TagStats,
     _duration_hours,
-    fetch_trades_sqlite,
-    report_text,
-    report_json,
+    aggregate,
     append_log,
-    GHOSTED_EXIT_REASONS,
+    classify,
+    fetch_trades_sqlite,
+    report_json,
+    report_text,
 )
-
 
 # ---------------------------------------------------------------------------
 # classify()
 # ---------------------------------------------------------------------------
+
 
 class TestClassify:
     def test_swing_failure_long(self):
@@ -86,6 +82,7 @@ class TestClassify:
 # _duration_hours()
 # ---------------------------------------------------------------------------
 
+
 class TestDurationHours:
     def test_standard_format(self):
         h = _duration_hours("2026-04-01 10:00:00", "2026-04-01 12:30:00")
@@ -115,9 +112,15 @@ class TestDurationHours:
 # aggregate()
 # ---------------------------------------------------------------------------
 
-def _make_trade(tag: str, profit: float, open_d: str = "2026-04-01 10:00:00",
-                close_d: str = "2026-04-01 12:00:00", is_short: bool = False,
-                exit_reason: str = "stoploss_on_exchange"):
+
+def _make_trade(
+    tag: str,
+    profit: float,
+    open_d: str = "2026-04-01 10:00:00",
+    close_d: str = "2026-04-01 12:00:00",
+    is_short: bool = False,
+    exit_reason: str = "stoploss_on_exchange",
+):
     return {
         "id": 1,
         "pair": "BTC/USDT",
@@ -208,9 +211,7 @@ class TestAggregate:
 
     def test_duration_tracked(self):
         trades = [
-            _make_trade("fa_s0", 1.0,
-                        open_d="2026-04-01 10:00:00",
-                        close_d="2026-04-01 13:00:00"),  # 3h
+            _make_trade("fa_s0", 1.0, open_d="2026-04-01 10:00:00", close_d="2026-04-01 13:00:00"),  # 3h
         ]
         stats = aggregate(trades)
         assert stats["fa_s"].avg_duration_h == pytest.approx(3.0, abs=0.01)
@@ -223,6 +224,7 @@ class TestAggregate:
 # ---------------------------------------------------------------------------
 # SQLite fetch
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def test_db(tmp_path):
@@ -252,9 +254,7 @@ def test_db(tmp_path):
         (7, "BTC/USDT", "fa_short_s3", "exit_short_profit_rsi_1", 0, 1, 3, 0.03, "2026-04-01 10:00:00", "2026-04-01 12:00:00"),
         (8, "BTC/USDT", "fa_s0", "stoploss_on_exchange", 1, 0, 3, None, "2026-04-01 15:00:00", None),  # still open
     ]
-    conn.executemany(
-        "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", trades
-    )
+    conn.executemany("INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", trades)
     conn.commit()
     conn.close()
     return db_path
@@ -279,15 +279,14 @@ class TestSQLiteFetch:
         assert all(t.get("is_short") for t in trades)
 
     def test_missing_db_skipped(self, tmp_path):
-        trades = fetch_trades_sqlite(
-            {"gone": tmp_path / "nonexistent.sqlite"}, days=0, side_filter="both"
-        )
+        trades = fetch_trades_sqlite({"gone": tmp_path / "nonexistent.sqlite"}, days=0, side_filter="both")
         assert trades == []
 
 
 # ---------------------------------------------------------------------------
 # report_text (smoke test — just ensure no crash)
 # ---------------------------------------------------------------------------
+
 
 class TestReportText:
     def test_no_crash_with_data(self, capsys):
@@ -322,6 +321,7 @@ class TestReportText:
 # report_json
 # ---------------------------------------------------------------------------
 
+
 class TestReportJson:
     def test_valid_json(self, capsys):
         trades = [
@@ -340,6 +340,7 @@ class TestReportJson:
 # ---------------------------------------------------------------------------
 # append_log
 # ---------------------------------------------------------------------------
+
 
 class TestAppendLog:
     def test_creates_log_file(self, tmp_path):

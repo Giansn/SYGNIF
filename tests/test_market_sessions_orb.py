@@ -1,7 +1,6 @@
 """Tests for session ORB helper (BTC/ETH on 5m-style bars)."""
 
 import pandas as pd
-
 from user_data.strategies import market_sessions_orb as mso
 
 
@@ -37,7 +36,7 @@ def test_is_orb_pair_futures_suffix():
 def test_attach_orb_columns_non_orb_noop():
     df = _make_df_5m_session()
     out = mso.attach_orb_columns(df.copy(), metadata_pair="SOL/USDT")
-    assert (out["orb_break_long"] == False).all()
+    assert not out["orb_break_long"].any()
 
 
 def test_attach_orb_columns_btc_sets_session_and_breakout():

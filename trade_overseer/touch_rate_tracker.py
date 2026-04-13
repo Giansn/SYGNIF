@@ -58,6 +58,7 @@ EXIT_FAMILIES = [
     ("exit_profit_rsi",            r"^exit_profit_rsi_",         "custom",   "Profit-tiered RSI exit (long)"),
     ("exit_willr_reversal",        r"^exit_willr_reversal$",     "custom",   "Williams %R reversal (long)"),
     ("exit_stoploss_conditional",  r"^exit_stoploss_conditional$", "custom", "Soft SL with RSI slope confirm (long)"),
+    ("exit_btc_risk_off",          r"^exit_btc_risk_off$",       "custom",   "BTC 1h spill — risk-off exit (long)"),
     ("exit_sf_ema_tp",             r"^exit_sf_ema_tp$",          "custom",   "Swing failure EMA TP (long)"),
     ("exit_sf_vol_sl",             r"^exit_sf_vol_sl$",          "custom",   "Swing failure vol-adjusted SL (long)"),
     # custom_exit short

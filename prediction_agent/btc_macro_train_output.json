@@ -1,0 +1,124 @@
+{
+  "generated_utc": "2026-04-12T22:41:00Z",
+  "input": "/home/ubuntu/SYGNIF/finance_agent/btc_specialist/data/btc_macro_yfinance_daily.json",
+  "rows_total": 4205,
+  "holdout_rows": 841,
+  "test_ratio": 0.2,
+  "model": "sklearn_logistic_l1_next_day_direction",
+  "features": {
+    "ta_columns_count": 18,
+    "macro_proxy_columns": [
+      "spy_ret_1",
+      "spy_ret_5",
+      "vix_lvl",
+      "vix_z_20",
+      "tlt_ret_5",
+      "gld_ret_5",
+      "btc_spy_roll_corr_20"
+    ]
+  },
+  "metrics": {
+    "holdout_accuracy": 0.5101,
+    "holdout_brier": 0.2579,
+    "last_holdout_p_up_pct": 40.04
+  },
+  "top_coef": [
+    {
+      "feature": "MACD_hist",
+      "coef": -0.136818
+    },
+    {
+      "feature": "RSI_14",
+      "coef": 0.11436
+    },
+    {
+      "feature": "Close_pct",
+      "coef": -0.112097
+    },
+    {
+      "feature": "BB_lower",
+      "coef": -0.100372
+    },
+    {
+      "feature": "BB_std",
+      "coef": 0.098183
+    },
+    {
+      "feature": "MOM_10",
+      "coef": 0.083571
+    },
+    {
+      "feature": "MACD",
+      "coef": -0.070375
+    },
+    {
+      "feature": "gld_ret_5",
+      "coef": -0.064166
+    },
+    {
+      "feature": "btc_spy_roll_corr_20",
+      "coef": -0.051295
+    },
+    {
+      "feature": "WILLR_14",
+      "coef": 0.049804
+    },
+    {
+      "feature": "VOL_SMA_20",
+      "coef": -0.047735
+    },
+    {
+      "feature": "Mean_pct",
+      "coef": -0.044552
+    },
+    {
+      "feature": "ATR_14",
+      "coef": -0.030952
+    },
+    {
+      "feature": "vix_lvl",
+      "coef": 0.026741
+    },
+    {
+      "feature": "spy_ret_1",
+      "coef": -0.023279
+    },
+    {
+      "feature": "RSI_6",
+      "coef": -0.020352
+    },
+    {
+      "feature": "ROC_12",
+      "coef": -0.010858
+    },
+    {
+      "feature": "vix_z_20",
+      "coef": -0.006644
+    },
+    {
+      "feature": "tlt_ret_5",
+      "coef": 0.000835
+    },
+    {
+      "feature": "EMA_12",
+      "coef": 0.0
+    },
+    {
+      "feature": "EMA_26",
+      "coef": 0.0
+    },
+    {
+      "feature": "MACD_signal",
+      "coef": 0.0
+    },
+    {
+      "feature": "BB_mid",
+      "coef": 0.0
+    },
+    {
+      "feature": "BB_upper",
+      "coef": 0.0
+    }
+  ],
+  "disclaimer": "Macro columns are ETF/index proxies (risk-on/off, vol), not token on-chain fundamentals; Yahoo BTC is not Bybit execution; no live trading claim."
+}

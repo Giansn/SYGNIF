@@ -1,0 +1,68 @@
+[project]
+name = "sygnif"
+version = "0.0.0"
+description = "Freqtrade Sygnif strategy, services, and tests"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 127
+src = [
+    "tests",
+    "user_data/strategies",
+    "notification_handler.py",
+    "dashboard_server.py",
+    "dashboard_server_futures.py",
+    "dashboard_cryptoapis.py",
+]
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "ann_text_project",
+    "NostalgiaForInfinity",
+    "staging",
+    "backups",
+    "user_data/backtest_results",
+    "user_data/hyperopt_results",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+]
+ignore = [
+    "E501",
+    "E731",
+]
+# Stubs must be registered before importing strategy deps (freqtrade/talib).
+per-file-ignores = { "tests/conftest.py" = ["E402"] }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["."]
+omit = [
+    "tests/*",
+    "ann_text_project/*",
+    "NostalgiaForInfinity/*",
+    "staging/*",
+    ".venv/*",
+]
+
+[tool.coverage.report]
+skip_empty = true
+precision = 1

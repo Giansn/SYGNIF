@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sygnif BTC Terminal — btc prediction training</title>
+<link rel="icon" type="image/png" href="assets/logo_sygnif_spot.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #06080c;
+  --s1: #0c1018;
+  --s2: #121822;
+  --s3: #1a2232;
+  --bd: #1e2a3a;
+  --bd2: #2a3a50;
+  --t1: #e8ecf2;
+  --t2: #6a7a92;
+  --t3: #3a4a5e;
+  --ac: #f7931a;
+  --ac2: #e67e00;
+  --ac-glow: #f7931a18;
+  --g: #00e87b;
+  --g-bg: #00e87b08;
+  --g-bd: #00e87b20;
+  --r: #ff3b5c;
+  --r-bg: #ff3b5c08;
+  --r-bd: #ff3b5c20;
+  --y: #ffc23b;
+  --y-bg: #ffc23b08;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Outfit', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--t1);
+  font-size: 14px;
+  min-height: 100vh;
+}
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 360px;
+  background: radial-gradient(ellipse 70% 45% at 50% -15%, #f7931a0d 0%, transparent 65%);
+  pointer-events: none;
+  z-index: 0;
+}
+.wrap { max-width: 1200px; margin: 0 auto; padding: 16px 18px; position: relative; z-index: 1; }
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--bd);
+  margin-bottom: 20px;
+}
+.logo h1 {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: var(--t1);
+}
+.logo h1 span { color: var(--ac); }
+.logo .sub {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-top: 4px;
+  letter-spacing: 0.5px;
+}
+.head-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t3);
+  text-align: right;
+}
+.badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.b-ok { background: var(--g-bg); color: var(--g); border: 1px solid var(--g-bd); }
+.b-warn { background: var(--y-bg); color: var(--y); border: 1px solid #ffc23b25; }
+.b-err { background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd); }
+.b-info { background: var(--ac-glow); color: var(--ac); border: 1px solid #f7931a22; }
+
+.err-banner {
+  display: none;
+  background: var(--r-bg);
+  border: 1px solid var(--r-bd);
+  color: var(--r);
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.err-banner.on { display: block; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.stat {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.stat-lbl {
+  font-size: 9px;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-bottom: 6px;
+}
+.stat-val {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.stat-sub { font-family: var(--mono); font-size: 10px; color: var(--t3); margin-top: 4px; }
+.up { color: var(--g) !important; }
+.dn { color: var(--r) !important; }
+.nt { color: var(--y) !important; }
+
+.sec { margin-bottom: 20px; }
+.sec-t {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--t1);
+}
+.card {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 9px;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  border-bottom: 1px solid var(--bd);
+  background: var(--s2);
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #0e1520;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+tr:last-child td { border-bottom: none; }
+
+.pre {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t2);
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow-y: auto;
+}
+details { margin-top: 8px; }
+details summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--ac);
+  padding: 6px 0;
+}
+.footer {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--bd);
+  font-size: 10px;
+  color: var(--t3);
+  font-family: var(--mono);
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div class="logo">
+      <h1>SYGNIF <span>BTC</span> TERMINAL</h1>
+      <div class="sub">btc prediction training · training channel + rule registry (read-only)</div>
+    </div>
+    <div>
+      <div class="badges" id="badges">
+        <span class="badge b-info">refresh 45s</span>
+      </div>
+      <div class="head-meta" id="clock"></div>
+    </div>
+  </header>
+
+  <div class="err-banner" id="errBanner"></div>
+
+  <div class="stats" id="statsTop"></div>
+
+  <div class="sec">
+    <div class="sec-t">Training channel — recognition</div>
+    <div class="card"><table id="tblRec"><thead><tr>
+      <th>Field</th><th>Value</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Runner snapshot (embedded in training)</div>
+    <div class="card"><table id="tblRun"><thead><tr>
+      <th>Model / field</th><th>Value</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Inflow health</div>
+    <div class="card"><table id="tblInflow"><thead><tr>
+      <th>Channel</th><th>Status</th><th>Rows</th><th>Last candle (ms)</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Risk assessment (training JSON)</div>
+    <div class="card"><table id="tblRisk"><thead><tr>
+      <th>Metric</th><th>Value</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">BTC prediction file (latest runner)</div>
+    <div class="card"><table id="tblPred"><thead><tr>
+      <th>Field</th><th>Value</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">Rule registry — proof bucket</div>
+    <div class="card"><div class="pre" id="regBox"></div></div>
+  </div>
+
+  <details>
+    <summary>Raw JSON (training_channel_output.json)</summary>
+    <div class="card"><pre class="pre" id="rawTrain"></pre></div>
+  </details>
+
+  <p class="footer">Data: /data/training_channel_output.json · /data/btc_prediction_output.json · /data/btc_strategy_0_1_rule_registry.json — served by dashboard_server_btc_terminal.py</p>
+</div>
+
+<script>
+const REFRESH_MS = 45000;
+
+function el(id) { return document.getElementById(id); }
+
+function clock() {
+  const d = new Date();
+  el('clock').textContent = d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+setInterval(clock, 1000);
+clock();
+
+function r01Bearish(rec) {
+  if (!rec) return false;
+  const p = parseFloat(rec.last_bar_probability_down_pct || 0);
+  const snap = rec.btc_predict_runner_snapshot || {};
+  const cons = String(snap.consensus || '').toUpperCase();
+  return p >= 90 && cons === 'BEARISH';
+}
+
+function numClass(x) {
+  if (x == null || x === '') return '';
+  const n = Number(x);
+  if (Number.isNaN(n)) return '';
+  if (n > 0) return 'up';
+  if (n < 0) return 'dn';
+  return 'nt';
+}
+
+function row2(tbl, k, v, vClass) {
+  const tr = document.createElement('tr');
+  const c0 = document.createElement('td'); c0.textContent = k;
+  const c1 = document.createElement('td');
+  if (vClass) c1.className = vClass;
+  c1.textContent = v == null ? '—' : String(v);
+  tr.appendChild(c0); tr.appendChild(c1);
+  tbl.appendChild(tr);
+}
+
+function clearTbl(id) {
+  const tb = el(id).querySelector('tbody');
+  tb.innerHTML = '';
+  return tb;
+}
+
+async function fetchJson(path) {
+  const r = await fetch(path, { cache: 'no-store' });
+  if (!r.ok) throw new Error(path + ' ' + r.status);
+  return r.json();
+}
+
+function renderTraining(tc) {
+  const rec = tc.recognition || {};
+  const tb = clearTbl('tblRec');
+  row2(tb, 'generated_utc', tc.generated_utc);
+  row2(tb, 'model', rec.model);
+  row2(tb, 'last_bar_probability_up_pct', (rec.last_bar_probability_up_pct != null ? rec.last_bar_probability_up_pct.toFixed(2) : '—'), numClass(-(rec.last_bar_probability_up_pct || 0)));
+  row2(tb, 'last_bar_probability_down_pct', (rec.last_bar_probability_down_pct != null ? rec.last_bar_probability_down_pct.toFixed(2) : '—'), numClass(rec.last_bar_probability_down_pct));
+  row2(tb, 'holdout_brier_score', rec.holdout_brier_score != null ? rec.holdout_brier_score.toFixed(4) : '—');
+  row2(tb, 'empirical win % (when pred up)', rec.holdout_when_predicted_up_empirical_win_rate);
+  row2(tb, 'R01 gate (p_down≥90 & consensus BEARISH)', r01Bearish(rec) ? 'YES — aggressive long timing gated' : 'no');
+
+  const snap = rec.btc_predict_runner_snapshot || {};
+  const tbR = clearTbl('tblRun');
+  if (!Object.keys(snap).length) {
+    row2(tbR, '(empty)', 'No runner snapshot in training file');
+  } else {
+    row2(tbR, 'consensus', snap.consensus || '—', String(snap.consensus).toUpperCase() === 'BULLISH' ? 'up' : (String(snap.consensus).toUpperCase() === 'BEARISH' ? 'dn' : ''));
+    ['random_forest', 'xgboost', 'direction_logistic'].forEach((k) => {
+      if (!snap[k]) return;
+      const o = snap[k];
+      if (o.next_mean != null) row2(tbR, k + ' next_mean', o.next_mean.toFixed(2));
+      if (o.delta != null) row2(tbR, k + ' delta', o.delta.toFixed(2), numClass(o.delta));
+      if (o.label != null) row2(tbR, k + ' label', o.label);
+      if (o.confidence != null) row2(tbR, k + ' confidence', o.confidence);
+    });
+  }
+
+  const tbI = clearTbl('tblInflow');
+  const chans = (tc.inflow && tc.inflow.channels) || [];
+  if (!chans.length) {
+    row2(tbI, '—', 'No inflow.channels', '—');
+  } else {
+    chans.forEach((c) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + (c.name || '') + '</td><td>' + (c.status || '') + '</td><td>' + (c.rows != null ? c.rows : '') + '</td><td>' + (c.last_candle_ms != null ? c.last_candle_ms : '') + '</td>';
+      tbI.appendChild(tr);
+    });
+  }
+
+  const risk = tc.risk_assessment || {};
+  const tbK = clearTbl('tblRisk');
+  Object.keys(risk).forEach((k) => {
+    if (k === 'disclaimer') return;
+    const v = risk[k];
+    row2(tbK, k, typeof v === 'number' ? v.toFixed(4) : v);
+  });
+  row2(tbK, 'disclaimer', risk.disclaimer || '—');
+
+  el('rawTrain').textContent = JSON.stringify(tc, null, 2);
+}
+
+function renderPred(pr) {
+  const tb = clearTbl('tblPred');
+  row2(tb, 'generated_utc', pr.generated_utc);
+  row2(tb, 'timeframe', pr.timeframe);
+  row2(tb, 'last_candle_utc', pr.last_candle_utc);
+  row2(tb, 'current_close', pr.current_close);
+  const p = pr.predictions || {};
+  row2(tb, 'consensus', p.consensus || '—');
+  ['random_forest', 'xgboost', 'direction_logistic'].forEach((k) => {
+    if (!p[k]) return;
+    const o = p[k];
+    if (o.next_mean != null) row2(tb, k + ' next_mean', o.next_mean.toFixed(2));
+    if (o.delta != null) row2(tb, k + ' delta', o.delta.toFixed(2), numClass(o.delta));
+    if (o.label != null) row2(tb, k + ' label', o.label);
+    if (o.confidence != null) row2(tb, k + ' confidence', o.confidence);
+  });
+}
+
+function renderReg(reg) {
+  const bucket = reg.rule_proof_bucket || {};
+  const lines = [
+    'schema: ' + (reg.schema || ''),
+    'version: ' + (reg.version != null ? reg.version : ''),
+    'reference_equity_usdt: ' + (reg.reference_equity_usdt != null ? reg.reference_equity_usdt : ''),
+    '--- rule_proof_bucket ---',
+    JSON.stringify(bucket, null, 2),
+    '--- rules (id + kind) ---',
+  ];
+  (reg.rules || []).forEach((r) => {
+    lines.push((r.id || '') + ' | ' + (r.kind || '') + ' | tags: ' + JSON.stringify(r.tags || []));
+  });
+  el('regBox').textContent = lines.join('\n');
+}
+
+function renderStatsTop(tc, pr) {
+  const host = el('statsTop');
+  host.innerHTML = '';
+  const rec = (tc && tc.recognition) || {};
+  const cards = [
+    { lbl: 'Training generated', val: (tc && tc.generated_utc) ? tc.generated_utc.slice(0, 19) : '—' },
+    { lbl: 'Runner file generated', val: (pr && pr.generated_utc) ? pr.generated_utc.slice(0, 19) : '—' },
+    { lbl: 'Consensus (training)', val: (rec.btc_predict_runner_snapshot && rec.btc_predict_runner_snapshot.consensus) || '—' },
+    { lbl: 'Consensus (runner file)', val: (pr && pr.predictions && pr.predictions.consensus) || '—' },
+    { lbl: 'Current close (runner)', val: (pr && pr.current_close != null) ? pr.current_close : '—' },
+    { lbl: 'R01 bearish gate', val: r01Bearish(rec) ? 'ON' : 'off' },
+  ];
+  cards.forEach((c) => {
+    const d = document.createElement('div');
+    d.className = 'stat';
+    const bearOn = c.lbl === 'R01 bearish gate' && c.val === 'ON';
+    d.innerHTML = '<div class="stat-lbl">' + c.lbl + '</div><div class="stat-val' + (bearOn ? ' dn' : '') + '">' + c.val + '</div>';
+    host.appendChild(d);
+  });
+}
+
+async function load() {
+  const banner = el('errBanner');
+  const badges = el('badges');
+  banner.classList.remove('on');
+  banner.textContent = '';
+
+  try {
+    const [tc, pr, reg] = await Promise.all([
+      fetchJson('/data/training_channel_output.json'),
+      fetchJson('/data/btc_prediction_output.json'),
+      fetchJson('/data/btc_strategy_0_1_rule_registry.json'),
+    ]);
+    renderStatsTop(tc, pr);
+    renderTraining(tc);
+    renderPred(pr);
+    renderReg(reg);
+    badges.innerHTML = '<span class="badge b-ok">data ok</span><span class="badge b-info">refresh 45s</span>';
+  } catch (e) {
+    banner.textContent = String(e.message || e);
+    banner.classList.add('on');
+    badges.innerHTML = '<span class="badge b-err">load error</span><span class="badge b-info">refresh 45s</span>';
+  }
+}
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

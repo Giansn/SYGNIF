@@ -40,8 +40,18 @@
         "name": "bybit",
         "key": "",
         "secret": "",
-        "ccxt_config": {},
-        "ccxt_async_config": {},
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "spot"
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "spot"
+            }
+        },
         "pair_whitelist": [
             "BTC/USDT"
         ],
@@ -109,6 +119,8 @@
     "dataformat_ohlcv": "feather",
     "dataformat_trades": "feather",
     "_comment_2": "Bybit spot: stoploss_on_exchange must be false. Use a dedicated subaccount for the bot.",
-    "_comment_3": "Host map 8282:8080 in compose; keep main spot on 8181. Shared user_data => shared strategy_adaptation.json with other bots.",
+    "_comment_3": "Host map 8282:8080 in compose; keep main spot on 8181. Shared user_data => shared strategy_adaptation.json with other bots. SygnifStrategy may still inject pairs from movers_pairlist.json — for strict BTC-only, clear that file or use a dedicated user_data copy.",
+    "_comment_bybit_ccxt": "Freqtrade reads exchange key/secret from this JSON (fill or use dry_run). BYBIT_* in .env is for other services (Docker, pybit); wire keys here for live/demo trading.",
+    "_comment_bybit_demo": "For Bybit **demo** trading only: use API keys created **inside** Bybit demo, set dry_run false, and merge into ccxt_config + ccxt_async_config: \"urls\": {\"api\": {\"public\": \"https://api-demo.bybit.com\", \"private\": \"https://api-demo.bybit.com\"}}. See https://bybit-exchange.github.io/docs/v5/demo",
     "position_adjustment_enable": true
 }

@@ -1,0 +1,238 @@
+"""
+**BTC_Strategy_0.1** — Freqtrade class ``BTC_Strategy_0_1`` (underscore; Python id).
+
+Spec: ``letscrash/BTC_Strategy_0.1.md`` + ``btc_strategy_0_1_rule_registry.json``.
+Adds **tag-specific** entry/exit paths for **BTC-0.1-R01–R03**: each path is selected by
+``enter_tag`` (``BTC-0.1-R01`` … ``R03``) in ``populate_entry_trend`` / ``custom_exit`` /
+``confirm_trade_entry`` (see ``letscrash/BTC_Strategy_0.1.md`` §7).
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
+import pandas as pd
+from freqtrade.persistence import Trade
+
+from SygnifStrategy import SygnifStrategy as _SygnifStrategyBase
+
+import btc_strategy_0_1_engine as b01
+import btc_trend_regime
+
+logger = logging.getLogger(__name__)
+
+try:
+    from trade_overseer.event_log import EventLog
+    from trade_overseer.risk_manager import RiskEngineConfig, RiskManager
+
+    _HAS_OVERSEER = True
+except ImportError:
+    _HAS_OVERSEER = False
+
+
+class BTC_Strategy_0_1(_SygnifStrategyBase):
+    """Sygnif stack + BTC 0.1 rule tags, bucket cap, and R01/R02/R03 exits."""
+
+    max_slots_btc_0_1_r03 = 3
+    # Futures: allow opens when whitelist is BTC-only (``_active_volume_pairs`` < 3).
+    _tags_bypass_volume_regime = frozenset({"BTC-0.1-R01", "BTC-0.1-R02", "BTC-0.1-R03"})
+
+    def bot_start(self, **kwargs) -> None:
+        """BTC-only portfolio: skip movers/new_pairs injection (``StaticPairList`` is source of truth)."""
+        if self.config.get("trading_mode", "") == "futures":
+            self.can_short = True
+        self._load_doom_cooldown()
+        self._refresh_strategy_adaptation(force=True)
+        self._risk_manager = None
+        self._event_log = None
+        self._last_sl_tier: dict[int, str] = {}
+        if _HAS_OVERSEER:
+            self._risk_manager = RiskManager(
+                RiskEngineConfig(
+                    ratchet_tiers=(
+                        (0.10, 0.015),
+                        (0.05, 0.02),
+                    ),
+                )
+            )
+            instance = (
+                "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
+            )
+            self._event_log = EventLog(instance=instance)
+
+    def bot_loop_start(self, current_time=None, **kwargs) -> None:
+        """Keep ``StaticPairList``; refresh adaptation + futures volume regime count only."""
+        self._refresh_strategy_adaptation(force=False)
+        if not self.dp:
+            return
+        current_wl = self.dp.current_whitelist()
+        if self.config.get("trading_mode", "") == "futures":
+            count = 0
+            for p in current_wl:
+                try:
+                    df, _ = self.dp.get_analyzed_dataframe(p, self.timeframe)
+                    if len(df) > 0 and self._futures_volume_gate_passes(df):
+                        count += 1
+                except Exception:
+                    pass
+            self._active_volume_pairs = count
+
+    def populate_entry_trend(self, df: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+        pair = metadata.get("pair", "")
+
+        if btc_trend_regime.sygnif_profile() == "btc_trend" and btc_trend_regime.is_btc_pair(pair):
+            df = super().populate_entry_trend(df, metadata)
+            if len(df) and str(df.iloc[-1].get("enter_tag") or "") == "btc_trend_long":
+                df.iloc[-1, df.columns.get_loc("enter_tag")] = b01.TAG_R02
+            return df
+
+        df = super().populate_entry_trend(df, metadata)
+        if not btc_trend_regime.is_btc_pair(pair) or len(df) < 6:
+            return df
+
+        last_i = len(df) - 1
+        # --- R01 governance: strip aggressive long *timing* when training+runner stack is bearish ---
+        if int(df.iloc[last_i].get("enter_long", 0) or 0) == 1 and b01.r01_training_runner_bearish():
+            tag = str(df.iloc[last_i].get("enter_tag") or "")
+            if tag == "strong_ta" or tag == "orb_long" or (
+                tag.startswith("sygnif_s") and not tag.startswith("sygnif_short")
+            ):
+                df.iloc[last_i, df.columns.get_loc("enter_long")] = 0
+                df.iloc[last_i, df.columns.get_loc("enter_tag")] = ""
+
+        # --- R01 entry tag: BTC ``strong_ta`` that passed governance → explicit tag for exits/journal ---
+        if int(df.iloc[last_i].get("enter_long", 0) or 0) == 1:
+            t = str(df.iloc[last_i].get("enter_tag") or "")
+            if t == "strong_ta":
+                df.iloc[last_i, df.columns.get_loc("enter_tag")] = b01.TAG_R01
+
+        # --- R03 sleeve (last bar; blocked under R01 extreme stack) ---
+        if int(df.iloc[last_i].get("enter_long", 0) or 0) == 0 and not b01.r01_training_runner_bearish():
+            prot = df.get("protections_long_global", pd.Series(True, index=df.index))
+            empty_ok = df.get("num_empty_288", pd.Series(0, index=df.index)).fillna(0) <= 60
+            if bool(prot.iloc[last_i]) and bool(empty_ok.iloc[last_i]) and b01.r03_pullback_long(df):
+                df.iloc[last_i, df.columns.get_loc("enter_long")] = 1
+                df.iloc[last_i, df.columns.get_loc("enter_tag")] = b01.TAG_R03
+
+        return df
+
+    def confirm_trade_entry(
+        self,
+        pair,
+        order_type,
+        amount,
+        rate,
+        time_in_force,
+        current_time,
+        entry_tag,
+        side,
+        **kwargs,
+    ):
+        tag = entry_tag or ""
+        open_trades = Trade.get_trades_proxy(is_open=True)
+
+        if btc_trend_regime.is_btc_pair(pair) and side == "long" and b01.r01_training_runner_bearish():
+            if tag in (b01.TAG_R01, "strong_ta", "orb_long") or (
+                tag.startswith("sygnif_s") and not tag.startswith("sygnif_short")
+            ):
+                logger.info("BTC-0.1-R01 governance: blocking %s %s under bearish training+runner", tag, pair)
+                return False
+
+        if tag.startswith("BTC-0.1-R"):
+            cap = b01.load_notional_cap_usdt()
+            used = b01.bucket_used_stake_usdt(open_trades)
+            est = float(amount or 0.0) * float(rate or 0.0)
+            if used + est > cap * 1.02:
+                logger.info(
+                    "BTC-0.1 bucket cap: used=%.0f est=%.0f cap=%.0f — block %s",
+                    used,
+                    est,
+                    cap,
+                    pair,
+                )
+                return False
+
+        if tag == b01.TAG_R02:
+            n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R02)
+            if n >= int(getattr(self, "max_slots_btc_trend", 2)):
+                logger.info("BTC-0.1-R02 slot cap %s/%s", n, getattr(self, "max_slots_btc_trend", 2))
+                return False
+
+        if tag == b01.TAG_R03:
+            n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R03)
+            if n >= int(getattr(self, "max_slots_btc_0_1_r03", 3)):
+                logger.info("BTC-0.1-R03 slot cap %s/%s", n, getattr(self, "max_slots_btc_0_1_r03", 3))
+                return False
+
+        if tag == b01.TAG_R01:
+            n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R01)
+            cap_slots = int(getattr(self, "max_slots_strong", 6))
+            if n >= cap_slots:
+                logger.info("BTC-0.1-R01 slot cap %s/%s (same band as strong_ta)", n, cap_slots)
+                return False
+
+        return super().confirm_trade_entry(
+            pair,
+            order_type,
+            amount,
+            rate,
+            time_in_force,
+            current_time,
+            entry_tag,
+            side,
+            **kwargs,
+        )
+
+    def custom_stoploss(
+        self,
+        pair: str,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        after_fill: bool,
+        **kwargs,
+    ) -> float:
+        """R03 sleeve: cap doom vs Sygnif parent to the ruleprediction first-trade SL box (§7.1)."""
+        tag = trade.enter_tag or ""
+        parent_sl = super().custom_stoploss(
+            pair, trade, current_time, current_rate, current_profit, after_fill, **kwargs
+        )
+        if tag == b01.TAG_R03 and not trade.is_short:
+            return max(parent_sl, b01.R03_STOPLOSS_FLOOR_VS_PARENT)
+        return parent_sl
+
+    def custom_exit(
+        self,
+        pair: str,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        **kwargs,
+    ):
+        tag = trade.enter_tag or ""
+        lev = float(trade.leverage or 1.0)
+
+        if not trade.is_short and btc_trend_regime.is_btc_pair(pair):
+            df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            if len(df) >= 1:
+                last = df.iloc[-1]
+                if tag == b01.TAG_R01 and b01.r01_training_runner_bearish():
+                    return "exit_btc01_r01_stack_guard"
+                if tag == b01.TAG_R02 and not btc_trend_regime.btc_trend_long_row(last):
+                    return "exit_btc01_r02_regime_break"
+                if tag == b01.TAG_R03:
+                    rsi14 = float(last.get("RSI_14", 50) or 50)
+                    if rsi14 > b01.R03_SCALP_RSI_OVERBOUGHT:
+                        return "exit_btc01_r03_scalp_overbought"
+                    if current_profit >= b01.R03_SCALP_TP_PROFIT_PCT * max(1.0, lev):
+                        return "exit_btc01_r03_scalp_take"
+                if tag in (b01.TAG_R02, b01.TAG_R03) and b01.r01_training_runner_bearish():
+                    if current_profit < b01.R01_R03_STACK_GUARD_LOSS_PCT * max(1.0, lev):
+                        return "exit_btc01_r01_stack_guard"
+
+        return super().custom_exit(
+            pair, trade, current_time, current_rate, current_profit, **kwargs
+        )

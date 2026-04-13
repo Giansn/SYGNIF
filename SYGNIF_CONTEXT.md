@@ -14,6 +14,16 @@ Dual-mode (spot + futures) crypto trading bot on Freqtrade with AI sentiment ana
 | `trade_overseer/` | Trade management and analysis system |
 | `notification_handler.py` | Webhook notifications |
 | `docker-compose.yml` | Five services: `finance-agent`, `freqtrade`, `freqtrade-futures`, `notification-handler`, `trade-overseer` (merge `docker-compose.sygnif-network.yml` for an external bridge) |
+| `ann_text_project/` | Git submodule [ann-text-project](https://github.com/Giansn/ann-text-project): agentic ANN (tool-calling train/profile/export, PyTorch, Kineto, OpenVINO path). Shares **Network**-style artifact layout ideas (`ANN_ARTIFACT_ROOT`, neural-node bundles). **Not** connected to Freqtrade or live orders unless you explicitly wire it. |
+| `network/` | Submodule [Network](https://github.com/Giansn/Network): OpenVINO edge/split infer, `wire_tensor`, VPC — operational counterpart to ANN export and edge placement. |
+
+## Git submodules
+
+```bash
+git submodule update --init --recursive
+```
+
+After clone, `ann_text_project/` is optional for trading; use it for **offline** training and IR workflows. See `ann_text_project/README.md` and `ann_text_project/docs/ARCHITECTURE.md`.
 
 ## Strategy Design
 

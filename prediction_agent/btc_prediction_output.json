@@ -1,42 +1,42 @@
 {
-  "generated_utc": "2026-04-11T23:08:20Z",
-  "timeframe": "daily",
+  "generated_utc": "2026-04-13T02:02:50Z",
+  "timeframe": "1h",
   "window_size": 5,
-  "last_candle_utc": "2026-04-11T00:00:00Z",
-  "current_close": 73341.7,
+  "last_candle_utc": "2026-04-13T01:00:00Z",
+  "current_close": 71165.7,
   "predictions": {
     "random_forest": {
-      "next_mean": 72096.86,
-      "delta": -1244.84
+      "next_mean": 70742.97,
+      "delta": -422.73
     },
     "xgboost": {
-      "next_mean": 71518.5625,
-      "delta": -1823.14
+      "next_mean": 70510.609375,
+      "delta": -655.09
     },
     "direction_logistic": {
-      "label": "UP",
-      "confidence": 69.3
+      "label": "DOWN",
+      "confidence": 74.0
     },
     "consensus": "BEARISH"
   },
   "backtest_metrics": {
     "random_forest": {
-      "MAE": 639.1913,
-      "RMSE": 758.9875,
-      "MAPE": 0.9249,
-      "Direction_Acc": 92.3077
+      "MAE": 155.609,
+      "RMSE": 205.8836,
+      "MAPE": 0.2241,
+      "Direction_Acc": 69.8413
     },
     "xgboost": {
-      "MAE": 1515.4945,
-      "RMSE": 1720.3694,
-      "MAPE": 2.1792,
-      "Direction_Acc": 84.6154
+      "MAE": 147.4031,
+      "RMSE": 200.6127,
+      "MAPE": 0.2125,
+      "Direction_Acc": 71.1111
     },
     "direction_logistic": {
-      "Accuracy": 84.62,
-      "Precision": 100.0,
-      "Recall": 81.82,
-      "F1": 90.0
+      "Accuracy": 73.33,
+      "Precision": 77.78,
+      "Recall": 68.29,
+      "F1": 72.73
     }
   }
 }

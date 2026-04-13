@@ -33,7 +33,8 @@
 
 | Artifact | Producer | Consumer (today) |
 |----------|----------|-------------------|
-| `finance_agent/btc_specialist/data/btc_1h_ohlcv.json`, `btc_daily_90d.json` | `pull_btc_context.py` / cron | `btc_predict_runner.py` |
+| `finance_agent/btc_specialist/data/btc_1h_ohlcv.json`, `btc_daily_90d.json` | **`research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py`** (Docker **`nautilus-research`**, merge **`docker-compose.btc-nautilus-research.yml`**) — Nautilus **Bybit** adapter; **also** `pull_btc_context.py` / cron if you still run it | `btc_predict_runner.py`, **`training_pipeline/channel_training.py`** |
+| `finance_agent/btc_specialist/data/nautilus_spot_btc_market_bundle.json` | same Nautilus feed | `channel_training.py` inflow report, humans / future features |
 | `prediction_agent/btc_prediction_output.json` | `btc_predict_runner.py` | Dashboards, manual review, optional future briefing line |
 | `~/.local/share/sygnif-agent/predictions/BTCUSDT_latest.json` | `prediction_horizon_check.py save` | `prediction_horizon_check.py check`, dashboard snapshot path in `dashboard_server.py` |
 

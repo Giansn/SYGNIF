@@ -1,9 +1,9 @@
 """Tests for SYGNIF_PROFILE=btc_trend regime helpers (no Freqtrade runtime)."""
 
-import pandas as pd
-
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "user_data" / "strategies"))

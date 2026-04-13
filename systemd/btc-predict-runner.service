@@ -1,0 +1,16 @@
+[Unit]
+Description=BTC next-bar ML predict (Sygnif prediction_agent/btc_predict_runner.py)
+Documentation=file:///home/ubuntu/SYGNIF/prediction_agent/btc_predict_runner.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF/prediction_agent
+# Reads: ../../finance_agent/btc_specialist/data/btc_1h_ohlcv.json (and daily if --timeframe daily)
+# Writes: btc_prediction_output.json in this directory
+ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/prediction_agent/btc_predict_runner.py
+StandardOutput=journal
+StandardError=journal

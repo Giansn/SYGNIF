@@ -1,24 +1,25 @@
 """Tests for notification_handler.py — webhook message formatting."""
-import sys
+
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from notification_handler import (
+    _calc_duration,
+    _fallback_review,
+    fmt_coin,
+    fmt_price,
     format_entry_msg,
     format_exit_msg,
     format_status_msg,
     map_exit_reason,
-    _fallback_review,
-    _calc_duration,
-    fmt_coin,
-    fmt_price,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # Entry Messages
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestEntryMessages:
     def test_spot_order_placed(self):
@@ -124,6 +125,7 @@ class TestEntryMessages:
 # Exit Messages
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestExitMessages:
     def test_profitable_exit(self):
         msg = {
@@ -183,6 +185,7 @@ class TestExitMessages:
 # Exit Reason Mapping
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestExitReasonMapping:
     def test_all_known_reasons(self):
         cases = {
@@ -220,6 +223,7 @@ class TestExitReasonMapping:
 # Fallback Review
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestFallbackReview:
     def test_profit_review(self):
         msg = {"profit_ratio": 0.05, "exit_reason": "profit_rsi"}
@@ -241,24 +245,34 @@ class TestFallbackReview:
 # Duration + Formatting
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestFormatting:
     def test_duration_hours(self):
-        assert _calc_duration(
-            "2024-01-01T10:00:00+00:00",
-            "2024-01-01T12:30:00+00:00",
-        ) == "2h30m"
+        assert (
+            _calc_duration(
+                "2024-01-01T10:00:00+00:00",
+                "2024-01-01T12:30:00+00:00",
+            )
+            == "2h30m"
+        )
 
     def test_duration_minutes(self):
-        assert _calc_duration(
-            "2024-01-01T10:00:00+00:00",
-            "2024-01-01T10:45:00+00:00",
-        ) == "45m"
+        assert (
+            _calc_duration(
+                "2024-01-01T10:00:00+00:00",
+                "2024-01-01T10:45:00+00:00",
+            )
+            == "45m"
+        )
 
     def test_duration_seconds(self):
-        assert _calc_duration(
-            "2024-01-01T10:00:00+00:00",
-            "2024-01-01T10:00:30+00:00",
-        ) == "30s"
+        assert (
+            _calc_duration(
+                "2024-01-01T10:00:00+00:00",
+                "2024-01-01T10:00:30+00:00",
+            )
+            == "30s"
+        )
 
     def test_duration_invalid(self):
         assert _calc_duration("bad", "data") == "--"

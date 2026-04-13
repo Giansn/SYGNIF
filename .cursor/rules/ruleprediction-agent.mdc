@@ -1,6 +1,6 @@
 ---
 description: Prediction + briefing + btc_Trader_Docker data flows; consult agents; continuous evidence loop (canonical; was ruler-prediction-agent)
-globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/BTC_TRADER_DOCKER.md,letscrash/BTC_DUMP_PROTECTION_DESIGN.md
+globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,docker-compose.btc-nautilus-research.yml,training_pipeline/channel_training.py,research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py,research/nautilus_lab/bybit_nautilus_btc_ohlcv_sink.py,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md,letscrash/BTC_TRADER_DOCKER.md,letscrash/BTC_DUMP_PROTECTION_DESIGN.md,letscrash/BTC_Strategy_0.1.md,letscrash/btc_strategy_0_1_rule_registry.json
 alwaysApply: false
 ---
 
@@ -8,9 +8,11 @@ alwaysApply: false
 
 **Alias:** **`/ruleprediction-agent`** = **`/ruler-prediction-agent`** — same rule; use this filename only.
 
+**Narrow BTC-ML slice (optional):** when work is limited to **`btc_predict_runner`**, **`channel_training`** embed, or **`ruleprediction_briefing`**, **`.cursor/rules/btc-prediction.mdc`** also attaches via tighter globs — use both; avoid duplicating long governance text in answers.
+
 ## Scope
 
-Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, **`.cursor/agents/prediction-agent.md`**, **`docker/Dockerfile.btc_trader`**, or **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** / **`letscrash/BTC_TRADER_DOCKER.md`** / **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`**.
+Applies when editing **`prediction_agent/`**, **`scripts/prediction_horizon_check.py`**, **`finance_agent/http_main.py`**, **`.cursor/agents/prediction-agent.md`**, **`docker/Dockerfile.btc_trader`**, **`docker-compose.btc-nautilus-research.yml`**, **`training_pipeline/channel_training.py`**, **`research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py`** (Nautilus → training inflow), or **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** / **`letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md`** / **`letscrash/BTC_TRADER_DOCKER.md`** / **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`** / **`letscrash/BTC_Strategy_0.1.md`** / **`letscrash/btc_strategy_0_1_rule_registry.json`**.
 
 ## Consult other agents (set rules with correct data flows)
 
@@ -26,6 +28,17 @@ Before changing **Docker**, **compose**, or **.mdc** rules for prediction/BTC pi
 | **Predict workflow** | `.cursor/rules/sygnif-predict-workflow.mdc` |
 
 **Long-form loop + indicator wishlist + btc_Trader_Docker I/O table:** **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — rules **evolve**; that file is the canonical narrative for the **continuous information → train → propose → prove → test → rm/apply → compare** cycle.
+
+## Trading rule generation from incoming data (`/ruleprediction-agent` intent)
+
+When the user asks to **generate or evolve trading rules from data** (incoming feeds, training JSON, Nautilus bundle):
+
+1. **Ingest:** read artifacts in **`letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md` §1** (newest `mtime` wins where two sources overlap).
+2. **Predict / Analyze:** map observations to **hypotheses** and **one primary surface** per hypothesis (`.mdc`, `strategy_adaptation.json`, `SygnifStrategy.py`, compose) — table in **§2** of that file.
+3. **Proofread:** check for duplication against **SygnifStrategy** + existing `.mdc`; respect **8091** single-listener and **RAM** constraints above.
+4. **Adjust:** only implement **L0–L2** changes without user sign-off if already policy-safe (docs, horizon script, **clamped** adaptation). **L3** / live execution logic → tests + explicit user approval.
+
+Do **not** start silent production rule changes; always leave an auditable trail (PR, commit, or dated `letscrash/` note).
 
 **BTC dump protection (Pine inspiration → Sygnif, bounded):** **`letscrash/BTC_DUMP_PROTECTION_DESIGN.md`** — QuantumEdge + chikaharu MA references under **`prediction_agent/reference/`** (MPL 2.0).
 

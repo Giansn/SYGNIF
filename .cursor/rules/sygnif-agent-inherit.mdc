@@ -50,6 +50,7 @@ When you touch those paths, apply **both** the inherit identity above **and** th
 | Rule | Path | Role |
 |------|------|------|
 | **ruleprediction-agent** | `.cursor/rules/ruleprediction-agent.mdc` | Ports, RAM, bounded self-learning for prediction + briefing HTTP |
+| **btc-prediction** | `.cursor/rules/btc-prediction.mdc` | **File-scoped:** BTC runner / channel JSON / briefing-appendix / journal — tight globs; alias **`/btc-prediction`**; pairs with **ruleprediction-agent** on overlap |
 
 ## Adaptive strategy tuning (bounded)
 

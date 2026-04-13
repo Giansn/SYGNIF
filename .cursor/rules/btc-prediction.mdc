@@ -1,0 +1,48 @@
+---
+description: >-
+  BTC ML prediction slice (runner, channel embed, briefing hooks) — narrow globs;
+  use with ruleprediction-agent. Alias /btc-prediction /create-btc-prediction
+globs: prediction_agent/btc_predict*.py,prediction_agent/btc_predict_5m.pine,prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine,prediction_agent/btc_prediction_output.json,prediction_agent/training_channel_output.json,prediction_agent/rule_tag_journal.py,prediction_agent/rule_tag_journal.csv,finance_agent/ruleprediction_briefing.py,training_pipeline/channel_training.py,docker-compose.training-pipeline.yml,systemd/btc-predict-runner.service
+alwaysApply: false
+---
+
+# BTC prediction (runner + channel + briefing)
+
+**Aliases:** **`/btc-prediction`**, **`/create-btc-prediction`** — same rule file. **Narrow scope:** only the **Bybit-OHLCV → sklearn/XGB runner → JSON** path and **training-channel embed** + optional **8091 briefing** lines. For full prediction governance (ports, RAM, letscrash rule tables, Nautilus sinks), the broader **`.cursor/rules/ruleprediction-agent.mdc`** still applies when those paths are in play.
+
+## When this rule should guide you
+
+- User edits **`btc_predict_runner.py`**, **`btc_predict_5m.pine`**, or **`channel_training.py`**.
+- User inspects **`btc_prediction_output.json`** / **`training_channel_output.json`** and asks what changed or whether to trust it.
+- User enables or tunes **`finance_agent/ruleprediction_briefing.py`** (`SYGNIF_BRIEFING_*` env) or **`rule_tag_journal`**.
+
+This rule stays **`alwaysApply: false`** (glob-triggered only) so routine strategy edits do not load ML-pipeline detail by default.
+
+## Reasonable triggers (operator + agent)
+
+| Trigger | Action |
+|---------|--------|
+| OHLCV JSON under **`finance_agent/btc_specialist/data/`** stale vs **`manifest.json`** | Refresh pulls (`pull_btc_context.py` / cron) **before** re-running the runner; cite `generated_utc` in answers. |
+| After **`channel_training.py`** or manual runner | Prefer **one** aligned boundary: training output **`generated_utc`** matches runner when both written in the same pass (`predict_runner_alignment` in `training_channel_output.json`). |
+| User asks for “signal” from JSON only | **R01 / governance:** next-bar + runner extremes are **not** a license to widen live long risk; point to **`letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md`** §5 and **`btc_trend_regime`** / HTF context for execution framing. |
+| Promoting behaviour to Freqtrade | **Not** silent: needs tests + explicit approval per **`ruleprediction-agent`** L3 policy; FT does **not** read **`btc_strategy_0_1_rule_registry.json`**. |
+
+## Commands (reference)
+
+- Runner (host or container with **`PREDICTION_AGENT_DIR`** / **`DATA_DIR`** set):  
+  `python3 prediction_agent/btc_predict_runner.py --timeframe 1h`
+- Channel (embeds runner snapshot + alignment):  
+  `python3 training_pipeline/channel_training.py`
+- Horizon mechanical check:  
+  `python3 scripts/prediction_horizon_check.py save --symbol BTC` … later `check`
+
+## Consult
+
+- **`.cursor/agents/prediction-agent.md`** — data paths, Pine study trees, “not wired to FT by default.”
+- **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — where this slice sits in the larger loop.
+- **`docs/btc_trend_backtest_checklist.md`** — **separate** from ML JSON: rule-based **`SYGNIF_PROFILE=btc_trend`** backtests.
+
+## Anti-patterns
+
+- Dumping full OHLCV or `backtest_metrics` into **`GET /briefing`** bodies — keep optional lines **compact** (existing env flags).
+- Running **two** heavy jobs (runner + large PyTorch train) concurrently on small instances (**`ruleprediction-agent`** RAM note).

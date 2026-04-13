@@ -15,7 +15,7 @@ except ImportError:
 _CLIENT_SOCK_TIMEOUT = 120  # seconds; frees a worker if the client never completes a request
 
 PORT = 8888
-API = "http://localhost:8080"
+API = "http://127.0.0.1:8181"
 DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(DIR)
 

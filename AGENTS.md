@@ -108,6 +108,9 @@ Canonical paths (repo-relative; attach skills in Cursor — **`~/.claude/skills/
 |------|------|------|
 | Skill | **finance-agent** | `.cursor/skills/finance-agent/SKILL.md` |
 | Skill | **btc-specialist** | `.cursor/skills/btc-specialist/SKILL.md` |
+| Skill | **create-btc-agent** | `.cursor/skills/create-btc-agent/SKILL.md` |
 | Agent | **btc-specialist** | `.cursor/agents/btc-specialist.md` |
 
 For **Bitcoin-only** analysis, prefer the **agent** (`.cursor/agents/btc-specialist.md`) when delegating; use the **skill** for the reference tables and file index.
+
+**Cursor rule (BTC ML JSON path):** `.cursor/rules/btc-prediction.mdc` — attaches when editing `btc_predict_runner`, `channel_training`, `ruleprediction_briefing`, or prediction JSON sidecars; alias `/btc-prediction`. Broader prediction + ports: `.cursor/rules/ruleprediction-agent.mdc`.

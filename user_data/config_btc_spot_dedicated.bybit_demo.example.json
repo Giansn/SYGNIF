@@ -1,0 +1,123 @@
+{
+    "_comment": "Bybit **demo** (testnet trading UI) — use API keys created in Bybit demo only. Copy to config_btc_spot_dedicated.json or merge `exchange` + `dry_run` into your file. Official demo API: https://bybit-exchange.github.io/docs/v5/demo",
+    "strategy": "SygnifStrategy",
+    "trading_mode": "spot",
+    "margin_mode": "",
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.95,
+    "fiat_display_currency": "CHF",
+    "dry_run": false,
+    "dry_run_wallet": 10000,
+    "timeframe": "5m",
+    "use_exit_signal": true,
+    "exit_profit_only": false,
+    "ignore_roi_if_entry_signal": true,
+    "unfilledtimeout": {
+        "entry": 3,
+        "exit": 2,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0
+    },
+    "exchange": {
+        "name": "bybit",
+        "key": "BYBIT_DEMO_API_KEY",
+        "secret": "BYBIT_DEMO_API_SECRET",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "spot"
+            },
+            "urls": {
+                "api": {
+                    "public": "https://api-demo.bybit.com",
+                    "private": "https://api-demo.bybit.com"
+                }
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "spot"
+            },
+            "urls": {
+                "api": {
+                    "public": "https://api-demo.bybit.com",
+                    "private": "https://api-demo.bybit.com"
+                }
+            }
+        },
+        "pair_whitelist": [
+            "BTC/USDT"
+        ],
+        "pair_blacklist": [
+            ".*(5L|5S|3L|3S|2L|2S)/.*",
+            "(BUSD|CUSD|DAI|TUSD|USDC|USDT|USDD|FDUSD|USDP|USDS|XUSD|USD1|RLUSD|AUSD|EURI|U)/.*",
+            "(ACM|AFA|ALA|ALL|ALPINE|APL|ASR|ATM|BAR|CAI|CITY|FOR|GAL|GOZ|JUV|LEG|NAVI|PORTO|PSG|ROUSH|TRA|UCH|UFC|YBO)/.*",
+            "(XAUT|PAXG)/.*"
+        ]
+    },
+    "order_types": {
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_exit": "market",
+        "force_entry": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": false
+    },
+    "order_time_in_force": {
+        "entry": "GTC",
+        "exit": "GTC"
+    },
+    "pairlists": [
+        {
+            "method": "StaticPairList"
+        }
+    ],
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": ""
+    },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": true,
+        "jwt_secret_key": "REPLACE_WITH_OPENSSL_RAND_HEX_64",
+        "CORS_origins": [
+            "http://localhost:8282",
+            "http://127.0.0.1:8282"
+        ],
+        "username": "freqtrader",
+        "password": "REPLACE_ME_STRONG_API_PASSWORD"
+    },
+    "bot_name": "Sygnif BTC spot (Bybit demo)",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 3
+    },
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather",
+    "position_adjustment_enable": true
+}

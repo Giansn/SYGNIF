@@ -3538,8 +3538,19 @@ def _briefing(symbols: list[str] | None = None) -> str:
         import crypto_market_data as _cmd_md
 
         pipe = _cmd_md.briefing_lines_plain(max_chars=900).strip()
+        extra = ""
+        try:
+            import ruleprediction_briefing as _rpb
+
+            extra = _rpb.extra_briefing_lines(max_chars=320).strip()
+        except Exception as e:
+            logger.debug("briefing ruleprediction_briefing: %s", e)
+        if pipe and extra:
+            return f"{core}\n\n{pipe}\n\n{extra}"
         if pipe:
             return f"{core}\n\n{pipe}"
+        if extra:
+            return f"{core}\n\n{extra}"
     except Exception as e:
         logger.debug("briefing crypto_market_data: %s", e)
     return core

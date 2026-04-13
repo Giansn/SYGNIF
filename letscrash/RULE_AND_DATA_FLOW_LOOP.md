@@ -4,6 +4,8 @@
 
 **Rule setting never stops:** each cycle produces evidence; **false** hypotheses → delete or narrow rules/docs; **true** under defined tests → apply (code, `strategy_adaptation.json`, compose, or `.mdc` globs). Re-compare against **live feeds** next cycle.
 
+**Operational checklist (incoming data → rule rows):** **`letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md`** — use with **`.cursor/rules/ruleprediction-agent.mdc`** when invoking **`/ruleprediction-agent`** for data-driven rule work.
+
 ---
 
 ## 1. Consult other agents (before changing rules or Docker)
@@ -49,13 +51,28 @@ flowchart TD
 |-----------|---------|---------|
 | **In** | `SYGNIF_SENTIMENT_HTTP_URL` | `finance-agent:8091/sygnif/sentiment` — MLP / HTTP sentiment for strategy |
 | **In** | Mounted `user_data/` | `SygnifStrategy`, `strategy_adaptation.json`, configs, feather data |
-| **In** | Exchange REST/WS | Bybit spot **BTC/USDT** (Freqtrade ccxt) |
+| **In** | Exchange REST/WS | Bybit spot **BTC/USDT** (Freqtrade **CCXT**) |
+| **In** | `nautilus-research` + **`bybit_nautilus_spot_btc_training_feed.py`** | **Nautilus `BybitHttpClient`** (not CCXT), **spot BTC/USDT only** — writes `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `btc_1h_ohlcv_nautilus_bybit.json`, `nautilus_spot_btc_market_bundle.json` → **training channel** + `btc_predict_runner` + regime; compose: `docker-compose.btc-nautilus-research.yml` |
 | **In** | (optional future) | Read-only mount or HTTP for **prediction** / **yfinance** sidecars — document before enable |
 | **Out** | Webhooks | `notification-handler:8089` — trades, fills (align `trading_mode` / `bot_name`) |
 | **Out** | Freqtrade REST | Host-mapped port (e.g. **8282** → container **8080**) |
 | **Out** | Logs | `user_data/logs/freqtrade-btc-spot.log` |
 
 **No second :8091** inside the trader image — **ruleprediction-agent** port contract.
+
+### Training pipeline (`sygnif-training-pipeline`)
+
+Bounded channel job: **inflow** = mounted `finance_agent/btc_specialist/data/*.json` (Bybit OHLCV); optional subprocess `btc_predict_runner.py` → `prediction_agent/btc_prediction_output.json`. **Recognition / risk outflow** = `prediction_agent/training_channel_output.json` (holdout `p_up` / `p_down`, Brier, empirical win/loss when model predicts up, naive VaR on 1-bar returns, max drawdown disclaimer).
+
+| Direction | Channel | Content |
+|-----------|---------|---------|
+| **In** | `./finance_agent:/app/finance_agent:ro` | `btc_1h_ohlcv.json`, `btc_daily_90d.json` |
+| **In** | `./prediction_agent:/app/prediction_agent:rw` | Live `btc_predict_runner.py` + write targets |
+| **Out** | Same `prediction_agent` mount | `btc_prediction_output.json` (runner), `training_channel_output.json` (channel) |
+
+Start (merge with main compose so `sygnif_backend` exists): `docker compose -f docker-compose.yml -f docker-compose.training-pipeline.yml up -d --build sygnif-training-pipeline`. Env: `SKIP_PREDICT_RUNNER`, `RUNNER_TIMEFRAME`, `WINDOW`, `TEST_RATIO`, `TRAINING_LOOP_SECONDS` (default 21600). One-shot local: `SKIP_PREDICT_RUNNER=1 PYTHONPATH=prediction_agent .venv/bin/python training_pipeline/channel_training.py`.
+
+**Cross-link:** R01 live gate = `prediction_agent/training_channel_output.json`; Nautilus = upstream inflow only unless mirrored to `finance_agent/btc_specialist/data/btc_1h_ohlcv.json` — see `user_data/strategies/btc_strategy_0_1_engine.py`, `prediction_agent/btc_predict_runner.py`, **`letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md`** §5.
 
 ---
 

@@ -1,7 +1,7 @@
 
 
 # Project Memory — SYGNIF
-> 1949 notes | Score threshold: >40
+> 2060 notes | Score threshold: >40
 
 ## Safety — Never Run Destructive Commands
 
@@ -20,16 +20,23 @@
 
 ## 📝 NOTE: 1 uncommitted file(s) in working tree.\n\n## Important Warnings
 
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
-- **⚠️ GOTCHA: what-changed in tradesv3-futures.sqlite-wal** — - �	�=f�"�\��IUs
+- **gotcha in freqtrade-futures.log** — - 
++ 2026-04-12 09:10:24,828 - MarketStrategy2 - WARNING - [CL/USDT:US
+- **gotcha in freqtrade-futures.log** — - 
++ 2026-04-12 09:05:29,818 - MarketStrategy2 - WARNING - [FF/USDT:US
+- **gotcha in freqtrade-futures.log** — - 
++ 2026-04-12 09:05:28,794 - MarketStrategy2 - WARNING - [CL/USDT:US
+- **gotcha in freqtrade-futures.log** — File updated (external): user_data/logs/freqtrade-futures.log
+
+Content
+- **gotcha in agent-rules.md** — File updated (external): .brainsync/agent-rules.md
+
+Content summary (6
+- **⚠️ GOTCHA: problem-fix in tradesv3-futures.sqlite-wal** — - ?�e����trailing_stop_lossclosedMarketStrategy2strong_taFUTURES?���
 
 ## Project Standards
 
-- Strengthened types INFO
+- Strengthened types GOTCHA
 - Strengthened types INFO
 - Strengthened types INFO
 - convention in agent-rules.md
@@ -41,13 +48,14 @@
 ## Known Fixes
 
 - ❌ - ?�e����trailing_stop_lossclosedMarketStrategy2strong_taFUTURES?�������>�����h�?�i/n���?f��� → ✅ problem-fix in tradesv3-futures.sqlite-wal
+- ❌ - Global protections: Multi-TF cascade prevents buying during crashes → ✅ problem-fix in SygnifStrategy.py
 
 ## Recent Decisions
 
 - decision in freqtrade.log
-- decision in freqtrade-futures.log
 - decision in freqtrade.log
 - decision in freqtrade-futures.log
+- decision in freqtrade.log
 
 ## Verified Best Practices
 

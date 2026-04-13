@@ -1,0 +1,43 @@
+name: Python CI
+
+on: [push, pull_request]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff lint (tests)
+        run: ruff check tests
+
+      - name: Ruff format (tests)
+        run: ruff format --check tests
+
+      - name: Byte-compile (strategy + handlers)
+        run: |
+          python -m compileall -q SygnifStrategy.py notification_handler.py \
+            tests dashboard_server.py dashboard_server_futures.py dashboard_cryptoapis.py
+
+      - name: Test with pytest
+        run: pytest tests/ -v

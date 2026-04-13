@@ -759,7 +759,7 @@ tr:hover td { background: #ffffff04; }
         <span id="badge" class="badge b-run"><span class="pulse"></span>...</span>
         <span id="dry" class="badge b-dry" style="display:none">DRY RUN</span>
       </div>
-      <div class="clock" id="clock">--:--:--</div>
+      <div class="clock" id="clock" title="Europe/Zurich (Bern)">--:--:--</div>
     </div>
   </div>
 
@@ -769,7 +769,7 @@ tr:hover td { background: #ffffff04; }
     <div class="stat fade-in"><div class="stat-lbl">Closed P/L</div><div class="stat-val" id="cpnl">--</div><div class="stat-sub" id="cpnl-s">realized</div></div>
     <div class="stat fade-in"><div class="stat-lbl">Trades</div><div class="stat-val" id="tcount">--</div><div class="stat-sub" id="tcount-s">open / max</div></div>
     <div class="stat fade-in"><div class="stat-lbl">Win Rate</div><div class="stat-val" id="wr">--</div><div class="stat-sub" id="wr-s">W / L</div></div>
-    <div class="stat fade-in"><div class="stat-lbl">Today's P&amp;L</div><div class="stat-val" id="today-pnl" style="font-size:22px">--</div><div class="stat-sub" id="today-pnl-s">UTC day · closed trades</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Today's P&amp;L</div><div class="stat-val" id="today-pnl" style="font-size:22px">--</div><div class="stat-sub" id="today-pnl-s">Europe/Zurich · closed trades</div></div>
   </div>
 
   <div class="portfolio-chart-wrap fade-in">
@@ -830,9 +830,9 @@ tr:hover td { background: #ffffff04; }
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Pair</th><th>Side</th><th>P/L %</th><th>P/L</th><th>Dur</th><th>Entry</th><th>Exit</th>
+          <th>Pair</th><th>Side</th><th>Closed</th><th>P/L %</th><th>P/L</th><th>Dur</th><th>Entry</th><th>Exit</th>
         </tr></thead>
-        <tbody id="closed-tbody"><tr><td colspan="7" class="empty">No closed trades yet</td></tr></tbody>
+        <tbody id="closed-tbody"><tr><td colspan="8" class="empty">No closed trades yet</td></tr></tbody>
       </table>
     </div>
     <div class="trade-cards" id="closed-cards"></div>
@@ -858,6 +858,51 @@ let closedShowAll = false;
 let chartTF = 1;
 let _dailyCache = null;
 let _tradesCache = [];
+
+/** Bern / Switzerland — all dashboard clocks and trade timestamps use this IANA zone. */
+const DASH_TZ = 'Europe/Zurich';
+const DASH_LOC = 'de-CH';
+
+function parseTradeTs(raw) {
+  if (raw == null || raw === '') return new Date(NaN);
+  const s = String(raw);
+  return new Date(s + (s.includes('Z') || s.includes('+') ? '' : 'Z'));
+}
+
+function zurichDateKey(ms) {
+  const d = ms instanceof Date ? ms : new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: DASH_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+function zurichTodayStr() {
+  return zurichDateKey(Date.now());
+}
+
+function fmtZurichDateTimeOf(ms) {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '--';
+  return d.toLocaleString(DASH_LOC, { timeZone: DASH_TZ, year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function dashClockStr() {
+  return new Date().toLocaleTimeString(DASH_LOC, { timeZone: DASH_TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+/** Sum realized P/L for trades whose close time falls on today's calendar date in Zurich. */
+function closedProfitZurichToday(allTrades) {
+  const key = zurichTodayStr();
+  let abs = 0, n = 0;
+  for (const t of allTrades || []) {
+    if (t.is_open === true || t.is_open === 1) continue;
+    if (!t.close_date) continue;
+    const ts = parseTradeTs(t.close_date);
+    if (isNaN(ts.getTime()) || zurichDateKey(ts.getTime()) !== key) continue;
+    abs += Number(t.profit_abs) || 0;
+    n++;
+  }
+  return { abs, n };
+}
 
 /* ── Auth ── */
 async function autoLogin() {
@@ -909,14 +954,14 @@ function calcDur(od) {
 
 function prec(v) { return v < 0.01 ? 8 : v < 1 ? 6 : v < 100 ? 4 : 2; }
 
-function utcTodayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function findTodayDailyRow(daily) {
   const rows = daily?.data || [];
-  const t = utcTodayStr();
-  let hit = rows.find(r => String(r.date).slice(0, 10) === t);
+  const zk = zurichTodayStr();
+  let hit = rows.find(r => String(r.date).slice(0, 10) === zk);
+  if (!hit) {
+    const uk = new Date().toISOString().slice(0, 10);
+    hit = rows.find(r => String(r.date).slice(0, 10) === uk);
+  }
   if (!hit && rows.length) hit = rows[0];
   return hit || null;
 }
@@ -942,10 +987,9 @@ function buildGranularData(days) {
     dailyEq[ds] = { s: Number(r.starting_balance) || 0, e: (Number(r.starting_balance) || 0) + (Number(r.abs_profit) || 0) };
   }
 
-  const parseTS = raw => { const s = String(raw); return new Date(s + (s.includes('Z') || s.includes('+') ? '' : 'Z')); };
   const trades = _tradesCache
     .filter(t => !t.is_open && t.close_date)
-    .map(t => ({ ts: parseTS(t.close_date), profit: t.profit_abs || 0 }))
+    .map(t => ({ ts: parseTradeTs(t.close_date), profit: t.profit_abs || 0 }))
     .filter(t => t.ts >= start && t.ts <= now)
     .sort((a, b) => a.ts - b.ts);
 
@@ -972,9 +1016,9 @@ function buildGranularData(days) {
     while (ti < trades.length && trades[ti].ts.getTime() <= slotEnd) { equity += trades[ti].profit; ti++; }
     values.push(equity);
     if (days <= 1) {
-      labels.push(d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+      labels.push(d.toLocaleTimeString(DASH_LOC, { timeZone: DASH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }));
     } else {
-      labels.push(d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+      labels.push(d.toLocaleDateString(DASH_LOC, { timeZone: DASH_TZ, month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(DASH_LOC, { timeZone: DASH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }));
     }
   }
 
@@ -1127,16 +1171,12 @@ function btcLinReg(ys) {
   return { slope, intercept, n };
 }
 
-/** Compact UTC label for chart axis (ms). */
-function btcFmtUtcAxis(ms) {
+/** Compact label for BTC chart axis (ms) in Europe/Zurich. */
+function btcFmtDashAxis(ms) {
   if (ms == null || ms === '') return '';
   const d = new Date(Number(ms));
   if (isNaN(d.getTime())) return '';
-  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
-  const day = d.getUTCDate();
-  const h = d.getUTCHours();
-  const m = d.getUTCMinutes();
-  return `${mon} ${day} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return d.toLocaleString('en-GB', { timeZone: DASH_TZ, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function btcPriceAxisLabel(y) {
@@ -1192,9 +1232,7 @@ function btcBuildChartSvg(bars, projYs, support, resistance, h24, l24) {
   for (let i = 1; i < n; i++) {
     const t0 = bars[i - 1].t, t1 = bars[i].t;
     if (t0 == null || t1 == null) continue;
-    const a = new Date(Number(t0));
-    const b = new Date(Number(t1));
-    if (a.getUTCDate() !== b.getUTCDate() || a.getUTCMonth() !== b.getUTCMonth() || a.getUTCFullYear() !== b.getUTCFullYear()) {
+    if (zurichDateKey(Number(t0)) !== zurichDateKey(Number(t1))) {
       const x = xScale(i);
       dayBreaks += `<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(padT + innerH).toFixed(1)}" stroke="var(--bd)" stroke-width="1" stroke-dasharray="4 6" opacity="0.65"/>`;
     }
@@ -1226,14 +1264,14 @@ function btcBuildChartSvg(bars, projYs, support, resistance, h24, l24) {
   for (const i of tickIdx) {
     const x = xScale(i);
     const t = bars[i] && bars[i].t;
-    const lab = btcFmtUtcAxis(t);
+    const lab = btcFmtDashAxis(t);
     if (!lab) continue;
     xTicks += `<line x1="${x.toFixed(1)}" y1="${(padT + innerH).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(padT + innerH + 5).toFixed(1)}" stroke="var(--t3)" stroke-width="1" opacity="0.5"/>`;
     xTicks += `<text class="btc-axis-text" x="${x.toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="middle">${lab}</text>`;
   }
   const t0 = bars[0] && bars[0].t;
   const t1 = bars[n - 1] && bars[n - 1].t;
-  const ariaSpan = t0 && t1 ? `UTC ${btcFmtUtcAxis(t0)} to ${btcFmtUtcAxis(t1)}` : 'BTC 1h';
+  const ariaSpan = t0 && t1 ? `${DASH_TZ.replace(/_/g, ' ')} ${btcFmtDashAxis(t0)} → ${btcFmtDashAxis(t1)}` : 'BTC 1h';
   return `<svg class="portfolio-svg btc-chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="BTC 1h closes ${ariaSpan} projection dashed">
   <defs>
     <linearGradient id="btcChartGradFut" x1="0" y1="0" x2="0" y2="1">
@@ -1569,7 +1607,15 @@ async function refreshBtcContext() {
       fetch(p('btc_crypto_market_data.json'), { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)),
     ]);
     const gen = (snap && snap.generated_utc) || (manifest && manifest.generated_utc) || '—';
-    if (ageEl) ageEl.textContent = gen !== '—' ? `snap ${String(gen).slice(0, 19).replace('T', ' ')} UTC` : 'Sygnif TA';
+    if (ageEl) {
+      if (gen !== '—') {
+        const raw = String(gen).trim().replace(' ', 'T');
+        const d = new Date(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z');
+        ageEl.textContent = !isNaN(d.getTime())
+          ? `snap ${fmtZurichDateTimeOf(d.getTime())} · Europe/Zurich`
+          : `snap ${String(gen).slice(0, 19).replace('T', ' ')}`;
+      } else ageEl.textContent = 'Sygnif TA';
+    }
     const bars = Array.isArray(ohlcv) ? ohlcv.slice(-72) : [];
     const closes = bars.map(b => b.c);
     const lb = Math.min(24, Math.max(2, closes.length));
@@ -1696,7 +1742,7 @@ async function refresh() {
     badgeEl.innerHTML = `<span class="pulse"></span>${state.toUpperCase()}`;
     badgeEl.className = `badge ${state === 'running' ? 'b-run' : 'b-stop'}`;
     document.getElementById('dry').style.display = cfg.dry_run ? 'inline-block' : 'none';
-    document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+    document.getElementById('clock').textContent = dashClockStr();
     document.getElementById('pair-count').textContent = `${(wl.whitelist || []).length} pairs`;
     document.getElementById('pos-count').textContent = `${trades.length} open`;
 
@@ -1729,10 +1775,25 @@ async function refresh() {
     document.getElementById('wr').className = `stat-val ${tot ? (w / tot >= 0.5 ? 'up' : 'dn') : ''}`;
     document.getElementById('wr-s').textContent = `${w}W / ${l}L`;
 
-    // Today's P&L (from /daily — same as spot)
+    // Today's P&L — primary: realized closes on today's Zurich calendar; fallback: /daily row
     const tRow = findTodayDailyRow(daily);
-    const tAbs = tRow ? Number(tRow.abs_profit) || 0 : 0;
-    const tRel = tRow ? (Number(tRow.rel_profit) || 0) * 100 : 0;
+    const zurichClosed = closedProfitZurichToday(allTrades);
+    let tAbs, tRel, tCount;
+    if (zurichClosed.n > 0) {
+      tAbs = zurichClosed.abs;
+      tCount = zurichClosed.n;
+      const rowKey = tRow ? String(tRow.date).slice(0, 10) : '';
+      if (rowKey === zurichTodayStr() && tRow) {
+        tRel = (Number(tRow.rel_profit) || 0) * 100;
+      } else {
+        const wb = walletBalance || 0;
+        tRel = wb ? (tAbs / wb) * 100 : 0;
+      }
+    } else {
+      tAbs = tRow ? Number(tRow.abs_profit) || 0 : 0;
+      tRel = tRow ? (Number(tRow.rel_profit) || 0) * 100 : 0;
+      tCount = tRow?.trade_count ?? 0;
+    }
     const tpEl = document.getElementById('today-pnl');
     const tpSub = document.getElementById('today-pnl-s');
     if (tpEl) {
@@ -1742,7 +1803,7 @@ async function refresh() {
       tpEl.style.fontSize = '22px';
     }
     if (tpSub) {
-      tpSub.textContent = (tRow?.trade_count ?? 0) + ' closes · stake ' + (daily?.stake_currency || 'USDT');
+      tpSub.textContent = (tCount ?? 0) + ' closes · Europe/Zurich · ' + (daily?.stake_currency || 'USDT');
     }
     _dailyCache = daily;
     _tradesCache = allTrades;
@@ -1888,14 +1949,14 @@ async function tick() {
 // Clock
 setInterval(() => {
   const el = document.getElementById('clock');
-  if (el) el.textContent = new Date().toLocaleTimeString();
+  if (el) el.textContent = dashClockStr();
 }, 1000);
 
-/** Freqtrade trade: long unless `is_short` is true (futures shorts). */
+/** Freqtrade trade: LONG unless `is_short` is true (futures shorts). */
 function tradeSideTag(t) {
   const short = t && (t.is_short === true || t.is_short === 1);
   const cls = short ? 'side-short' : 'side-long';
-  const text = short ? 'short' : 'long';
+  const text = short ? 'SHORT' : 'LONG';
   return `<span class="tag ${cls}">${text}</span>`;
 }
 
@@ -1907,7 +1968,7 @@ function renderClosedSection() {
   if (!ctb || !cc) return;
 
   if (!closedTradesAll.length) {
-    ctb.innerHTML = '<tr><td colspan="7" class="empty">No closed trades yet</td></tr>';
+    ctb.innerHTML = '<tr><td colspan="8" class="empty">No closed trades yet</td></tr>';
     cc.innerHTML = '<div class="card"><div class="empty">No closed trades yet</div></div>';
     document.getElementById('closed-count').textContent = '0 recent';
     if (actions) actions.style.display = 'none';
@@ -1926,9 +1987,11 @@ function renderClosedSection() {
     const dur = t.close_date && t.open_date
       ? calcDur(t.open_date)
       : (t.trade_duration ? (t.trade_duration < 60 ? t.trade_duration + 'm' : (t.trade_duration/60).toFixed(1) + 'h') : '--');
+    const closedTs = fmtZurichDateTimeOf(parseTradeTs(t.close_date).getTime());
     return `<tr>
       <td><span class="pair-name">${pairDisp(t.pair)}<span> /USDT</span></span></td>
       <td>${tradeSideTag(t)}</td>
+      <td style="color:var(--t2);font-variant-numeric:tabular-nums;white-space:nowrap">${closedTs}</td>
       <td><span class="${pc(pctVal)}" style="font-weight:700">${pctVal >= 0 ? '+' : ''}${pctVal.toFixed(2)}%</span></td>
       <td class="${pc(pnl)}">${fmt(pnl)}</td>
       <td style="color:var(--t2)">${dur}</td>
@@ -1940,6 +2003,7 @@ function renderClosedSection() {
   cc.innerHTML = list.map(t => {
     const pctVal = (t.profit_ratio || 0) * 100;
     const pnl = t.profit_abs || 0;
+    const closedTs = fmtZurichDateTimeOf(parseTradeTs(t.close_date).getTime());
     return `<div class="tc">
       <div class="tc-top">
         <div class="tc-pair-row"><div class="tc-pair">${pairDisp(t.pair)}<span> /USDT</span></div>${tradeSideTag(t)}</div>
@@ -1949,6 +2013,7 @@ function renderClosedSection() {
         </div>
       </div>
       <div class="tc-grid">
+        <div class="tc-item"><div class="tc-item-lbl">Closed</div><div class="tc-item-val" style="font-variant-numeric:tabular-nums">${closedTs}</div></div>
         <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val"><span class="tag">${t.enter_tag || '--'}</span></div></div>
         <div class="tc-item"><div class="tc-item-lbl">Exit</div><div class="tc-item-val"><span class="tag">${t.exit_reason || '--'}</span></div></div>
       </div>

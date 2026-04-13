@@ -1,8 +1,12 @@
 .env
+.env.local
+.env.secrets
 user_data/data/
 user_data/logs/
 user_data/tradesv3.sqlite*
 user_data/tradesv3-futures.sqlite*
+user_data/tradesv3-*-demo.sqlite*
+user_data/tradesv3-btc01-paper.sqlite*
 user_data/backtest_results/
 user_data/hyperopt_results/
 user_data/plot/
@@ -19,6 +23,9 @@ movers_pairlist.json
 NostalgiaForInfinity/
 files.zip
 user_data/config.json
+# Dedicated BTC spot bot (secrets + JWT; copy from *.example.json)
+user_data/config_btc_spot_dedicated.json
+user_data/tradesv3-btc-spot.sqlite*
 config_claude_bot.json
 .gitnexus
 .claude/*

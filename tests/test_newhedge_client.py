@@ -1,9 +1,5 @@
 """Tests for optional NewHedge client (no live API key required)."""
 
-import os
-
-import pytest
-
 
 def test_format_telegram_skips_without_key(monkeypatch):
     monkeypatch.delenv("NEWHEDGE_API_KEY", raising=False)

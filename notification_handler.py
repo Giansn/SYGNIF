@@ -110,6 +110,7 @@ EXIT_REASON_MAP = {
     "secure_profit": "Profit secured",
     "willr": "Williams %R signal",
     "profit_rsi": "RSI profit lock",
+    "btc_risk": "BTC risk-off (guard)",
     "overbought": "Overbought",
     "oversold": "Oversold",
     "bounce": "Bounce",

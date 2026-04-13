@@ -1,13 +1,13 @@
 """Shared fixtures for Sygnif tests."""
-import sys
-import os
-import json
-import types
-import tempfile
 
-import pytest
+import os
+import sys
+import tempfile
+import types
+
 import numpy as np
 import pandas as pd
+import pytest
 
 # ---------------------------------------------------------------------------
 # Stub out heavy imports that aren't available outside Docker
@@ -15,11 +15,15 @@ import pandas as pd
 
 # freqtrade stubs
 _ft_strategy = types.ModuleType("freqtrade.strategy")
-_ft_strategy.IStrategy = type("IStrategy", (), {
-    "dp": None,
-    "config": {},
-    "INTERFACE_VERSION": 3,
-})
+_ft_strategy.IStrategy = type(
+    "IStrategy",
+    (),
+    {
+        "dp": None,
+        "config": {},
+        "INTERFACE_VERSION": 3,
+    },
+)
 _ft_strategy.merge_informative_pair = lambda df, info, tf_base, tf_info, ffill=True: df
 
 _ft_persistence = types.ModuleType("freqtrade.persistence")
@@ -32,15 +36,18 @@ sys.modules["freqtrade.persistence"] = _ft_persistence
 
 # talib stub — must have __spec__ set for pandas_ta find_spec() check
 import importlib.machinery
+
 _talib = types.ModuleType("talib")
 _talib.__spec__ = importlib.machinery.ModuleSpec("talib", None)
 _talib_abstract = types.ModuleType("talib.abstract")
 _talib_abstract.__spec__ = importlib.machinery.ModuleSpec("talib.abstract", None)
 
+
 def _bbands(close, timeperiod=20, nbdevup=2.0, nbdevdn=2.0, matype=0):
     mid = close.rolling(timeperiod).mean()
     std = close.rolling(timeperiod).std()
     return mid + nbdevup * std, mid, mid - nbdevdn * std
+
 
 _talib_abstract.BBANDS = _bbands
 _talib.abstract = _talib_abstract
@@ -106,6 +113,7 @@ def strategy():
 
     # Mock Claude sentiment
     from SygnifStrategy import SygnifSentiment
+
     s.sentiment = SygnifSentiment()
     s.sentiment.api_key = ""  # disable real API calls
 
@@ -115,6 +123,7 @@ def strategy():
 @pytest.fixture
 def make_df():
     """Factory to create a mock DataFrame with required columns."""
+
     def _make(rows=200, **overrides):
         np.random.seed(42)
         close = 100 + np.cumsum(np.random.randn(rows) * 0.5)
@@ -123,52 +132,94 @@ def make_df():
         open_ = close + np.random.randn(rows) * 0.1
         volume = np.random.randint(1000, 100000, rows).astype(float)
 
-        df = pd.DataFrame({
-            "date": pd.date_range("2024-01-01", periods=rows, freq="5min"),
-            "open": open_,
-            "high": high,
-            "low": low,
-            "close": close,
-            "volume": volume,
-        })
+        df = pd.DataFrame(
+            {
+                "date": pd.date_range("2024-01-01", periods=rows, freq="5min"),
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+            }
+        )
 
         # Add commonly expected columns with defaults
         defaults = {
-            "RSI_3": 50.0, "RSI_4": 50.0, "RSI_14": 50.0, "RSI_20": 50.0,
-            "RSI_3_change_pct": 0.0, "RSI_14_change_pct": 0.0,
-            "EMA_3": close, "EMA_9": close, "EMA_12": close,
-            "EMA_16": close, "EMA_20": close, "EMA_26": close,
-            "EMA_50": close, "EMA_100": close, "EMA_120": close,
+            "RSI_3": 50.0,
+            "RSI_4": 50.0,
+            "RSI_14": 50.0,
+            "RSI_20": 50.0,
+            "RSI_3_change_pct": 0.0,
+            "RSI_14_change_pct": 0.0,
+            "EMA_3": close,
+            "EMA_9": close,
+            "EMA_12": close,
+            "EMA_16": close,
+            "EMA_20": close,
+            "EMA_26": close,
+            "EMA_50": close,
+            "EMA_100": close,
+            "EMA_120": close,
             "EMA_200": close,
-            "SMA_9": close, "SMA_16": close, "SMA_21": close,
-            "SMA_30": close, "SMA_200": close,
-            "BBL_20_2.0": close - 2, "BBM_20_2.0": close,
-            "BBU_20_2.0": close + 2, "BBB_20_2.0": 4.0, "BBP_20_2.0": 0.5,
-            "BBL_40_2.0": close - 3, "BBM_40_2.0": close,
-            "BBU_40_2.0": close + 3, "BBB_40_2.0": 6.0, "BBP_40_2.0": 0.5,
-            "MFI_14": 50.0, "CMF_20": 0.0,
-            "WILLR_14": -50.0, "WILLR_480": -50.0,
-            "AROONU_14": 50.0, "AROOND_14": 50.0,
-            "STOCHRSIk_14_14_3_3": 50.0, "STOCHRSId_14_14_3_3": 50.0,
-            "KST_10_15_20_30_10_10_10_15": 0.0, "KSTs_9": 0.0,
-            "CCI_20": 0.0, "ROC_2": 0.0, "ROC_9": 0.0,
-            "OBV": 0.0, "OBV_change_pct": 0.0,
-            "change_pct": 0.0, "close_delta": 0.0,
-            "close_max_6": close, "close_max_12": close, "close_max_48": close,
-            "close_min_6": close, "close_min_12": close, "close_min_48": close,
-            "volume_sma_25": 50000.0, "ATR_14": 1.0,
+            "SMA_9": close,
+            "SMA_16": close,
+            "SMA_21": close,
+            "SMA_30": close,
+            "SMA_200": close,
+            "BBL_20_2.0": close - 2,
+            "BBM_20_2.0": close,
+            "BBU_20_2.0": close + 2,
+            "BBB_20_2.0": 4.0,
+            "BBP_20_2.0": 0.5,
+            "BBL_40_2.0": close - 3,
+            "BBM_40_2.0": close,
+            "BBU_40_2.0": close + 3,
+            "BBB_40_2.0": 6.0,
+            "BBP_40_2.0": 0.5,
+            "MFI_14": 50.0,
+            "CMF_20": 0.0,
+            "WILLR_14": -50.0,
+            "WILLR_480": -50.0,
+            "AROONU_14": 50.0,
+            "AROOND_14": 50.0,
+            "STOCHRSIk_14_14_3_3": 50.0,
+            "STOCHRSId_14_14_3_3": 50.0,
+            "KST_10_15_20_30_10_10_10_15": 0.0,
+            "KSTs_9": 0.0,
+            "CCI_20": 0.0,
+            "ROC_2": 0.0,
+            "ROC_9": 0.0,
+            "OBV": 0.0,
+            "OBV_change_pct": 0.0,
+            "change_pct": 0.0,
+            "close_delta": 0.0,
+            "close_max_6": close,
+            "close_max_12": close,
+            "close_max_48": close,
+            "close_min_6": close,
+            "close_min_12": close,
+            "close_min_48": close,
+            "volume_sma_25": 50000.0,
+            "ATR_14": 1.0,
             "num_empty_288": 0.0,
             # Informative TF columns
-            "RSI_3_5m": 50.0, "RSI_14_5m": 50.0,
-            "RSI_3_15m": 50.0, "RSI_14_15m": 50.0,
-            "RSI_3_1h": 50.0, "RSI_14_1h": 50.0,
-            "RSI_3_4h": 50.0, "RSI_14_4h": 50.0,
+            "RSI_3_5m": 50.0,
+            "RSI_14_5m": 50.0,
+            "RSI_3_15m": 50.0,
+            "RSI_14_15m": 50.0,
+            "RSI_3_1h": 50.0,
+            "RSI_14_1h": 50.0,
+            "RSI_3_4h": 50.0,
+            "RSI_14_4h": 50.0,
             "RSI_14_1d": 50.0,
-            "ROC_9_4h": 0.0, "ROC_9_1d": 0.0,
-            "AROONU_14_15m": 50.0, "AROONU_14_4h": 50.0,
+            "ROC_9_4h": 0.0,
+            "ROC_9_1d": 0.0,
+            "AROONU_14_15m": 50.0,
+            "AROONU_14_4h": 50.0,
             "CMF_20_1h": 0.0,
             # BTC columns
-            "btc_RSI_3_1h": 50.0, "btc_RSI_14_1h": 50.0,
+            "btc_RSI_3_1h": 50.0,
+            "btc_RSI_14_1h": 50.0,
             "btc_RSI_14_4h": 50.0,
             # Failure swing
             "sf_resistance": high.max(),
@@ -177,8 +228,10 @@ def make_df():
             "sf_support_stable": True,
             "sf_volatility": 0.06,
             "sf_vol_filter": True,
-            "sf_long": False, "sf_short": False,
-            "sf_sl_pct": 0.03, "sf_tp_ema": close * 1.02,
+            "sf_long": False,
+            "sf_short": False,
+            "sf_sl_pct": 0.03,
+            "sf_tp_ema": close * 1.02,
             # Protections
             "protections_long_global": True,
             "protections_short_global": True,
@@ -199,6 +252,7 @@ def make_df():
 @pytest.fixture
 def mock_trade():
     """Factory for creating mock Trade objects."""
+
     def _make(**kwargs):
         defaults = {
             "pair": "BTC/USDT",

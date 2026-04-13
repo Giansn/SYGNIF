@@ -648,6 +648,11 @@ class _SygnifStrategyDefault(IStrategy):
     )
     premium_nonreserved_max = 10    # non-premium cap (used with max_open_trades=12)
 
+    # Subclasses (e.g. ``BTC_Strategy_0_1``) may set tags here so futures
+    # ``MIN_ACTIVE_VOLUME_PAIRS`` + per-pair volume gate do not block **all**
+    # entries on a **BTC-only** (or very short) whitelist.
+    _tags_bypass_volume_regime: frozenset = frozenset()
+
     # Claude layer
     sentiment = SygnifSentiment()
 
@@ -1260,11 +1265,29 @@ class _SygnifStrategyDefault(IStrategy):
                 | (df["ROC_9_1d"] > -40.0)
             )
 
-        # BTC crash protection
+        # BTC crash protection (1h micro-RSI vs 4h washout — tightened vs 2026-04 dumps)
         if "btc_RSI_3_1h" in df.columns:
             prot &= (
-                (df["btc_RSI_3_1h"] > 10.0)
-                | (df.get("btc_RSI_14_4h", 50.0) < 30.0)
+                (df["btc_RSI_3_1h"] > 18.0)
+                | (df.get("btc_RSI_14_4h", 50.0) < 32.0)
+            )
+
+        # BTC 1h dump + weak momentum: block fresh longs when the 1h candle is red, 1h RSI
+        # is soft, and 4h has not yet washed out (catches slow bleeds RSI_3 alone misses).
+        if "btc_change_pct_1h" in df.columns:
+            ch1 = pd.to_numeric(df["btc_change_pct_1h"], errors="coerce")
+            r1h = pd.to_numeric(
+                df.get("btc_RSI_14_1h", pd.Series(50.0, index=df.index)),
+                errors="coerce",
+            ).fillna(50.0)
+            r4h = pd.to_numeric(
+                df.get("btc_RSI_14_4h", pd.Series(50.0, index=df.index)),
+                errors="coerce",
+            ).fillna(50.0)
+            prot &= (
+                (ch1 > -0.85)
+                | (r1h > 41.0)
+                | (r4h < 35.0)
             )
 
         return prot
@@ -1902,6 +1925,7 @@ class _SygnifStrategyDefault(IStrategy):
         # NT Lesson 5: global volume regime gate (premium tags bypass)
         if (self.config.get("trading_mode", "") == "futures"
                 and tag not in self.PREMIUM_TAGS
+                and tag not in getattr(self, "_tags_bypass_volume_regime", frozenset())
                 and self._active_volume_pairs < self.MIN_ACTIVE_VOLUME_PAIRS):
             logger.info(
                 "Volume regime: only %d/%d pairs active, blocking %s on %s",
@@ -1910,7 +1934,10 @@ class _SygnifStrategyDefault(IStrategy):
             return False
 
         # Futures: minimum average volume gate (filter micro caps, swing bypasses)
-        if self.config.get("trading_mode", "") == "futures" and tag not in self._swing_tags and self.dp:
+        if (self.config.get("trading_mode", "") == "futures"
+                and tag not in self._swing_tags
+                and tag not in getattr(self, "_tags_bypass_volume_regime", frozenset())
+                and self.dp):
             df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(df) > 0 and not self._futures_volume_gate_passes(df):
                 last = df.iloc[-1]
@@ -1998,6 +2025,28 @@ class _SygnifStrategyDefault(IStrategy):
                 last, prev, current_profit, current_rate, trade,
                 filled_entries, leverage,
             )
+
+        # ==================================================================
+        # BTC risk-off — flatten small / flat longs when BTC 1h confirms a spill
+        # (uses merged BTC columns on alts; skipped when columns absent e.g. BTC pair)
+        # ==================================================================
+        try:
+            btc_ch = float(last.get("btc_change_pct_1h", float("nan")))
+            btc_r1 = float(last.get("btc_RSI_14_1h", 50.0))
+            btc_r4 = float(last.get("btc_RSI_14_4h", 50.0))
+        except (TypeError, ValueError):
+            btc_ch = float("nan")
+            btc_r1 = 50.0
+            btc_r4 = 50.0
+        if not pd.isna(btc_ch) and "btc_change_pct_1h" in last.index:
+            profit_cap = 0.035 if leverage <= 1.0 else min(0.14, 0.035 * leverage)
+            if (
+                btc_ch <= -1.15
+                and btc_r1 < 37.0
+                and btc_r4 < 46.0
+                and current_profit < profit_cap
+            ):
+                return "exit_btc_risk_off"
 
         # ==================================================================
         # FAILURE SWING EXITS (tag-based routing)

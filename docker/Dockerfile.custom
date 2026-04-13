@@ -4,4 +4,5 @@ RUN pip install --no-cache-dir feedparser pandas_ta
 
 COPY user_data/status_patch.py /tmp/status_patch.py
 COPY user_data/notification_patch.py /tmp/notification_patch.py
-RUN python3 /tmp/status_patch.py && python3 /tmp/notification_patch.py
+COPY user_data/bybit_ccxt_demo_patch.py /tmp/bybit_ccxt_demo_patch.py
+RUN python3 /tmp/status_patch.py && python3 /tmp/notification_patch.py && python3 /tmp/bybit_ccxt_demo_patch.py

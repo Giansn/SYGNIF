@@ -3,7 +3,7 @@
 **Scope:** optional **second** Freqtrade container — **BTC spot only**, same Sygnif stack (strategy, sentiment, notifications), lower RAM footprint than multi-pair spot.  
 **Not implemented** in root `docker-compose.yml` until you merge this design; copy fragments from §6.
 
-**btc_Trader_Docker:** dediziertes Image **`docker/Dockerfile.btc_trader`** (= `Dockerfile.custom` + **`yfinance`** im Container, kein PEP 668/`--break-system-packages` auf dem Host). Build/Rollout: **`letscrash/BTC_TRADER_DOCKER.md`**.
+**btc_Trader_Docker:** dediziertes Image **`docker/Dockerfile.btc_trader`** (= `Dockerfile.custom` + **`yfinance`** + **`pybit`** im Container, kein PEP 668/`--break-system-packages` auf dem Host). Build/Rollout: **`letscrash/BTC_TRADER_DOCKER.md`**.
 
 **Naming (Cursor):**
 
@@ -40,6 +40,15 @@ flowchart LR
 
 - **BTC trader** = Freqtrade only (API + strategy + exchange). **No** embedded briefing server.
 - **Sentiment / MLP / optional prediction files** = **finance-agent** only (matches inherit: `finance_agent/bot.py` is the HTTP surface).
+
+### 2.1 Nautilus Bybit spot feed (shared `finance_agent/btc_specialist/data`)
+
+Merge **`docker-compose.btc-nautilus-research.yml`** (see **`letscrash/BTC_TRADER_DOCKER.md`** §3b) runs **`nautilus-research`** with a **read-write** mount of **`./finance_agent/btc_specialist/data`** → **`/lab/btc_specialist_data`**. The script **`research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py`** uses the Nautilus **`adapters.bybit`** HTTP client (**not CCXT**), **spot `BTC/USDT` only**, and writes into **that same host directory**:
+
+- **`btc_1h_ohlcv.json`**, **`btc_daily_90d.json`** — inflow for **`training_pipeline/channel_training.py`** and **`prediction_agent/btc_predict_runner.py`** (**`/ruleprediction-agent`** scope).
+- **`btc_1h_ohlcv_nautilus_bybit.json`**, **`nautilus_spot_btc_market_bundle.json`** — regime / diagnostics / future features.
+
+**`freqtrade-btc-spot`** in the same merge **does not** require this RW data mount for execution: it still relies on **`./user_data`** + **`SYGNIF_SENTIMENT_HTTP_URL`**. Treat the Nautilus feed as a **parallel research/training inflow** into the shared **btc_specialist** data lake, not a second Freqtrade dependency. When you change compose paths or filenames, update **`.cursor/rules/ruleprediction-agent.mdc`** and **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** so the data-flow narrative stays true.
 
 ---
 

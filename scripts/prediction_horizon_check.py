@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -244,6 +245,23 @@ def cmd_save(args: argparse.Namespace) -> int:
     latest.write_text(raw + "\n", encoding="utf-8")
     print(f"Saved {path}")
     print(f"Latest -> {latest}")
+    if os.environ.get("RULE_TAG_JOURNAL", "").lower() in ("1", "true", "yes", "on"):
+        try:
+            pa = _repo_root() / "prediction_agent"
+            if str(pa) not in sys.path:
+                sys.path.insert(0, str(pa))
+            from rule_tag_journal import append_horizon_save_event
+
+            tag = (os.environ.get("RULE_TAG_JOURNAL_TAG") or "").strip()
+            append_horizon_save_event(
+                symbol=sym,
+                snapshot_path=latest,
+                note=args.note or "",
+                rule_tag=tag,
+            )
+            print("rule_tag_journal: horizon_save appended (RULE_TAG_JOURNAL=1).")
+        except Exception as exc:  # noqa: BLE001
+            print(f"rule_tag_journal: skipped ({exc})", file=sys.stderr)
     print(f"interval={interval} limit={limit}  levels S={lv['support']} R={lv['resistance']}")
     print(f"Suggested checks (UTC): 24h @ {snap['horizons']['check_24h_utc']}")
     print(f"                        48h @ {snap['horizons']['check_48h_utc']}")
