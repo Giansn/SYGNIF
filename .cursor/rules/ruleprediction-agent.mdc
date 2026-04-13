@@ -1,6 +1,6 @@
 ---
 description: Prediction + briefing + btc_Trader_Docker data flows; consult agents; continuous evidence loop (canonical; was ruler-prediction-agent)
-globs: prediction_agent/**,scripts/prediction_horizon_check.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,docker-compose.yml,docker-compose.btc-nautilus-research.yml,training_pipeline/channel_training.py,research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py,research/nautilus_lab/bybit_nautilus_btc_ohlcv_sink.py,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md,letscrash/BTC_TRADER_DOCKER.md,letscrash/BTC_DUMP_PROTECTION_DESIGN.md,letscrash/BTC_Strategy_0.1.md,letscrash/btc_strategy_0_1_rule_registry.json
+globs: prediction_agent/**,scripts/prediction_horizon_check.py,scripts/btc_24h_movement_prediction.py,finance_agent/http_main.py,.cursor/agents/prediction-agent.md,docker/Dockerfile.btc_trader,docker-compose.yml,docker-compose.btc-nautilus-research.yml,training_pipeline/channel_training.py,research/nautilus_lab/bybit_nautilus_spot_btc_training_feed.py,research/nautilus_lab/bybit_nautilus_btc_ohlcv_sink.py,letscrash/RULE_AND_DATA_FLOW_LOOP.md,letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md,letscrash/BTC_TRADER_DOCKER.md,letscrash/BTC_DUMP_PROTECTION_DESIGN.md,letscrash/BTC_Strategy_0.1.md,letscrash/btc_strategy_0_1_rule_registry.json
 alwaysApply: false
 ---
 

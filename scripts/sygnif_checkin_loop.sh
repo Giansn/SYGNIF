@@ -100,5 +100,9 @@ while true; do
     "$PY" "$HC" check --symbol "$SYM"
   } >>"$LOG" 2>&1 || true
 
+  if [[ "${CHECKIN_RUN_BTC_24H_PREDICT:-1}" == 1 ]]; then
+    "$PY" "$REPO_ROOT/scripts/btc_24h_movement_prediction.py" --quiet >>"$LOG" 2>&1 || true
+  fi
+
   sleep "$(pick_sleep)"
 done
