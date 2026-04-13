@@ -1,5 +1,5 @@
 {
-    "_comment": "PAPER / dry-run default — BTC_Strategy_0_1 + Bybit USDT futures, BTC/USDT:USDT only. 10k wallet; bucket/slots per letscrash/BTC_Strategy_0.1.md §7 + btc_strategy_0_1_rule_registry.json. Docker: compose service freqtrade-btc-0-1 (profile btc-0-1). R03 Pine ref: prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine (MPL-2.0).",
+    "_comment": "PAPER / dry-run default — BTC_Strategy_0_1 + Bybit USDT futures, BTC/USDT:USDT only. 10k wallet; bucket/slots per letscrash/BTC_Strategy_0.1.md §7 + btc_strategy_0_1_rule_registry.json. Docker: compose service freqtrade-btc-0-1 (profile btc-0-1). R03 Pine ref: prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine (MPL-2.0). tradable_balance_ratio=0.99 = Freqtrade default (no separate 'automated' type): share of wallet the bot may allocate; pairs with stake_amount unlimited.",
     "_ruleprediction": "Do not flip dry_run false from automation. Live: owner sets keys, reviews L3, runs tests. Journal: RULE_TAG_JOURNAL=1 on horizon_save optional.",
     "strategy": "BTC_Strategy_0_1",
     "can_short": true,
@@ -8,7 +8,7 @@
     "max_open_trades": 100,
     "stake_currency": "USDT",
     "stake_amount": 400,
-    "tradable_balance_ratio": 0.95,
+    "tradable_balance_ratio": 0.99,
     "fiat_display_currency": "USD",
     "dry_run": true,
     "dry_run_wallet": 10000,
