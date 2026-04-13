@@ -1,0 +1,17 @@
+[Unit]
+Description=BTC 0.1 finetune tick (R01/R02 report + R01–R03 monitor journal)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+Environment=HOME=/home/ubuntu
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+Environment=RULE_TAG_JOURNAL_MONITOR=YES
+ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/scripts/btc01_finetune_tick.py
+
+[Install]
+WantedBy=multi-user.target

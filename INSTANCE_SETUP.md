@@ -177,6 +177,24 @@ sudo systemctl enable --now cursor-agent-worker
 
 Verify: `curl -fsS http://127.0.0.1:8093/healthz`
 
+### BTC 0.1 persistent finetune tick (optional, complements Cursor worker)
+
+The **Cursor worker** (`cursor-agent-worker`) is for **Cloud-side** tasks (edits, reviews). It does **not** run a schedule by itself. For **continuous R01/R02/R03 evidence** on disk (report + monitor + optional `rule_tag_journal.csv` rows), enable this **systemd timer**:
+
+- **Scripts:** `scripts/btc01_finetune_tick.py` → `btc01_r01_r02_report.py` + `monitor_r01_r03_gate.py`
+- **Default cadence:** every **5 minutes** after boot (`OnUnitInactiveSec=5min` — edit the installed timer to slow down)
+- **Log:** `~/.local/share/sygnif/btc01_finetune_tick.log`
+- **Journal:** set `RULE_TAG_JOURNAL_MONITOR=YES` (already default in the unit) → `prediction_agent/rule_tag_journal.csv`
+
+```bash
+sudo cp systemd/sygnif-btc01-finetune.service systemd/sygnif-btc01-finetune.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sygnif-btc01-finetune.timer
+systemctl list-timers sygnif-btc01-finetune.timer
+```
+
+One-shot test: `sudo systemctl start sygnif-btc01-finetune.service` then `tail -5 ~/.local/share/sygnif/btc01_finetune_tick.log`
+
 ### Finance agent (optional)
 
 Telegram research bot + briefing HTTP for overseer (`~/finance_agent`, separate clone). Expects Cursor worker healthy first (`After=` / `ExecStartPre` in unit).
@@ -262,6 +280,7 @@ Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /he
 | `sygnif-reverse-tunnel` | systemd (optional) | — (outbound SSH) | yes |
 | `sygnif-notify` | systemd | — | yes |
 | `cursor-agent-worker` | systemd (optional) | 8093 (**localhost**, management) | yes |
+| `sygnif-btc01-finetune.timer` | systemd (optional) | — (runs `btc01_finetune_tick.py` on interval) | yes |
 | `finance-agent` | systemd (optional) | 8091 (default **localhost**, briefing HTTP) | yes |
 
 ## Automation as an instance-wide network (stable ops)

@@ -12,6 +12,11 @@ Der **Sygnif Agent** läuft über **Cursor Cloud Agent** + den **Worker** auf di
 Health Worker: `http://127.0.0.1:8093/healthz`  
 Logs: `~/.local/share/cursor-agent/worker.log`
 
+## Dauer-Feintuning (Datenpfad vs. Code)
+
+- **Host-Timer** `sygnif-btc01-finetune.timer` (siehe `INSTANCE_SETUP.md`): schreibt regelmäßig Report + Monitor-Ergebnisse und optional Journal-Zeilen — **ohne** Cursor-API-Kosten, rein read-only auf Trades/JSON.
+- **Cursor Cloud Agent + Worker**: wenn du Registry/Strategy anpassen willst, Task im Agent auslösen; der Worker arbeitet im gleichen Repo (`~/SYGNIF`).
+
 ## `.env` (für Cloud-LLM im Telegram-Bot und einheitliches Verhalten)
 
 | Variable | Pflicht für Cloud-LLM |
