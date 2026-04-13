@@ -41,7 +41,7 @@ Two config files must exist in `user_data/`:
 | File | Purpose | Template |
 |------|---------|----------|
 | `user_data/config.json` | Spot config | `config_claude_bot.example.json` |
-| `user_data/config_futures.json` | Futures config | Already in repo |
+| `user_data/config_futures.json` | Futures config (often **gitignored** on instances with real keys) | Tracked template: `config_futures` on `main` **without** secrets; **Bybit demo + `BTC_Strategy_0_1`:** copy from `user_data/config_btc_strategy_0_1_bybit_demo.example.json` (see **§4b** below) |
 
 ```bash
 cp config_claude_bot.example.json user_data/config.json
@@ -59,6 +59,20 @@ Edit both configs and set:
 |-----|----------|-------------|
 | Spot | `@sygnif_bot` | `8753646984:...` |
 | Futures | `@sygnifuture_bot` | `8016276540:...` |
+
+### 4b. BTC_Strategy_0_1 + Bybit demo bridge (EC2)
+
+**Full reference:** [letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md](letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md) (CCXT options, **`bybit_ccxt_demo_patch.py`**, Docker bake vs `freqtrade-futures` entrypoint, retCode **10003** / **10032**).
+
+**On this host you typically:**
+
+1. Put **Bybit Demo Trading** API keys in **`.env`** as `BYBIT_DEMO_API_KEY` / `BYBIT_DEMO_API_SECRET` (see `.env.example`).
+2. Build **`user_data/config_futures.json`** from **`user_data/config_btc_strategy_0_1_bybit_demo.example.json`**: set `exchange.key` / `exchange.secret` (or inject via your own merge script). Keep **`ccxt_config.options`**: `defaultType` **swap**, `defaultSettle` **USDT**, **`enableDemoTrading`: true**, **`hostname`: `bybit.com`** — do **not** point linear demo at legacy hard-coded `api-demo` URLs (see bridge doc).
+3. **Rebuild** traders after changing the patch: `docker compose --profile main-traders build freqtrade-futures` (or full `up -d --build`). `Dockerfile.custom` runs `bybit_ccxt_demo_patch.py` at **image** build; the **`freqtrade-futures`** service also runs it at **container start** before `freqtrade trade`.
+4. Start futures: `docker compose --profile main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without main stack: `docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1` → uses **`user_data/config_btc_strategy_0_1_paper_market.json`** (`dry_run: true`).
+5. **Never commit** a `config_futures.json` that contains real Telegram tokens or exchange secrets — use examples + `.env` only.
+
+**Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
 
 ## 5. Build and Start Containers
 
@@ -251,8 +265,11 @@ Treat the **EC2 host** as one **control plane**: processes are **nodes** that ta
 | What | Path |
 |------|------|
 | Strategy | `user_data/strategies/SygnifStrategy.py` |
+| BTC 0.1 strategy | `user_data/strategies/BTC_Strategy_0_1.py`, `btc_strategy_0_1_engine.py` |
+| Bybit demo bridge doc | `letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` |
 | Spot config | `user_data/config.json` (gitignored) |
 | Futures config | `user_data/config_futures.json` |
+| BTC 0.1 futures demo template | `user_data/config_btc_strategy_0_1_bybit_demo.example.json` |
 | Spot DB | `user_data/tradesv3.sqlite` (gitignored) |
 | Futures DB | `user_data/tradesv3-futures.sqlite` (gitignored) |
 | Logs | `user_data/logs/` (gitignored) |
