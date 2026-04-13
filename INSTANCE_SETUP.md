@@ -358,6 +358,26 @@ sudo systemctl start btc-predict-runner.service
 journalctl -u btc-predict-runner.service -n 40 --no-pager
 ```
 
+## Optional: BTC training channel + R01–R03 monitor
+
+End-to-end **training flow** (runner → `channel_training` → what-if monitor for **BTC-0.1-R01–R03** gates):
+
+```bash
+cd ~/SYGNIF
+chmod +x scripts/run_training_flow.sh
+./scripts/run_training_flow.sh
+```
+
+Monitor only (read-only JSON): `PYTHONPATH=. python3 scripts/monitor_r01_r03_gate.py --json`
+
+- **Formulas / thresholds:** [docs/btc_expertise_proven_formulas.md](docs/btc_expertise_proven_formulas.md)
+- **Journal one line per monitor run:** `RULE_TAG_JOURNAL_MONITOR=YES ./scripts/run_training_flow.sh`
+- **Fail if channel JSON stale:** `… monitor_r01_r03_gate.py --strict-stale --max-age-hours 48` (exit 2)
+
+Example cron (hourly, adjust user/path):
+
+`17 * * * * cd /home/ubuntu/SYGNIF && ./scripts/run_training_flow.sh >>/tmp/btc_training_flow.log 2>&1`
+
 ## Optional: `network-dev-loop` (separate project)
 
 If `network-dev-loop.service` / `network-dev-loop.timer` are installed (e.g. under `~/network-dev-agents`), a **Failed to start** in `journalctl` is often **expected** when the script skips work: `run-dev-loop.sh` exits non-zero if **load per CPU** \> `--max-load-per-cpu` (default `1.50`) or **available RAM** \< `--min-mem-available-mb` (default `512`). Another cause is a stale lock: `/tmp/network-dev-loop.lock` when a previous run did not release.

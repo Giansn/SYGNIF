@@ -58,6 +58,12 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         """BTC-only portfolio: skip movers/new_pairs injection (``StaticPairList`` is source of truth)."""
         if self.config.get("trading_mode", "") == "futures":
             self.can_short = True
+        # Parent sets these in ``SygnifStrategy.bot_start``; we do not call super (no movers refresh).
+        self._nautilus_signal_mtime = -1.0
+        self._nautilus_signal_doc = None
+        # Never use shared movers / new_pairs files (BTC-only bot).
+        self._movers_pairs = []
+        self._new_pairs = []
         self._load_doom_cooldown()
         self._refresh_strategy_adaptation(force=True)
         self._risk_manager = None
@@ -76,6 +82,27 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                 "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
             )
             self._event_log = EventLog(instance=instance)
+
+    def _refresh_movers(self) -> None:
+        """No-op: do not load ``movers_pairlist.json`` (parent would pollute informative pairs)."""
+        self._movers_pairs = []
+
+    def _refresh_new_pairs(self) -> None:
+        """No-op: do not load ``new_pairs.json``."""
+        self._new_pairs = []
+
+    def informative_pairs(self):
+        """BTC + current whitelist only (no movers / new_pairs)."""
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        btc_pair = "BTC/USDT:USDT" if is_futures else "BTC/USDT"
+        pairs = []
+        for tf in self.info_timeframes:
+            pairs.append((btc_pair, tf))
+        if self.dp:
+            for pair in self.dp.current_whitelist():
+                for tf in self.info_timeframes:
+                    pairs.append((pair, tf))
+        return list(dict.fromkeys(pairs))
 
     def bot_loop_start(self, current_time=None, **kwargs) -> None:
         """Keep ``StaticPairList``; refresh adaptation + futures volume regime count only."""
@@ -110,6 +137,11 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
             last_i = len(df) - 1
             if str(df.iloc[last_i].get("enter_tag") or "") == "btc_trend_long":
                 df.iloc[last_i, df.columns.get_loc("enter_tag")] = b01.TAG_R02
+            # R02 finetune: registry ``tuning.r02_regime`` (defaults = Sygnif btc_trend); strip if stricter gate fails
+            if str(df.iloc[last_i].get("enter_tag") or "") == b01.TAG_R02:
+                if not b01.btc01_r02_trend_long_row(df.iloc[last_i]):
+                    df.iloc[last_i, df.columns.get_loc("enter_long")] = 0
+                    df.iloc[last_i, df.columns.get_loc("enter_tag")] = ""
 
         if not btc_trend_regime.is_btc_pair(pair) or len(df) < 6:
             return df
@@ -292,7 +324,7 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                 last = df.iloc[-1]
                 if tag == b01.TAG_R01 and b01.r01_training_runner_bearish():
                     return "exit_btc01_r01_stack_guard"
-                if tag == b01.TAG_R02 and not btc_trend_regime.btc_trend_long_row(last):
+                if tag == b01.TAG_R02 and not b01.btc01_r02_trend_long_row(last):
                     return "exit_btc01_r02_regime_break"
                 if tag == b01.TAG_R03:
                     rsi14 = float(last.get("RSI_14", 50) or 50)

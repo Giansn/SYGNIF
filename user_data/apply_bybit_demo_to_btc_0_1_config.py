@@ -49,6 +49,11 @@ def main() -> int:
     )
     cfg = json.loads(base.read_text(encoding="utf-8"))
     ex = cfg.setdefault("exchange", {})
+    # BTC 0.1 bot: always **single-pair** USDT linear perp (never movers / multi-coin).
+    is_fut = cfg.get("trading_mode", "") == "futures"
+    ex["pair_whitelist"] = ["BTC/USDT:USDT"] if is_fut else ["BTC/USDT"]
+    ex.setdefault("pair_blacklist", [])
+    cfg["pairlists"] = [{"method": "StaticPairList"}]
     if ex.get("name", "").lower() != "bybit":
         print("apply_bybit_demo_btc_0_1: exchange is not bybit, skipping demo merge", file=sys.stderr)
     else:

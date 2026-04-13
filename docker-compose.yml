@@ -7,10 +7,12 @@
 #
 # **Default stack (no profile):** `finance-agent` + `notification-handler` only.
 # **Main Sygnif spot/futures + overseer:** `docker compose --profile main-traders up -d`
-# **BTC spot trader + Nautilus sink/sidecar:** `docker compose --profile btc-nautilus up -d` (same file — no second compose merge).
+# **BTC dock (spot + Nautilus + BTC linear demo):** `docker compose --profile btc-nautilus up -d` — includes
+# `freqtrade-btc-spot`, `nautilus-research`, and **`freqtrade-btc-0-1`** (Bybit demo USDT perp BTC via `BTC_Strategy_0_1`).
+# Add profile **`btc-grid-mm`** (or `COMPOSE_PROFILES=btc-nautilus,btc-grid-mm`) for `nautilus-grid-btc01` GridMarketMaker.
 # **BTCUSDT linear grid (Nautilus GridMarketMaker, demo):** `docker compose --profile btc-grid-mm up -d nautilus-grid-btc01`
 # or set `COMPOSE_PROFILES=btc-grid-mm` in `.env` so `docker compose up -d` includes it after reboot.
-# (needs `NAUTILUS_GRID_MM_DEMO_ACK=YES` + `BYBIT_DEMO_*`; avoid same keys as live `freqtrade-btc-0-1` unless isolated).
+# (needs `NAUTILUS_GRID_MM_DEMO_ACK=YES` + demo keys; prefer `BYBIT_DEMO_GRID_*` vs `freqtrade-btc-0-1`).
 #
 # **Health:** `healthcheck` on finance-agent, notification-handler, Freqtrade*, trade-overseer,
 # nautilus-research; `depends_on: service_healthy` chains traders → notification + finance-agent,
@@ -165,11 +167,11 @@ services:
       - "python3 /freqtrade/user_data/bybit_ccxt_demo_patch.py && exec /home/ftuser/.local/bin/freqtrade trade --strategy BTC_Strategy_0_1 --logfile /freqtrade/user_data/logs/freqtrade-futures.log --db-url sqlite:////freqtrade/user_data/tradesv3-futures-btc01-demo.sqlite --config /freqtrade/user_data/config_futures.json"
 
   # BTC_Strategy_0_1 — Bybit **demo** USDT perp BTC only (runtime config + BYBIT_DEMO_* from env).
-  # Start: docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1
+  # Profiles: `btc-0-1` (standalone) or `btc-nautilus` (full BTC dock with spot + Nautilus + this futures bot).
   # API: host 127.0.0.1:8185 → container :8085
   freqtrade-btc-0-1:
     <<: *sygnif-env-files
-    profiles: ["btc-0-1"]
+    profiles: ["btc-0-1", "btc-nautilus"]
     build:
       context: .
       dockerfile: "./docker/Dockerfile.custom"
@@ -182,12 +184,15 @@ services:
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
+      # Same Nautilus JSON feed as `freqtrade-btc-spot` (optional columns in strategy / parity with BTC dock).
+      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
     ports:
       - "127.0.0.1:8185:8085"
     environment:
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
       # btc_trend maps btc_trend_long→R02; full R01 governance + R03 sleeve still run (no early return).
       SYGNIF_PROFILE: btc_trend
+      NAUTILUS_BTC_DATA_DIR: "/freqtrade/user_data/btc_specialist_data"
     depends_on:
       finance-agent:
         condition: service_healthy
@@ -296,8 +301,9 @@ services:
 
   # Nautilus vendored **GridMarketMaker** on Bybit **demo**, **BTCUSDT linear** (same instrument class as
   # ``freqtrade-btc-0-1`` / ``BTC_Strategy_0_1``). This is **not** Freqtrade — it is a separate ``TradingNode``.
-  # **Conflict risk:** same ``BYBIT_DEMO_*`` keys as the Freqtrade bot → two systems placing orders; use a
-  # **separate** demo subaccount for grid, or stop ``freqtrade-btc-0-1`` while testing. Requires
+  # **Isolation:** set ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (second Bybit demo API key)
+  # so grid MM does not share wallet/position with ``freqtrade-btc-0-1``. If unset, grid falls back to
+  # ``BYBIT_DEMO_*`` (same account as 0.1 — not independent). Requires
   # ``NAUTILUS_GRID_MM_DEMO_ACK=YES`` in ``.env``. Survives crashes + host reboot when compose is brought up
   # with profile ``btc-grid-mm`` (e.g. ``COMPOSE_PROFILES=btc-grid-mm`` in ``.env``). Cancel demo opens:
   # ``PYTHONPATH=. python3 scripts/bybit_demo_cancel_open_orders.py`` (stop this container first if needed).
@@ -322,8 +328,10 @@ services:
       - "./prediction_agent:/lab/prediction_agent:ro"
     environment:
       FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
-      # Grid MM: ``run_bybit_demo_grid_market_maker.py`` requires ACK + ``BYBIT_DEMO_*`` together; keys load via ``*sygnif-env-files``.
+      # Grid MM: ACK + demo keys (prefer ``BYBIT_DEMO_GRID_*`` for isolation from ``freqtrade-btc-0-1``).
       NAUTILUS_GRID_MM_DEMO_ACK: "${NAUTILUS_GRID_MM_DEMO_ACK:-}"
+      BYBIT_DEMO_GRID_API_KEY: "${BYBIT_DEMO_GRID_API_KEY:-}"
+      BYBIT_DEMO_GRID_API_SECRET: "${BYBIT_DEMO_GRID_API_SECRET:-}"
       NAUTILUS_BYBIT_DEMO: "true"
     depends_on:
       finance-agent:

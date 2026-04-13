@@ -91,8 +91,13 @@ def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         return {"retCode": -1, "retMsg": r.text[:500], "httpStatus": r.status_code}
 
 
-def _get(path: str, params: Dict[str, str]) -> Dict[str, Any]:
-    key, secret, base = _credentials()
+def _get_with_creds(
+    path: str,
+    params: Dict[str, str],
+    key: str,
+    secret: str,
+    base: str,
+) -> Dict[str, Any]:
     recv = _recv_window()
     ts = str(int(time.time() * 1000))
     query_string = urllib.parse.urlencode(sorted(params.items()))
@@ -109,6 +114,35 @@ def _get(path: str, params: Dict[str, str]) -> Dict[str, Any]:
         return r.json()
     except Exception:
         return {"retCode": -1, "retMsg": r.text[:500], "httpStatus": r.status_code}
+
+
+def _get(path: str, params: Dict[str, str]) -> Dict[str, Any]:
+    key, secret, base = _credentials()
+    return _get_with_creds(path, params, key, secret, base)
+
+
+def get_open_orders_realtime_linear(
+    symbol: str = "BTCUSDT",
+    *,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    GET /v5/order/realtime — open working orders for USDT linear symbol.
+
+    If ``api_key`` / ``api_secret`` are set, uses **Bybit demo** host (``api-demo``) with those keys
+    (e.g. ``BYBIT_DEMO_GRID_*`` for Nautilus grid isolation). Otherwise uses ``_credentials()``.
+    """
+    sym = (symbol or "").replace("/", "").upper().strip() or "BTCUSDT"
+    if api_key and api_secret:
+        return _get_with_creds(
+            "/v5/order/realtime",
+            {"category": "linear", "symbol": sym},
+            api_key.strip(),
+            api_secret.strip(),
+            "https://api-demo.bybit.com",
+        )
+    return _get("/v5/order/realtime", {"category": "linear", "symbol": sym})
 
 
 def switch_position_mode(symbol: str, mode: int) -> Dict[str, Any]:

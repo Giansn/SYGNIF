@@ -4,10 +4,11 @@ Run vendored ``GridMarketMaker`` on **Bybit demo** via Nautilus live adapters (`
 
 Submits **post-only** limit grid orders. Requires demo keys + explicit ACK.
 
-Env (set **together** — same ``BYBIT_DEMO_*`` as other Sygnif demo tooling):
+Env:
 
-- ``BYBIT_DEMO_API_KEY`` / ``BYBIT_DEMO_API_SECRET``
 - ``NAUTILUS_GRID_MM_DEMO_ACK=YES``
+- **Isolated vs** ``freqtrade-btc-0-1``: ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (recommended).
+- Or shared demo account: ``BYBIT_DEMO_API_KEY`` / ``BYBIT_DEMO_API_SECRET`` only (grid and 0.1 then share one wallet).
 
 Bybit **hedge (default)** for USDT linear / inverse: ``BybitExecClientConfig.position_mode`` is set to
 ``BothSides`` (mode 3) for this symbol at client start (Nautilus calls Bybit ``switch-mode``).
@@ -25,27 +26,35 @@ if str(_LAB) not in sys.path:
     sys.path.insert(0, str(_LAB))
 
 
-def _require_demo_grid_env() -> None:
-    """ACK + Bybit **demo** API keys must be set together (same names as Freqtrade demo / overseer)."""
+def _require_demo_grid_credentials() -> tuple[str, str, bool]:
+    """ACK + demo keys. Prefer ``BYBIT_DEMO_GRID_*`` so grid does not share orders/position with ``freqtrade-btc-0-1``."""
     ack = os.environ.get("NAUTILUS_GRID_MM_DEMO_ACK", "").strip().upper()
-    k = os.environ.get("BYBIT_DEMO_API_KEY", "").strip()
-    s = os.environ.get("BYBIT_DEMO_API_SECRET", "").strip()
+    gk = os.environ.get("BYBIT_DEMO_GRID_API_KEY", "").strip()
+    gs = os.environ.get("BYBIT_DEMO_GRID_API_SECRET", "").strip()
+    dk = os.environ.get("BYBIT_DEMO_API_KEY", "").strip()
+    ds = os.environ.get("BYBIT_DEMO_API_SECRET", "").strip()
     missing: list[str] = []
     if ack != "YES":
         missing.append("NAUTILUS_GRID_MM_DEMO_ACK=YES (confirms demo post-only grid)")
-    if not k:
-        missing.append("BYBIT_DEMO_API_KEY")
-    if not s:
-        missing.append("BYBIT_DEMO_API_SECRET")
+    if gk and gs:
+        pass
+    elif dk and ds:
+        pass
+    else:
+        missing.append(
+            "BYBIT_DEMO_GRID_API_KEY + BYBIT_DEMO_GRID_API_SECRET (isolated grid) "
+            "or BYBIT_DEMO_API_KEY + BYBIT_DEMO_API_SECRET (shared demo account)"
+        )
     if missing:
         print(
-            "Refusing to run: Nautilus GridMarketMaker on Bybit **demo** needs all of the following "
-            "in the process environment (e.g. SYGNIF `.env` and/or `SYGNIF_SECRETS_ENV_FILE`, same "
-            "demo keys as `freqtrade-btc-0-1` if you use that account):\n  "
+            "Refusing to run: Nautilus GridMarketMaker on Bybit **demo** needs:\n  "
             + "\n  ".join(missing),
             file=sys.stderr,
         )
         raise SystemExit(2)
+    if gk and gs:
+        return gk, gs, True
+    return dk, ds, False
 
 
 def _product_types_for_instrument(s: str) -> tuple:
@@ -81,7 +90,22 @@ def _bybit_position_mode_for_symbol(
 
 
 def main() -> int:
-    _require_demo_grid_env()
+    grid_key, grid_secret, isolated_account = _require_demo_grid_credentials()
+    os.environ["BYBIT_DEMO_API_KEY"] = grid_key
+    os.environ["BYBIT_DEMO_API_SECRET"] = grid_secret
+    if not isolated_account:
+        print(
+            "[grid-mm-live] WARNING: Grid uses the same BYBIT_DEMO_* as freqtrade-btc-0-1 — one demo account; "
+            "orders and net position interact. For a fair A/B vs BTC_Strategy_0_1, set "
+            "BYBIT_DEMO_GRID_API_KEY and BYBIT_DEMO_GRID_API_SECRET (second Bybit demo API key).",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print(
+            "[grid-mm-live] Using BYBIT_DEMO_GRID_* (isolated from freqtrade-btc-0-1 default demo keys).",
+            flush=True,
+        )
 
     ap = argparse.ArgumentParser(description="Bybit demo + GridMarketMaker (post-only grid).")
     ap.add_argument("--instrument", default="ETHUSDT-LINEAR.BYBIT")

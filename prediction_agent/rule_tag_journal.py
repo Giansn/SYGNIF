@@ -8,6 +8,7 @@ Override: RULE_TAG_JOURNAL_PATH
 Events:
   - channel_training: each successful training_channel_output.json write
   - horizon_save: optional when prediction_horizon_check.py save + RULE_TAG_JOURNAL=1
+  - r01_r03_monitor: optional when ``scripts/monitor_r01_r03_gate.py`` runs with RULE_TAG_JOURNAL_MONITOR=YES
 """
 from __future__ import annotations
 
@@ -76,6 +77,11 @@ def append_channel_training_event(
         "r02": (payload.get("ruleprediction_briefing") or {}).get("r02"),
     }
     return append_event("channel_training", rule_tag="", detail=detail)
+
+
+def append_r01_r03_monitor_event(detail: dict) -> Path | None:
+    """Snapshot from ``scripts/monitor_r01_r03_gate.py`` (R01–R03 what-if gates)."""
+    return append_event("r01_r03_monitor", rule_tag="", detail=detail)
 
 
 def append_horizon_save_event(

@@ -9,6 +9,19 @@
     "tag_key": "rule_tag",
     "allowed_tags": ["BTC-0.1-R01", "BTC-0.1-R02", "BTC-0.1-R03"]
   },
+  "tuning": {
+    "_dataflow": "Nautilus → finance_agent/btc_specialist/data → channel_training → prediction_agent/training_channel_output.json (R01). SYGNIF_PROFILE=btc_trend + Sygnif informative merge → RSI_14_1h/4h, EMA_200_1h, ADX_14 on 5m (R02). Edit thresholds here; git-tracked. See letscrash/RULE_AND_DATA_FLOW_LOOP.md §3.",
+    "r01_governance": {
+      "p_down_min_pct": 90.0,
+      "runner_consensus_equals": "BEARISH",
+      "notes": "When both hold, r01_training_runner_bearish() blocks R01-style long timing and feeds stack-guard exits (see btc_strategy_0_1_engine.py)."
+    },
+    "r02_regime": {
+      "rsi_bull_min": 50.0,
+      "adx_min": 25.0,
+      "notes": "HTF bull gate for BTC-0.1-R02 only (entry overlay after Sygnif btc_trend_long + exit regime_break). Defaults match btc_trend_regime.py; raise to tighten."
+    }
+  },
   "rules": [
     {
       "id": "BTC-0.1-R01",

@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,19 @@ def registry_path() -> Path:
     return _repo_root() / "letscrash" / "btc_strategy_0_1_rule_registry.json"
 
 
+def _registry_raw() -> dict[str, Any]:
+    try:
+        return json.loads(registry_path().read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.debug("btc01 registry read: %s", e)
+        return {}
+
+
+def tuning_config() -> dict[str, Any]:
+    """Live-tunable R01/R02 section (``tuning``) in ``btc_strategy_0_1_rule_registry.json``."""
+    return _registry_raw().get("tuning") or {}
+
+
 def training_channel_path() -> Path:
     return _repo_root() / "prediction_agent" / "training_channel_output.json"
 
@@ -46,7 +60,7 @@ def training_channel_path() -> Path:
 @lru_cache(maxsize=1)
 def load_notional_cap_usdt() -> float:
     try:
-        raw = json.loads(registry_path().read_text(encoding="utf-8"))
+        raw = _registry_raw()
         cap = float((raw.get("rule_proof_bucket") or {}).get("notional_cap_usdt") or 3333.33)
         return max(100.0, cap)
     except Exception as e:
@@ -69,7 +83,16 @@ def r01_training_runner_bearish() -> bool:
     """
     R01 governance proxy: strong next-bar-down probability + runner bearish consensus
     (see RULE_GENERATION §5). Used to block aggressive long *timing* on BTC.
+
+    Thresholds come from registry ``tuning.r01_governance`` (defaults preserve legacy 90 / BEARISH).
     """
+    g = (tuning_config().get("r01_governance") or {})
+    try:
+        p_min = float(g.get("p_down_min_pct", 90.0))
+    except (TypeError, ValueError):
+        p_min = 90.0
+    cons_need = str(g.get("runner_consensus_equals", "BEARISH") or "BEARISH").upper()
+
     doc = _read_training_channel()
     rec = doc.get("recognition") or {}
     try:
@@ -79,7 +102,37 @@ def r01_training_runner_bearish() -> bool:
     snap = rec.get("btc_predict_runner_snapshot") or {}
     pred = snap.get("predictions") or {}
     cons = str(pred.get("consensus", "") or "").upper()
-    return p_down >= 90.0 and cons == "BEARISH"
+    return p_down >= p_min and cons == cons_need
+
+
+def btc01_r02_trend_long_row(row: pd.Series) -> bool:
+    """
+    R02 HTF trend gate for **BTC-0.1** only — same geometry as ``btc_trend_regime.btc_trend_long_row``,
+    but thresholds from registry ``tuning.r02_regime`` (finetune without changing global Sygnif defaults).
+    """
+    t = (tuning_config().get("r02_regime") or {})
+    try:
+        rsi_min = float(t.get("rsi_bull_min", 50.0))
+    except (TypeError, ValueError):
+        rsi_min = 50.0
+    try:
+        adx_min = float(t.get("adx_min", 25.0))
+    except (TypeError, ValueError):
+        adx_min = 25.0
+
+    r1 = float(row.get("RSI_14_1h", 50) or 50)
+    r4 = float(row.get("RSI_14_4h", 50) or 50)
+    adx = float(row.get("ADX_14", 0) or 0)
+    close = float(row.get("close", 0) or 0)
+    ema1h = float(row.get("EMA_200_1h", np.nan) or np.nan)
+    if not np.isfinite(ema1h) or ema1h <= 0 or close <= 0:
+        return False
+    return bool(
+        r1 > rsi_min
+        and r4 > rsi_min
+        and close > ema1h
+        and adx > adx_min
+    )
 
 
 def r03_pullback_long(df: pd.DataFrame) -> bool:

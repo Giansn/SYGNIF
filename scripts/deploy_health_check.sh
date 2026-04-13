@@ -65,6 +65,7 @@ try_curl_core "freqtrade futures /api/v1/ping (:8081)" "http://127.0.0.1:8081/ap
 
 try_curl_opt "freqtrade-btc-0-1 /api/v1/ping (:${FT_B01})" "http://127.0.0.1:${FT_B01}/api/v1/ping"
 try_curl_opt "freqtrade-btc-spot /api/v1/ping (:8282)" "http://127.0.0.1:8282/api/v1/ping"
+try_curl_opt "dashboard BTC01+Grid / (:8892)" "http://127.0.0.1:8892/"
 try_curl_opt "cursor-agent-worker /healthz" "http://127.0.0.1:8093/healthz"
 
 echo
