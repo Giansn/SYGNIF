@@ -3,6 +3,8 @@
 **Version:** 0.1  
 **Purpose:** Single place to **register** BTC-only rules proposed under **`/ruleprediction-agent`**, with a **traceable scan** of Pine references, Python regime/prediction code, risk notes, and market-data paths. **No live execution** is implied by this file.
 
+**Bybit demo / CCXT bridge (Docker, patch, configs):** [`BTC_STRATEGY_0_1_BYBIT_BRIDGE.md`](./BTC_STRATEGY_0_1_BYBIT_BRIDGE.md)
+
 **Canonical rule log (full §2 rows):** `letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md` §5–§7.
 
 **Machine tags + 10k / ⅓ bucket:** `letscrash/btc_strategy_0_1_rule_registry.json` (`rule_tag` on each experimental fill).
