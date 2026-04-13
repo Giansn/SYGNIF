@@ -32,7 +32,7 @@ Before changing **Docker**, **compose**, or **.mdc** rules for prediction/BTC pi
 
 - **Cursor UUID** is for **Cursor** (chat / Cloud Agent routing with **`/ruleprediction-agent`**). It is **not** an HTTP or Bybit callback this repo calls from systemd.
 - **Webhooks in Sygnif:** Freqtrade → **`notification-handler`** `POST /webhook` (alerts / Telegram). That path **does not place** venue orders.
-- **Orders:** go through **Freqtrade** (e.g. **`scripts/ft_btc_0_1_forceenter.py`**, strategy entries) or **`trade_overseer`** `ensure_entry` with **`OVERSEER_ENSURE_TOKEN`** — signed REST, gated by `dry_run` / `OVERSEER_ENSURE_LIVE_OK`. **`rule_trade_agent_helper`** stays **read-only**; snapshot now includes **`btc_24h_movement`** from **`btc_24h_movement_prediction.json`** for agent context only.
+- **Orders:** go through **Freqtrade** (e.g. **`scripts/ft_btc_0_1_forceenter.py`**, **`scripts/ft_btc_0_1_from_24h_forecast.py`** + ``FORECAST_FORCEENTER_OK=YES``, strategy entries) or **`trade_overseer`** `ensure_entry` with **`OVERSEER_ENSURE_TOKEN`** — signed REST, gated by `dry_run` / `OVERSEER_ENSURE_LIVE_OK`. **`rule_trade_agent_helper`** stays **read-only**; snapshot now includes **`btc_24h_movement`** from **`btc_24h_movement_prediction.json`** for agent context only.
 
 **Long-form loop + indicator wishlist + btc_Trader_Docker I/O table:** **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — rules **evolve**; that file is the canonical narrative for the **continuous information → train → propose → prove → test → rm/apply → compare** cycle.
 
