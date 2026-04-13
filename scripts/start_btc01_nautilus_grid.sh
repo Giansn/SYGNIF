@@ -4,9 +4,8 @@
 # Requires in **`.env`** / ``SYGNIF_SECRETS_ENV_FILE`` (same bundle — see ``.env.example`` next to ``BYBIT_DEMO_*``):
 #   BYBIT_DEMO_API_KEY, BYBIT_DEMO_API_SECRET, NAUTILUS_GRID_MM_DEMO_ACK=YES
 #
-# Optional sizing (defaults in docker-compose.yml):
-#   NAUTILUS_GRID_BTC01_TRADE_SIZE, NAUTILUS_GRID_BTC01_MAX_POSITION, NAUTILUS_GRID_BTC01_NUM_LEVELS,
-#   NAUTILUS_GRID_BTC01_GRID_STEP_BPS, NAUTILUS_GRID_BTC01_REQUOTE_BPS
+# Optional sizing (defaults in docker-compose.yml): trade size, max position, num_levels (8 → up to 16 orders),
+#   grid_step_bps, requote_bps — see INSTANCE_SETUP.md / .env.example
 #
 # **Do not** run against the same Bybit demo account as other linear demo bots unless you accept conflicting orders.
 # For always-on + reboot: ``COMPOSE_PROFILES=btc-grid-mm`` in ``.env`` and ``docker compose up -d`` from repo root.

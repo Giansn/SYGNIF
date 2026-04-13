@@ -14,26 +14,26 @@
     "_sampling_note": "BTC-only bot: one Freqtrade position per pair. To collect more tagged trades, relax R01/R02/R03 gates, raise bucket cap, add DCA fills, shorten R03 TP — not max_open_trades on a single symbol.",
     "r01_governance": {
       "enabled": true,
-      "p_down_min_pct": 94.0,
+      "p_down_min_pct": 96.5,
       "runner_consensus_equals": "BEARISH",
-      "notes": "enabled=false disables bearish governance entirely (demo only). Higher p_down_min_pct → bearish stack triggers less often → more long entries. When both p_down and consensus match, blocks R01-style timing + stack-guard exits."
+      "notes": "enabled=false disables bearish governance entirely (demo only). Higher p_down_min_pct → bearish stack triggers less often → more R02/R03 entries + fewer confirm blocks on BTC-0.1-R*. 96.5 vs 94: materially fewer stacked hours."
     },
     "r02_regime": {
-      "rsi_bull_min": 45.0,
-      "adx_min": 19.0,
-      "notes": "HTF bull gate for BTC-0.1-R02; lower thresholds → more R02-tagged bars (tighten for production)."
+      "rsi_bull_min": 42.0,
+      "adx_min": 17.0,
+      "notes": "HTF bull gate for BTC-0.1-R02 (stricter than parent btc_trend_long_row). Lower → more R02 bars under btc_trend profile; tighten for production."
     },
     "r03_pullback": {
-      "rsi_prior_3bars_max": 40.0,
-      "rsi_now_min": 40.0,
-      "adx_max": 36.0,
-      "notes": "Looser than legacy 38/42/34 → more R03 sleeve signals when flat."
+      "rsi_prior_3bars_max": 44.0,
+      "rsi_now_min": 37.0,
+      "adx_max": 40.0,
+      "notes": "Sleeve only when flat after parent+R02 logic. Higher rsi_prior_3bars_max / adx_max, lower rsi_now_min → more R03 arms (still last-bar only)."
     },
     "r03_scalp": {
-      "tp_profit_pct": 0.008,
-      "rsi_overbought": 58.0,
+      "tp_profit_pct": 0.006,
+      "rsi_overbought": 54.0,
       "stack_guard_loss_pct": 0.008,
-      "notes": "Lower tp_profit_pct → faster take-profit → more closed trades for analysis. rsi_overbought exits sooner; stack_guard_loss_pct unchanged vs engine default unless set."
+      "notes": "Lower tp / rsi_overbought → custom_exit R03 paths fire more often (scalp_take / overbought)."
     },
     "slot_caps": {
       "r01": 8,
@@ -54,10 +54,14 @@
     "tp_sl": {
       "BTC-0.1-R01": {
         "sl_doom": 0.06,
-        "tp_profit_pct": 0.025,
-        "notes": "sl_doom: same units as Sygnif doom (÷ leverage for futures → custom_stoploss). tp_profit_pct: ROI fraction, × leverage like R03 scalp."
+        "tp_profit_pct": 0.02,
+        "notes": "sl_doom: same units as Sygnif doom (÷ leverage for futures → custom_stoploss). tp_profit_pct: ROI fraction, × leverage like R03 scalp; lower → exit_btc01_r01_tp more often."
       },
-      "BTC-0.1-R02": { "sl_doom": 0.08, "tp_profit_pct": 0.04 },
+      "BTC-0.1-R02": {
+        "sl_doom": 0.08,
+        "tp_profit_pct": 0.032,
+        "notes": "Slightly lower TP vs 0.04 → more exit_btc01_r02_tp events for journal/sampling."
+      },
       "BTC-0.1-R03": {
         "sl_doom": 0.05,
         "tp_profit_pct": null,

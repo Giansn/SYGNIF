@@ -429,9 +429,10 @@ def main():
 
     logreg_up = dir_next == 1
     consensus_up = sum([rf_delta > 0, xgb_delta > 0, logreg_up])
+    # 0 = all down, 3 = all up; single dissent → MIXED (avoids mis-labelling 1/3 as full BEARISH).
     if consensus_up >= 2:
         consensus = "BULLISH"
-    elif consensus_up <= 1:
+    elif consensus_up == 0:
         consensus = "BEARISH"
     else:
         consensus = "MIXED"

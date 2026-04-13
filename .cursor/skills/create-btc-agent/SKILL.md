@@ -59,6 +59,7 @@ description: >-
 | File | Role |
 |------|------|
 | `.cursor/rules/btc-prediction.mdc` | Cursor rule for **BTC ML runner / channel JSON / briefing appendix** (tight globs; aliases `/btc-prediction`, `/create-btc-prediction`) |
+| `.cursor/agents/prediction-agent.md` | **Agent-only** ML + training channel; includes **Training → BTC-0.1 strategy** loop (`channel_training.py`, `r01_registry_bridge.py`, `BTC_Strategy_0_1`) |
 | `.cursor/skills/btc-specialist/SKILL.md` | Reference layout for project skills |
 | `.cursor/agents/btc-specialist.md` | BTC-only delegated persona |
 | `.cursor/skills/finance-agent/SKILL.md` | Router skill + Telegram parity pointer |

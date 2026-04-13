@@ -1,6 +1,6 @@
 {
     "_comment": "Freqtrade futures BTC dedicated: SygnifStrategy on Bybit USDT linear BTC. Runtime merge via apply_bybit_demo_to_btc_futures_config.py (not part of compose profile btc-nautilus).",
-    "strategy": "SygnifStrategy",
+    "strategy": "BTC_Strategy_0_1",
     "can_short": true,
     "trading_mode": "futures",
     "margin_mode": "isolated",

@@ -356,13 +356,17 @@ services:
       - --trade-size
       - "${NAUTILUS_GRID_BTC01_TRADE_SIZE:-0.001}"
       - --max-position
-      - "${NAUTILUS_GRID_BTC01_MAX_POSITION:-0.02}"
+      - "${NAUTILUS_GRID_BTC01_MAX_POSITION:-0.05}"
       - --num-levels
-      - "${NAUTILUS_GRID_BTC01_NUM_LEVELS:-2}"
+      - "${NAUTILUS_GRID_BTC01_NUM_LEVELS:-8}"
       - --grid-step-bps
-      - "${NAUTILUS_GRID_BTC01_GRID_STEP_BPS:-15}"
+      - "${NAUTILUS_GRID_BTC01_GRID_STEP_BPS:-18}"
       - --requote-threshold-bps
-      - "${NAUTILUS_GRID_BTC01_REQUOTE_BPS:-4}"
+      - "${NAUTILUS_GRID_BTC01_REQUOTE_BPS:-28}"
+      - --requote-min-interval-secs
+      - "${NAUTILUS_GRID_BTC01_REQUOTE_MIN_SEC:-4}"
+      - --emergency-requote-mult
+      - "${NAUTILUS_GRID_BTC01_REQUOTE_EMERGENCY_MULT:-4}"
       # Bybit demo accounts are often one-way; hedge mode causes 10001 position idx / position mode mismatch.
       - --merged-single
 

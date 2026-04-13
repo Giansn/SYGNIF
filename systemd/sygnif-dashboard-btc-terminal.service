@@ -6,6 +6,8 @@ After=docker.service network-online.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/SYGNIF
+# Same order as compose ``x-sygnif-env-files``: secrets first, repo ``.env`` overrides.
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
 EnvironmentFile=-/home/ubuntu/SYGNIF/.env
 # Port 8888 — mutually exclusive with ``sygnif-dashboard-spot`` (same host port). Stop spot or set SYGNIF_BTC_TERMINAL_PORT in .env.
 Environment=SYGNIF_BTC_TERMINAL_PORT=8888

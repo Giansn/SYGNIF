@@ -165,6 +165,15 @@ tr:hover td { background: #ffffff04; }
 .tag.side-short {
   background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd);
 }
+.tag.source-grid {
+  background: #7c5cff14; color: #b8a3ff; border: 1px solid #7c5cff35;
+}
+.tag.source-predict {
+  background: #5ae0b514; color: var(--ac2); border: 1px solid #5ae0b530;
+}
+.source-hint {
+  font-size: 11px; color: var(--t3); line-height: 1.4; margin-top: 8px; max-width: 720px;
+}
 .portfolio-chart-wrap {
   margin-bottom: 24px;
   background: var(--s1);
@@ -175,13 +184,40 @@ tr:hover td { background: #ffffff04; }
   overflow: hidden;
 }
 .portfolio-chart-wrap .sec-head { margin-bottom: 6px; }
-.chart-svg-wrap { width: 100%; height: 180px; min-height: 140px; }
+.chart-svg-wrap {
+  width: 100%;
+  height: 180px;
+  min-height: 140px;
+}
 .portfolio-svg { width: 100%; height: 100%; display: block; }
-.portfolio-svg .grid-line { stroke: var(--bd); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.5; }
+.portfolio-svg .grid-line {
+  stroke: var(--bd);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
 .portfolio-svg .line-area { opacity: 0.35; }
 .portfolio-svg .line-main {
-  fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
+}
+.chart-tf-inline {
+  color: var(--ac);
+  font-weight: 700;
+  font-size: 0.95em;
+  margin-left: 2px;
+}
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--t3);
+  margin-top: 6px;
+  padding: 0 2px;
 }
 .tf-btns { display: flex; gap: 2px; background: var(--s2); border-radius: 8px; padding: 3px; border: 1px solid var(--bd); }
 .tf-btn {
@@ -191,13 +227,31 @@ tr:hover td { background: #ffffff04; }
 .tf-btn:hover { color: var(--t1); }
 .tf-btn.active { background: var(--ac); color: var(--bg); box-shadow: 0 0 8px var(--ac-glow); }
 .chart-tooltip {
-  position: absolute; display: none; background: var(--s2); border: 1px solid var(--bd2);
-  border-radius: 8px; padding: 8px 12px; font-family: var(--mono); font-size: 11px;
-  color: var(--t1); pointer-events: none; z-index: 10;
+  position: absolute;
+  display: none;
+  background: var(--s2);
+  border: 1px solid var(--bd2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t1);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
+.chart-tooltip .tt-val { font-weight: 700; font-size: 13px; }
+.chart-tooltip .tt-date { color: var(--t2); font-size: 10px; margin-top: 2px; }
+.chart-tooltip .tt-pnl { font-size: 10px; margin-top: 2px; }
 .chart-dates {
-  display: flex; justify-content: space-between; font-family: var(--mono);
-  font-size: 9px; color: var(--t3); margin-top: 4px;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--t3);
+  margin-top: 4px;
+  padding: 0 2px;
 }
 #err {
   display: none; background: var(--r-bg); border: 1px solid var(--r-bd);
@@ -223,6 +277,9 @@ tr:hover td { background: #ffffff04; }
 }
 .foot { text-align: center; padding: 20px 0 30px; font-size: 11px; color: var(--t3); letter-spacing: 2px; text-transform: uppercase; }
 .empty { padding: 24px; text-align: center; color: var(--t3); font-size: 13px; }
+@media (max-width: 1100px) {
+  .tf-btns { flex-wrap: wrap; }
+}
 @media (max-width: 900px) { .stats { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 768px) {
   .wrap { padding: 12px 14px; }
@@ -252,6 +309,7 @@ tr:hover td { background: #ffffff04; }
     </div>
     <div class="head-right">
       <div class="badges">
+        <span id="badge-key" class="badge b-stop" style="display:none">KEY</span>
         <span id="badge" class="badge b-run"><span class="pulse"></span>OK</span>
       </div>
       <div class="clock" id="clock">--:--:--</div>
@@ -274,18 +332,21 @@ tr:hover td { background: #ffffff04; }
 
   <div class="portfolio-chart-wrap fade-in">
     <div class="sec-head">
-      <div class="sec-t">Realized P/L (cumulative)</div>
+      <div class="sec-t">Realized P/L (cumulative)<span id="chart-title-tf" class="chart-tf-inline"> · 24h</span></div>
       <div style="display:flex;align-items:center;gap:10px">
         <div class="tf-btns">
-          <button type="button" class="tf-btn active" data-tf="1">1D</button>
+          <button type="button" class="tf-btn active" data-tf="1">24h</button>
           <button type="button" class="tf-btn" data-tf="7">7D</button>
           <button type="button" class="tf-btn" data-tf="30">30D</button>
+          <button type="button" class="tf-btn" data-tf="90">90D</button>
+          <button type="button" class="tf-btn" data-tf="180">180D</button>
         </div>
         <div class="sec-count" id="chart-range">1d</div>
       </div>
     </div>
     <div class="chart-tooltip" id="chart-tooltip"></div>
-    <div class="chart-svg-wrap" id="portfolio-chart"><div class="empty">Loading…</div></div>
+    <div class="chart-svg-wrap" id="portfolio-chart"><div class="empty" style="padding:24px">Loading chart…</div></div>
+    <div class="chart-labels" id="chart-labels" style="display:none"><span id="chart-l">--</span><span id="chart-r">--</span></div>
     <div class="chart-dates" id="chart-dates"></div>
   </div>
 
@@ -294,7 +355,7 @@ tr:hover td { background: #ffffff04; }
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Lev</th><th>Unreal P/L</th><th>Notional</th><th>Liq</th>
+          <th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Lev</th><th>Unreal P/L</th><th>Notional (USDT)</th><th>Liq</th>
         </tr></thead>
         <tbody id="pos-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
       </table>
@@ -304,12 +365,13 @@ tr:hover td { background: #ffffff04; }
 
   <div class="sec">
     <div class="sec-head"><div class="sec-t">Current orders</div><div class="sec-count" id="ord-hdr"></div></div>
+    <p class="source-hint" id="order-source-hint" style="display:none"></p>
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Side</th><th>Price</th><th>Qty</th><th>Leaves</th><th>Type</th><th>Status</th><th>Order ID</th>
+          <th>Source</th><th>Side</th><th>Price</th><th>Qty</th><th>Leaves</th><th>Value (USDT)</th><th>Type</th><th>Status</th><th>Order ID</th>
         </tr></thead>
-        <tbody id="ord-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        <tbody id="ord-body"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <div class="trade-cards" id="ord-cards"></div>
@@ -358,35 +420,118 @@ function fmtTs(ms) {
   return d.toLocaleString(DASH_LOC, { timeZone: 'Europe/Zurich', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function updateChartFromSnap() {
+/** Same timezone token as spot / futures dashboards (`dashboard.html`, `dashboard_futures_full.html`). */
+const DASH_TZ = 'Europe/Zurich';
+
+function numMs(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Snapshot chart payload; includes window + timestamps for clock-true X axis (rolling 24h etc.). */
+function getIfaceChartData() {
+  const empty = { values: [], labels: [], timestamps_ms: [], window_start_ms: null, window_end_ms: null };
+  if (!snapCache || !snapCache.ok || !snapCache.charts) return empty;
+  const ch = snapCache.charts[chartTF] || {};
+  const values = (ch.values || []).map(v => Number(v));
+  const labels = (ch.labels || []).map(l => String(l));
+  const timestamps_ms = (ch.timestamps_ms || []).map(numMs);
+  let window_start_ms = numMs(ch.window_start_ms);
+  let window_end_ms = numMs(ch.window_end_ms);
+  if (window_end_ms == null) window_end_ms = numMs(snapCache.generated_ms);
+  if (window_start_ms == null && window_end_ms != null && chartTF) {
+    const days = Number(chartTF);
+    if (Number.isFinite(days) && days > 0) window_start_ms = window_end_ms - days * 86400000;
+  }
+  return { values, labels, timestamps_ms, window_start_ms, window_end_ms };
+}
+
+function fmtAxisFromWindow(ms, tf) {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  const hm = { timeZone: DASH_TZ, hour: '2-digit', minute: '2-digit', hour12: false };
+  /* 24h rolling window crosses midnight — always show day+time so it is not read as “same morning to afternoon”. */
+  if (tf === '1') {
+    return d.toLocaleString(DASH_LOC, {
+      timeZone: DASH_TZ,
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+  return d.toLocaleDateString(DASH_LOC, { timeZone: DASH_TZ, month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString(DASH_LOC, hm);
+}
+
+/**
+ * Portfolio chart: spot/futures look (horizontal grid, chart-labels, tt-* tooltip) +
+ * time-based X when API sends window_start_ms / window_end_ms / timestamps_ms (full rolling 24h).
+ */
+function updatePortfolioChart() {
   const wrap = document.getElementById('portfolio-chart');
-  const tooltip = document.getElementById('chart-tooltip');
+  const lblWrap = document.getElementById('chart-labels');
+  const lEl = document.getElementById('chart-l');
+  const rEl = document.getElementById('chart-r');
   const datesEl = document.getElementById('chart-dates');
   const rangeEl = document.getElementById('chart-range');
-  if (!wrap || !snapCache || !snapCache.charts) return;
+  const tooltip = document.getElementById('chart-tooltip');
+  const titleTf = document.getElementById('chart-title-tf');
+  if (!wrap) return;
 
-  const ch = snapCache.charts[chartTF] || { values: [], labels: [] };
-  let vals = ch.values || [];
-  let lbs = ch.labels || [];
-  if (rangeEl) rangeEl.textContent = chartTF + 'd · realized cum.';
+  let { values, labels, timestamps_ms: tms, window_start_ms: wStart, window_end_ms: wEnd } = getIfaceChartData();
+  const tfDisp = chartTF === '1' ? '24h' : chartTF + 'd';
+  if (titleTf) titleTf.textContent = ' · ' + tfDisp;
+  if (rangeEl) rangeEl.textContent = tfDisp + ' · realized cum.';
 
-  if (!vals.length) {
-    wrap.innerHTML = '<div class="empty">No closed P/L in this window</div>';
+  if (!values.length) {
+    wrap.innerHTML = '<div class="empty" style="padding:24px">No closed P/L in this window</div>';
+    if (lblWrap) lblWrap.style.display = 'none';
     if (datesEl) datesEl.innerHTML = '';
     return;
   }
 
-  if (vals.length === 1) { vals = [vals[0], vals[0]]; lbs = [lbs[0] || '', lbs[0] || '']; }
+  let vals = values.slice();
+  let lbs = labels.slice();
+  tms = (tms || []).slice(0, vals.length);
+  while (tms.length < vals.length) tms.push(null);
+  if (vals.length === 1) {
+    vals = [vals[0], vals[0]];
+    lbs = [lbs[0] || '', lbs[0] || ''];
+    if (wStart != null && wEnd != null) tms = [wStart, wEnd];
+    else if (tms[0] != null) tms = [tms[0], tms[0]];
+    else tms = [null, null];
+  }
 
   const W = 600, H = 160, padX = 12, padY = 12;
   const cW = W - 2 * padX, cH = H - 2 * padY;
   const min = Math.min(...vals), max = Math.max(...vals);
   const span = Math.max(max - min, 1e-8);
   const n = vals.length;
+  const trend = vals[n - 1] >= vals[0];
   const lnColor = 'var(--ac)';
 
+  let useTimeX = false;
+  if (wStart != null && wEnd != null && wEnd > wStart && n >= 2 && tms.length >= n) {
+    useTimeX = true;
+    for (let i = 0; i < n; i++) {
+      if (tms[i] == null || !Number.isFinite(tms[i])) {
+        useTimeX = false;
+        break;
+      }
+    }
+  }
+
   const pts = vals.map((v, i) => {
-    const x = padX + (i / (n - 1)) * cW;
+    let frac = n > 1 ? i / (n - 1) : 0;
+    if (useTimeX) {
+      frac = (tms[i] - wStart) / (wEnd - wStart);
+      frac = Math.min(1, Math.max(0, frac));
+    }
+    const x = padX + frac * cW;
     const y = padY + (1 - (v - min) / span) * cH;
     return [x, y];
   });
@@ -404,13 +549,13 @@ function updateChartFromSnap() {
   wrap.innerHTML = `
 <svg class="portfolio-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="ifaceGrad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="portGradBtcIface" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" style="stop-color:${lnColor};stop-opacity:0.3"/>
       <stop offset="100%" style="stop-color:${lnColor};stop-opacity:0"/>
     </linearGradient>
   </defs>
   ${grid}
-  <polygon class="line-area" fill="url(#ifaceGrad)" points="${areaPts}"/>
+  <polygon class="line-area" fill="url(#portGradBtcIface)" points="${areaPts}"/>
   <polyline class="line-main" stroke="${lnColor}" points="${linePts}"/>
 </svg>`;
 
@@ -427,21 +572,56 @@ function updateChartFromSnap() {
       }
       const v = vals[idx];
       const chg = v - vals[0];
-      const pctChg = vals[0] ? (chg / Math.max(Math.abs(vals[0]), 1e-8) * 100) : 0;
+      const pctChg = vals[0] ? (chg / vals[0] * 100) : 0;
       const cls = chg >= 0 ? 'up' : 'dn';
-      tooltip.innerHTML = `<div style="font-weight:700">${fmt4(v)} USDT</div><div style="color:var(--t2);font-size:10px">${lbs[idx] || ''}</div><div class="${cls}" style="font-size:10px;margin-top:2px">${fmt4(chg)} (${pctChg >= 0 ? '+' : ''}${pctChg.toFixed(1)}% vs start)</div>`;
+      const fmtV = v >= 100 ? v.toFixed(2) : v.toFixed(4);
+      const pnlMid = Math.abs(vals[0]) > 1e-9
+        ? `${chg >= 0 ? '+' : ''}${chg.toFixed(4)} (${pctChg >= 0 ? '+' : ''}${pctChg.toFixed(2)}%)`
+        : `${chg >= 0 ? '+' : ''}${chg.toFixed(4)}`;
+      tooltip.innerHTML = `<div class="tt-val">${fmtV} USDT</div><div class="tt-date">${lbs[idx] || ''}</div><div class="tt-pnl ${cls}">${pnlMid}</div>`;
       tooltip.style.display = 'block';
       const wr = wrap.parentElement.getBoundingClientRect();
       let tx = e.clientX - wr.left + 14;
       if (tx + 170 > wr.width) tx -= 190;
       tooltip.style.left = tx + 'px';
-      tooltip.style.top = (e.clientY - wr.top - 8) + 'px';
+      tooltip.style.top = Math.max(4, e.clientY - wr.top - 50) + 'px';
     });
     svg.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
   }
 
-  if (datesEl && lbs.length) {
-    datesEl.innerHTML = `<span>${lbs[0] || ''}</span><span>${lbs[lbs.length - 1] || ''}</span>`;
+  if (datesEl) {
+    /* Always tie the bottom strip to the API window when present (rolling 24h etc.), independent of polyline X mode */
+    if (wStart != null && wEnd != null && wEnd > wStart) {
+      const cnt = chartTF === '1' ? 8 : (Number(chartTF) <= 7 ? 7 : 8);
+      const spans = [];
+      for (let i = 0; i < cnt; i++) {
+        const tickMs = wStart + (i / (cnt - 1)) * (wEnd - wStart);
+        spans.push(fmtAxisFromWindow(tickMs, chartTF));
+      }
+      const deduped = spans.filter((s, i) => i === 0 || s !== spans[i - 1]);
+      datesEl.innerHTML = deduped.map(s => `<span>${s}</span>`).join('');
+    } else if (lbs.length > 1) {
+      const cnt = Math.min(lbs.length, chartTF <= 1 ? 8 : chartTF <= 7 ? 7 : 8);
+      const step = Math.max(1, Math.floor((lbs.length - 1) / (cnt - 1)));
+      const shown = [];
+      for (let i = 0; i < lbs.length; i += step) shown.push(lbs[i]);
+      if ((lbs.length - 1) % step !== 0) shown.push(lbs[lbs.length - 1]);
+      const short = shown.map(s => chartTF <= 1 ? s : s.replace(/\s\d{2}:\d{2}$/, ''));
+      const deduped = short.filter((s, i) => i === 0 || s !== short[i - 1]);
+      datesEl.innerHTML = deduped.map(s => `<span>${s}</span>`).join('');
+    } else {
+      datesEl.innerHTML = '';
+    }
+  }
+
+  if (lblWrap && lEl && rEl) {
+    lblWrap.style.display = 'flex';
+    const fmtN = x => (x >= 100 ? x.toFixed(0) : x.toFixed(2));
+    const chg = vals[n - 1] - vals[0];
+    const pctChg = vals[0] ? (chg / vals[0] * 100) : 0;
+    lEl.textContent = fmtN(vals[0]) + ' USDT';
+    rEl.textContent = fmtN(vals[n - 1]) + ' (' + (chg >= 0 ? '+' : '') + pctChg.toFixed(2) + '%)';
+    rEl.style.color = trend ? 'var(--g)' : 'var(--r)';
   }
 }
 
@@ -517,6 +697,32 @@ async function refresh() {
     badge.innerHTML = '<span class="pulse"></span>LIVE';
     badge.className = 'badge b-run';
 
+    const bk = document.getElementById('badge-key');
+    if (bk) {
+      const prof = d.iface_key_profile || '';
+      if (prof === 'grid') {
+        bk.textContent = 'GRID';
+        bk.className = 'badge b-stop';
+        bk.style.display = 'inline-block';
+      } else if (prof === 'predict' || prof === 'main_demo') {
+        bk.textContent = 'PREDICT';
+        bk.className = 'badge b-run';
+        bk.style.display = 'inline-block';
+      } else {
+        bk.style.display = 'none';
+      }
+    }
+    const oh = document.getElementById('order-source-hint');
+    if (oh) {
+      const note = d.order_source_note || '';
+      if (note) {
+        oh.textContent = note;
+        oh.style.display = 'block';
+      } else {
+        oh.style.display = 'none';
+      }
+    }
+
     const w = d.wallet;
     if (w) {
       document.getElementById('st-equity').textContent = '$' + w.equity.toFixed(2);
@@ -535,7 +741,10 @@ async function refresh() {
 
     const s = d.summary || {};
     document.getElementById('st-ord').textContent = String(s.open_order_count ?? 0);
-    document.getElementById('st-ord-s').textContent = 'ret ' + (d.order_raw_ret ?? '—');
+    const onot = s.open_orders_notional_usdt;
+    document.getElementById('st-ord-s').textContent =
+      (onot != null && !isNaN(onot) ? 'Σ $' + Number(onot).toFixed(2) + ' · ' : '') +
+      'ret ' + (d.order_raw_ret ?? '—');
     document.getElementById('st-posn').textContent = String(s.open_position_count ?? 0);
     document.getElementById('st-closed-n').textContent = String(s.closed_row_count ?? 0);
 
@@ -591,16 +800,22 @@ async function refresh() {
     const ob = document.getElementById('ord-body');
     const ocards = document.getElementById('ord-cards');
     if (!ord.length) {
-      ob.innerHTML = '<tr><td colspan="7" class="empty">No open orders</td></tr>';
+      ob.innerHTML = '<tr><td colspan="9" class="empty">No open orders</td></tr>';
       ocards.innerHTML = '<div class="card"><div class="empty">No open orders</div></div>';
     } else {
       ob.innerHTML = ord.map(o => {
         const buy = (o.side || '').toLowerCase() === 'buy';
+        const src = (o.source_label || '').toLowerCase();
+        const srcCls = src === 'predict' ? 'source-predict' : 'source-grid';
+        const srcLbl = src === 'predict' ? 'PREDICT' : 'GRID';
+        const nv = Number(o.notional_usdt != null ? o.notional_usdt : (o.price * o.leaves_qty));
         return `<tr>
+          <td><span class="tag ${srcCls}">${srcLbl}</span></td>
           <td><span class="tag ${buy ? 'side-long' : 'side-short'}">${buy ? 'BUY' : 'SELL'}</span></td>
           <td>${o.price.toFixed(prec(o.price))}</td>
           <td>${o.qty.toFixed(4)}</td>
           <td>${o.leaves_qty.toFixed(4)}</td>
+          <td>$${nv.toFixed(2)}</td>
           <td>${o.order_type || '—'}</td>
           <td>${o.status || '—'}</td>
           <td style="color:var(--t3);font-size:11px">${o.order_id || '—'}</td>
@@ -608,12 +823,17 @@ async function refresh() {
       }).join('');
       ocards.innerHTML = ord.map(o => {
         const buy = (o.side || '').toLowerCase() === 'buy';
+        const src = (o.source_label || '').toLowerCase();
+        const srcCls = src === 'predict' ? 'source-predict' : 'source-grid';
+        const srcLbl = src === 'predict' ? 'PREDICT' : 'GRID';
+        const nv = Number(o.notional_usdt != null ? o.notional_usdt : (o.price * o.leaves_qty));
         return `<div class="tc">
           <div class="tc-top">
-            <div class="tc-pair">${buy ? 'BUY' : 'SELL'}</div>
-            <div style="font-family:var(--mono)">${o.price.toFixed(prec(o.price))}</div>
+            <div class="tc-pair"><span class="tag ${srcCls}">${srcLbl}</span> ${buy ? 'BUY' : 'SELL'}</div>
+            <div style="font-family:var(--mono)">$${nv.toFixed(2)}</div>
           </div>
           <div class="tc-grid">
+            <div class="tc-item"><div class="tc-item-lbl">Price</div><div class="tc-item-val">${o.price.toFixed(prec(o.price))}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Qty</div><div class="tc-item-val">${o.qty.toFixed(4)}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Leaves</div><div class="tc-item-val">${o.leaves_qty.toFixed(4)}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Status</div><div class="tc-item-val">${o.status || '—'}</div></div>
@@ -624,7 +844,7 @@ async function refresh() {
 
     closedList = d.closed_pnl_recent || [];
     renderClosed();
-    updateChartFromSnap();
+    updatePortfolioChart();
   } catch (e) {
     errEl.textContent = 'Fetch error: ' + (e && e.message ? e.message : e);
     errEl.style.display = 'block';
@@ -636,7 +856,7 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
     document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     chartTF = btn.getAttribute('data-tf') || '1';
-    updateChartFromSnap();
+    updatePortfolioChart();
   });
 });
 
@@ -662,7 +882,7 @@ async function tick() {
   try { await refresh(); } finally { _busy = false; }
 }
 tick();
-setInterval(tick, 8000);
+setInterval(tick, 5 * 60 * 1000);
 
 const _port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
 document.getElementById('foot-port').textContent = 'Sygnif BTC Interface · port ' + _port;

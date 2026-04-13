@@ -2,7 +2,7 @@
 description: >-
   BTC ML prediction slice (runner, channel embed, briefing hooks) — narrow globs;
   use with ruleprediction-agent. Alias /btc-prediction /create-btc-prediction
-globs: prediction_agent/btc_predict*.py,prediction_agent/btc_predict_5m.pine,prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine,prediction_agent/btc_prediction_output.json,prediction_agent/training_channel_output.json,prediction_agent/rule_tag_journal.py,prediction_agent/rule_tag_journal.csv,finance_agent/ruleprediction_briefing.py,training_pipeline/channel_training.py,docker-compose.training-pipeline.yml,systemd/btc-predict-runner.service
+globs: prediction_agent/btc_predict*.py,prediction_agent/r01_registry_bridge.py,prediction_agent/btc_predict_5m.pine,prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine,prediction_agent/btc_prediction_output.json,prediction_agent/training_channel_output.json,prediction_agent/rule_tag_journal.py,prediction_agent/rule_tag_journal.csv,finance_agent/ruleprediction_briefing.py,training_pipeline/channel_training.py,docker-compose.training-pipeline.yml,systemd/btc-predict-runner.service
 alwaysApply: false
 ---
 

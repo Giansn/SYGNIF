@@ -68,8 +68,8 @@ Edit both configs and set:
 
 1. Put **Bybit Demo Trading** API keys in **`.env`** as `BYBIT_DEMO_API_KEY` / `BYBIT_DEMO_API_SECRET` (see `.env.example`).
 2. Build **`user_data/config_futures.json`** from **`user_data/config_btc_strategy_0_1_bybit_demo.example.json`**: set `exchange.key` / `exchange.secret` (or inject via your own merge script). Keep **`ccxt_config.options`**: `defaultType` **swap**, `defaultSettle` **USDT**, **`enableDemoTrading`: true**, **`hostname`: `bybit.com`** — do **not** point linear demo at legacy hard-coded `api-demo` URLs (see bridge doc).
-3. **Rebuild** traders after changing the patch: `docker compose --profile main-traders build freqtrade-futures` (or full `up -d --build`). `Dockerfile.custom` runs `bybit_ccxt_demo_patch.py` at **image** build; the **`freqtrade-futures`** service also runs it at **container start** before `freqtrade trade`.
-4. Start futures: `docker compose --profile main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without main stack: `docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1` → uses **`user_data/config_btc_strategy_0_1_paper_market.json`** (`dry_run: true`).
+3. **Rebuild** traders after changing the patch: `docker compose --profile archived-main-traders build freqtrade-futures` (or full `up -d --build`). `Dockerfile.custom` runs `bybit_ccxt_demo_patch.py` at **image** build; the **`freqtrade-futures`** service also runs it at **container start** before `freqtrade trade`.
+4. Start futures: `docker compose --profile archived-main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without that stack: `docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1` → base **`user_data/config_btc_strategy_0_1_paper_market.json`** + `apply_bybit_demo_to_btc_0_1_config.py` (`dry_run: true` if `BYBIT_DEMO_*` missing; else live demo orders).
 5. **Never commit** a `config_futures.json` that contains real Telegram tokens or exchange secrets — use examples + `.env` only.
 
 6. **Optional — open order from BTC analysis:** `python3 scripts/btc_analysis_forceenter.py` (dry-run) posts a plan from `prediction_agent/btc_prediction_output.json` + training channel; `--execute` calls Freqtrade **`/forceenter`** (needs `force_entry_enable` + `FT_API_URL` / `FT_PASS` in env). See **`letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md`** §7.
@@ -85,6 +85,8 @@ Edit both configs and set:
 Paper config **`user_data/config_btc_strategy_0_1_paper_market.json`** uses **`max_open_trades`: 100** for headroom; **`position_adjustment_enable`: true** allows **`BTC_Strategy_0_1.adjust_trade_position`** scale-ins (DCA-style) on the same BTC trade — not simultaneous long+short on one symbol (Freqtrade+Bybit one-way). Strategy slot caps (R01–R03) still apply on new entries.
 
 **Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
+
+**Grid + BTC 0.1 on the same host:** `nautilus-grid-btc01` (profile `btc-grid-mm`) and **`freqtrade-btc-0-1`** / **`freqtrade-futures`** both trade **BTCUSDT linear** on Bybit **demo** if they share **`BYBIT_DEMO_*`** — **one net position and one order book**; the grid is **not** an automatic hedge unless you use a **second demo API** (**`BYBIT_DEMO_GRID_API_KEY` / `BYBIT_DEMO_GRID_API_SECRET`**) so the MM runs on an isolated demo wallet (see `docker-compose.yml` header + `run_bybit_demo_grid_market_maker.py` startup warning).
 
 ## 5. Build and Start Containers
 
@@ -118,6 +120,7 @@ The entrypoint auto-applies the compact `/status` patch on every container start
 sudo cp systemd/sygnif-dashboard-spot.service /etc/systemd/system/
 sudo cp systemd/sygnif-dashboard-futures.service /etc/systemd/system/
 sudo cp systemd/sygnif-dashboard-btc-terminal.service /etc/systemd/system/
+# Unit loads ``~/xrp_claude_bot/.env`` then ``~/SYGNIF/.env`` (same as Docker compose) so ``BYBIT_DEMO_*`` in the secrets file are visible to BTC Terminal / ``/interface``.
 sudo systemctl daemon-reload
 sudo systemctl enable --now sygnif-dashboard-futures
 # Use **either** spot **or** BTC Terminal on 8888 (not both):
@@ -132,7 +135,7 @@ curl -s http://localhost:8888/interface | head -1   # BTC Interface (when btc-te
 curl -s http://localhost:8889 | head -1   # Futures dashboard
 ```
 
-**Port 8888 — one listener only:** `sygnif-dashboard-btc-terminal` and `sygnif-dashboard-spot` **cannot both** bind **8888**. Run **either** spot Freqtrade dashboard **or** BTC Terminal (+ `/interface`), or set `SYGNIF_BTC_TERMINAL_PORT` (e.g. 8891) in `.env` for the terminal unit. If the service is `inactive` with `Address already in use`, stop the other process on 8888 (e.g. `sudo systemctl stop sygnif-dashboard-spot`) or remove the conflicting Docker publish, then `sudo systemctl restart sygnif-dashboard-btc-terminal`.
+**Port 8888 — one listener only:** `sygnif-dashboard-btc-terminal`, `sygnif-dashboard-spot`, and **Docker** services that publish **8888** (e.g. **`nautilus-jupyter-lab`** `8888:8888`) **cannot** all run at once. Stop the conflicting unit/container or set `SYGNIF_BTC_TERMINAL_PORT` (e.g. `8891`) in `.env` for the terminal unit. Then `sudo systemctl restart sygnif-dashboard-btc-terminal`.
 
 ### Reverse SSH tunnel (optional — stable URL via your own gateway)
 
@@ -358,6 +361,8 @@ See `research/nautilus_lab/README.md` and `SWING_FAILURE_ANALYSIS.md`.
 ## Optional: `nautilus-grid-btc01` (Nautilus **GridMarketMaker** on Bybit demo, BTCUSDT linear)
 
 Profile **`btc-grid-mm`**: places live **demo** orders via Nautilus `GridMarketMaker`. Set **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** in `.env` plus **`BYBIT_DEMO_*`**. Prefer **`BYBIT_DEMO_GRID_*`** (or a separate demo key) if you also run other Bybit demo linear bots.
+
+**Sizing (defaults in `docker-compose.yml`):** **`NAUTILUS_GRID_BTC01_NUM_LEVELS=8`** → up to **16** resting post-only limits (8 bid + 8 ask rungs) when flat and **`NAUTILUS_GRID_BTC01_MAX_POSITION`** allows (`≥ num_levels × trade_size` per side). Wider **`NAUTILUS_GRID_BTC01_GRID_STEP_BPS`** spreads rungs for larger BTC moves. **`NAUTILUS_GRID_BTC01_REQUOTE_BPS`** (wider = fewer cancel/replace cycles) plus **`NAUTILUS_GRID_BTC01_REQUOTE_MIN_SEC`** debounce reduce orders “flashing” on the Bybit UI when quote ticks outpace cancel acks; override in `.env` if needed.
 
 **Persistent after reboot:** service uses **`restart: unless-stopped`**. Add **`COMPOSE_PROFILES=btc-grid-mm`** (alone or comma-appended) to `.env` so a normal **`docker compose up -d`** from `~/SYGNIF` recreates the grid after a host restart (still needs `finance-agent` healthy).
 

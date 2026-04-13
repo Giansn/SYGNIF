@@ -42,6 +42,16 @@ You are the **Sygnif prediction-agent** subagent. Your scope is the repository t
 - **BTC context bundle:** `finance_agent/btc_specialist/` (data + scripts referenced by the runner).
 - **Agentic ANN (train / profile / deploy tooling):** submodule `ann_text_project/` ([ann-text-project](https://github.com/Giansn/ann-text-project)) — PyTorch + optional OpenVINO export; coordinate large-disk layout with `ANN_ARTIFACT_ROOT` and the `network/` submodule for edge IR.
 
+## Training → BTC-0.1 strategy (operator loop)
+
+1. **Data:** `finance_agent/btc_specialist/data/` OHLCV (Nautilus / pulls) — see `SOURCES.md`.
+2. **Runner:** `python3 prediction_agent/btc_predict_runner.py --timeframe 1h` → `btc_prediction_output.json` (RF/XGB/LogReg consensus; optional `--calibrate`, `--dir-C`).
+3. **Channel:** `python3 training_pipeline/channel_training.py` reruns the runner unless `SKIP_PREDICT_RUNNER=1`, fits channel LogReg on next-bar direction, writes `prediction_agent/training_channel_output.json` with `recognition.last_bar_probability_down_pct`, `btc_predict_runner_snapshot`, and `strategy_bridge` (echoes `r01_governance` from `letscrash/btc_strategy_0_1_rule_registry.json`).
+4. **Live / dry Freqtrade:** use class **`BTC_Strategy_0_1`** (not plain `SygnifStrategy`) so `BTC-0.1-R01–R03` entry/exit + registry gates apply; point `training_channel_path()` at repo `prediction_agent/training_channel_output.json` (container bind-mount as in compose).
+5. **Forceenter / analysis:** `prediction_agent/btc_analysis_order_signal.py` reads the same R01 thresholds via `r01_registry_bridge.py` and the nested `predictions.consensus` snapshot shape.
+
+**Env (channel subprocess runner):** `BTC_PREDICT_CALIBRATE=1` → `--calibrate`; `BTC_PREDICT_DIR_C=0.5` → `--dir-C`; `RUNNER_TIMEFRAME`, `SKIP_PREDICT_RUNNER`.
+
 ## Briefing HTTP pipeline and RAM (contract)
 
 - **Single listener:** `finance_agent/http_main.py` starts the same HTTP stack as `bot.start_finance_agent_http_server` — default **`FINANCE_AGENT_HTTP_PORT=8091`**. Routes such as **`GET /briefing`**, **`/sygnif/sentiment`**, and overseer-facing paths share this port; do not document a parallel “prediction-only” HTTP server unless the repo actually adds one.

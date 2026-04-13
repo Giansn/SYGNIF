@@ -119,14 +119,36 @@ def main() -> int:
         default="0.01",
         help="Per-level order size; must meet venue min lot / step",
     )
-    ap.add_argument("--num-levels", type=int, default=2)
-    ap.add_argument("--grid-step-bps", type=int, default=15)
+    ap.add_argument(
+        "--num-levels",
+        type=int,
+        default=8,
+        help="Bid/ask rungs per side; max resting limits ≈ 2× this (capped by --max-position). Default 8 → up to 16 orders.",
+    )
+    ap.add_argument("--grid-step-bps", type=int, default=18)
     ap.add_argument("--skew-factor", type=float, default=0.0)
     ap.add_argument(
         "--requote-threshold-bps",
         type=int,
-        default=4,
-        help="Mid move (bps) before full re-quote; lower = more frequent grid updates",
+        default=28,
+        help="Mid move (bps) before full re-quote; lower = more frequent grid updates (default widened to reduce UI churn).",
+    )
+    ap.add_argument(
+        "--requote-min-interval-secs",
+        type=float,
+        default=4.0,
+        help="Min seconds between full cancel+replace while orders exist; 0=off. Cuts pop/vanish on Bybit UI.",
+    )
+    ap.add_argument(
+        "--emergency-requote-mult",
+        type=float,
+        default=4.0,
+        help="Mid must move requote_bps*this (relative) to bypass min-interval when resting/inflight.",
+    )
+    ap.add_argument(
+        "--clear-anchor-on-reject",
+        action="store_true",
+        help="Reset mid anchor on OrderRejected (legacy stormy behaviour).",
     )
     ap.add_argument(
         "--merged-single",
@@ -177,7 +199,7 @@ def main() -> int:
         exec_engine=LiveExecEngineConfig(
             reconciliation=True,
             reconciliation_instrument_ids=[instrument_id],
-            open_check_interval_secs=10.0,
+            open_check_interval_secs=20.0,
             open_check_open_only=True,
             graceful_shutdown_on_exception=True,
         ),
@@ -215,6 +237,9 @@ def main() -> int:
         grid_step_bps=args.grid_step_bps,
         skew_factor=args.skew_factor,
         requote_threshold_bps=args.requote_threshold_bps,
+        requote_min_interval_secs=args.requote_min_interval_secs,
+        emergency_requote_multiplier=args.emergency_requote_mult,
+        clear_mid_anchor_on_reject=args.clear_anchor_on_reject,
         on_cancel_resubmit=args.on_cancel_resubmit,
     )
 
@@ -233,7 +258,8 @@ def main() -> int:
     print(
         f"[grid-mm-live] demo=True | {instrument_id} | position_mode={pm} | trade_size={args.trade_size} | "
         f"max_position={args.max_position} | levels={args.num_levels} | step_bps={args.grid_step_bps} | "
-        f"requote_bps={args.requote_threshold_bps}",
+        f"requote_bps={args.requote_threshold_bps} | requote_min_s={args.requote_min_interval_secs} | "
+        f"emergency_mult={args.emergency_requote_mult}",
         flush=True,
     )
     try:

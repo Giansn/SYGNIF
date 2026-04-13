@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from r01_registry_bridge import load_r01_governance, runner_consensus_from_snapshot
+
 
 class ForceenterIntent(TypedDict):
     side: str
@@ -19,20 +21,33 @@ class ForceenterIntent(TypedDict):
 
 
 def r01_bearish_from_training(doc: dict[str, Any]) -> bool:
-    """Same predicate as ``r01_training_runner_bearish`` but from an in-memory ``recognition`` dict."""
+    """Match ``btc_strategy_0_1_engine.r01_training_runner_bearish`` (registry thresholds + snapshot shape)."""
+    enabled, p_min, cons_need = load_r01_governance()
+    if not enabled:
+        return False
     rec = doc.get("recognition") or {}
     try:
         p_down = float(rec.get("last_bar_probability_down_pct") or 0.0)
     except (TypeError, ValueError):
         p_down = 0.0
     snap = rec.get("btc_predict_runner_snapshot") or {}
-    cons = str(snap.get("consensus", "") or "").strip().upper()
-    return p_down >= 90.0 and cons == "BEARISH"
+    cons = runner_consensus_from_snapshot(snap if isinstance(snap, dict) else {})
+    return p_down >= p_min and cons == cons_need
+
+
+def _normalize_consensus_label(label: str) -> str:
+    u = (label or "").strip().upper()
+    if u == "STRONG_BULLISH":
+        return "BULLISH"
+    if u == "STRONG_BEARISH":
+        return "BEARISH"
+    return u
 
 
 def _consensus_from_prediction(pred: dict[str, Any]) -> str:
     p = pred.get("predictions") or {}
-    return str(p.get("consensus", "") or "").strip().upper()
+    raw = str(p.get("consensus_nautilus_enhanced", "") or p.get("consensus", "") or "").strip()
+    return _normalize_consensus_label(raw)
 
 
 def _direction_fallback(pred: dict[str, Any], min_conf: float) -> str | None:
@@ -74,6 +89,10 @@ def decide_forceenter_intent(
     cons = _consensus_from_prediction(btc_prediction)
     if not cons:
         cons = _direction_fallback(btc_prediction, direction_min_confidence) or ""
+    cons = _normalize_consensus_label(cons)
+
+    if cons == "MIXED":
+        return None
 
     if cons == "BULLISH":
         if bear:

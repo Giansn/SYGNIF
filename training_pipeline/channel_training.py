@@ -32,6 +32,7 @@ from btc_predict_runner import (  # noqa: E402
     build_windowed_dataset,
     load_bybit_ohlcv,
 )
+from r01_registry_bridge import load_r01_governance  # noqa: E402
 from rule_tag_journal import append_channel_training_event  # noqa: E402
 from sklearn.linear_model import LogisticRegression  # noqa: E402
 from sklearn.metrics import brier_score_loss  # noqa: E402
@@ -94,6 +95,11 @@ def run_subprocess_predict_runner() -> bool:
     if os.environ.get("SKIP_PREDICT_RUNNER", "").lower() in ("1", "true", "yes"):
         return False
     cmd = [sys.executable, str(exe), "--timeframe", os.environ.get("RUNNER_TIMEFRAME", "1h")]
+    if os.environ.get("BTC_PREDICT_CALIBRATE", "").lower() in ("1", "true", "yes"):
+        cmd.append("--calibrate")
+    dir_c = os.environ.get("BTC_PREDICT_DIR_C", "").strip()
+    if dir_c:
+        cmd.extend(["--dir-C", dir_c])
     print("[channel] running:", " ".join(cmd), flush=True)
     r = subprocess.run(cmd, cwd=str(PA))
     if r.returncode != 0:
@@ -160,6 +166,7 @@ def main() -> None:
             runner_block = json.load(f)
 
     channel_completed_utc = _utc_now()
+    r01_en, r01_pmin, r01_cons = load_r01_governance()
     runner_utc = runner_block.get("generated_utc") if isinstance(runner_block.get("generated_utc"), str) else None
     # Single proof boundary: top-level generated_utc matches runner file when that snapshot is embedded (§8).
     generated_utc = runner_utc or channel_completed_utc
@@ -174,11 +181,20 @@ def main() -> None:
         "r01": "L0: next-bar / runner extremes in training JSON are timing context — not sole basis to widen long risk; re-run channel if stale.",
         "r02": "Governance: HTF regime + dump script + btc_trend_long_row before trusting LTF pine-style overlays; R03 sleeve stays subordinate.",
     }
+    strategy_bridge = {
+        "btc_strategy_0_1_rule_registry": "letscrash/btc_strategy_0_1_rule_registry.json",
+        "r01_governance_enabled": r01_en,
+        "r01_p_down_min_pct": r01_pmin,
+        "r01_runner_consensus_equals": r01_cons,
+        "training_flow": "channel_training → training_channel_output.json (recognition + btc_predict_runner_snapshot) → BTC_Strategy_0_1 confirm + btc_analysis_order_signal",
+        "runner_flags_hint": "Set BTC_PREDICT_CALIBRATE=1 for isotonic LogReg; BTC_PREDICT_DIR_C for --dir-C",
+    }
 
     out = {
         "generated_utc": generated_utc,
         "channel_completed_utc": channel_completed_utc,
         "predict_runner_alignment": alignment,
+        "strategy_bridge": strategy_bridge,
         "ruleprediction_briefing": ruleprediction_briefing,
         "inflow": {
             "channels": channel_inflow_report(),

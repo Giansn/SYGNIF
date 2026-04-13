@@ -50,7 +50,7 @@ Both traders mount `./user_data` and share strategy files. The compact `/status`
 | ------------------------- | ---- |
 | `nautilus-research`       | Bybit OHLCV sink + `nautilus_sidecar_strategy` → `btc_specialist/data/` |
 | `nautilus-sygnif-btc-node` | `SygnifBtcBarNodeStrategy` on **5m** linear bars: optional post-only demo buys, sidecar + ML gates |
-| `nautilus-grid-btc01`     | (profile `btc-grid-mm`) Grid market maker on BTC linear **demo** |
+| `nautilus-grid-btc01`     | (profile `btc-grid-mm`) Grid MM on BTC linear **demo** (default **8** levels → up to **16** resting limits) |
 
 ```bash
 docker compose --profile btc-nautilus up -d --build

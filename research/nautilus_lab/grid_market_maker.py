@@ -31,6 +31,7 @@ discourage inventory buildup (Avellaneda-Stoikov inspired).
 
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -68,7 +69,9 @@ class GridMarketMakerConfig(StrategyConfig, frozen=True):
         The order size per grid level. If ``None``, resolved from the instrument's
         ``min_quantity`` on start, falling back to 1.0.
     num_levels : PositiveInt, default 3
-        The number of buy and sell levels.
+        The number of buy and sell rungs per side. Resting count is at most ``2 * num_levels``
+        (one bid + one ask per rung), subject to ``max_position`` / exposure checks — e.g.
+        ``num_levels=8`` → up to **16** post-only limits when flat and limits allow.
     grid_step_bps : PositiveInt, default 10
         The grid spacing in basis points of mid-price (geometric grid).
         E.g. ``10`` = 10 bps = 0.1%. Buy level N = mid * (1 - bps/10000)^N.
@@ -77,6 +80,15 @@ class GridMarketMakerConfig(StrategyConfig, frozen=True):
         Each unit of net position shifts prices by ``skew_factor`` price units.
     requote_threshold_bps : PositiveInt, default 5
         The minimum mid-price move (bps) before re-quoting.
+    requote_min_interval_secs : NonNegativeFloat, default 0
+        Minimum wall time between full cancel+replace cycles while orders are still open or
+        inflight. Reduces Bybit UI flicker and retCode 10002 storms when quote ticks arrive
+        faster than cancel acks. ``0`` disables.
+    emergency_requote_multiplier : NonNegativeFloat, default 4.0
+        Mid must move by ``requote_threshold_bps * multiplier`` (relative) to bypass the
+        min-interval gate when resting/inflight orders exist.
+    clear_mid_anchor_on_reject : bool, default False
+        If True, reset the requote anchor on ``OrderRejected`` (legacy: immediate full retry).
     expire_time_secs : PositiveInt, optional
         Order expiry in seconds. Uses GTD when set, GTC otherwise.
     on_cancel_resubmit : bool, default False
@@ -92,6 +104,9 @@ class GridMarketMakerConfig(StrategyConfig, frozen=True):
     grid_step_bps: PositiveInt = 10
     skew_factor: NonNegativeFloat = 0.0
     requote_threshold_bps: PositiveInt = 5
+    requote_min_interval_secs: NonNegativeFloat = 0.0
+    emergency_requote_multiplier: NonNegativeFloat = 4.0
+    clear_mid_anchor_on_reject: bool = False
     expire_time_secs: PositiveInt | None = None
     on_cancel_resubmit: bool = False
 
@@ -118,6 +133,7 @@ class GridMarketMaker(Strategy):
         self._trade_size: Quantity | None = config.trade_size
         self._price_precision: int | None = None
         self._last_quoted_mid: Price | None = None
+        self._last_requote_submit_ns: int | None = None
         self._pending_self_cancels: set[ClientOrderId] = set()
 
     def on_start(self) -> None:
@@ -169,6 +185,17 @@ class GridMarketMaker(Strategy):
         if not self._should_requote(mid) and has_resting:
             return
 
+        # Debounce full refresh: quote ticks often outpace cancel acks → inflight pile-up + UI flicker.
+        min_iv = float(self.config.requote_min_interval_secs or 0.0)
+        if min_iv > 0.0 and self._last_requote_submit_ns is not None:
+            elapsed = (time.time_ns() - self._last_requote_submit_ns) / 1e9
+            if elapsed < min_iv and not self._should_requote_emergency(mid):
+                if has_resting:
+                    return
+                # Grid empty but very recent submit — avoid hammering venue after mass cancel/reject
+                if self._last_quoted_mid is not None:
+                    return
+
         self.log.info(
             f"Requoting grid: mid={mid}, last_mid={self._last_quoted_mid}, "
             f"instrument={instrument_id}",
@@ -181,6 +208,7 @@ class GridMarketMaker(Strategy):
             ):
                 self._pending_self_cancels.add(order.client_order_id)
 
+        self._last_requote_submit_ns = time.time_ns()
         self.cancel_all_orders(instrument_id)
 
         # Compute worst-case per-side exposure since cancels are async
@@ -230,8 +258,9 @@ class GridMarketMaker(Strategy):
         Actions to be performed when an order is rejected.
         """
         self._pending_self_cancels.discard(event.client_order_id)
-        # Reset so the next quote tick can retry placing the full grid
-        self._last_quoted_mid = None
+        if self.config.clear_mid_anchor_on_reject:
+            # Legacy: immediate full retry on every tick (can cause cancel/reject storms).
+            self._last_quoted_mid = None
 
     def on_order_expired(self, event: OrderExpired) -> None:
         """
@@ -261,6 +290,7 @@ class GridMarketMaker(Strategy):
         self._trade_size = self.config.trade_size
         self._price_precision = None
         self._last_quoted_mid = None
+        self._last_requote_submit_ns = None
         self._pending_self_cancels.clear()
 
     def _should_requote(self, mid: Price) -> bool:
@@ -270,6 +300,17 @@ class GridMarketMaker(Strategy):
         if last_f64 == 0.0:
             return True
         threshold = self.config.requote_threshold_bps / 10_000.0
+        return abs(float(mid) - last_f64) / last_f64 >= threshold
+
+    def _should_requote_emergency(self, mid: Price) -> bool:
+        """Larger mid move — bypass debounce so the grid can catch a fast market."""
+        if self._last_quoted_mid is None:
+            return True
+        last_f64 = float(self._last_quoted_mid)
+        if last_f64 == 0.0:
+            return True
+        mult = max(1.0, float(self.config.emergency_requote_multiplier or 1.0))
+        threshold = (self.config.requote_threshold_bps * mult) / 10_000.0
         return abs(float(mid) - last_f64) / last_f64 >= threshold
 
     def _compute_exposure(
