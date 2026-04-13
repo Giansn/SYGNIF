@@ -28,6 +28,12 @@ Before changing **Docker**, **compose**, or **.mdc** rules for prediction/BTC pi
 | **Predict workflow** | `.cursor/rules/sygnif-predict-workflow.mdc` |
 | **Trade execution agent (Cursor)** | ID **`fe028603-b781-4013-932c-da706932e7de`** — use with **`/ruleprediction-agent`** to **govern trade executions** (L3 / auditable paths: `btc_analysis_forceenter`, Freqtrade API, `rule_trade_agent_helper`, strategy tags). Do not bypass R01 / adaptation policy without explicit owner sign-off. |
 
+### Execution vs. “Bybit webhook” (canonical)
+
+- **Cursor UUID** is for **Cursor** (chat / Cloud Agent routing with **`/ruleprediction-agent`**). It is **not** an HTTP or Bybit callback this repo calls from systemd.
+- **Webhooks in Sygnif:** Freqtrade → **`notification-handler`** `POST /webhook` (alerts / Telegram). That path **does not place** venue orders.
+- **Orders:** go through **Freqtrade** (e.g. **`scripts/ft_btc_0_1_forceenter.py`**, strategy entries) or **`trade_overseer`** `ensure_entry` with **`OVERSEER_ENSURE_TOKEN`** — signed REST, gated by `dry_run` / `OVERSEER_ENSURE_LIVE_OK`. **`rule_trade_agent_helper`** stays **read-only**; snapshot now includes **`btc_24h_movement`** from **`btc_24h_movement_prediction.json`** for agent context only.
+
 **Long-form loop + indicator wishlist + btc_Trader_Docker I/O table:** **`letscrash/RULE_AND_DATA_FLOW_LOOP.md`** — rules **evolve**; that file is the canonical narrative for the **continuous information → train → propose → prove → test → rm/apply → compare** cycle.
 
 ## Trading rule generation from incoming data (`/ruleprediction-agent` intent)

@@ -76,6 +76,12 @@ def load_btc_prediction(root: Path | None = None) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+def load_btc_24h_movement_prediction(root: Path | None = None) -> dict[str, Any] | None:
+    """``btc_24h_movement_prediction.json`` from ``scripts/btc_24h_movement_prediction.py`` (optional)."""
+    raw = _load_json((root or repo_root()) / "prediction_agent" / "btc_24h_movement_prediction.json")
+    return raw if isinstance(raw, dict) else None
+
+
 def load_nautilus_btc_1h(root: Path | None = None) -> dict[str, Any] | None:
     """Optional regime / OHLCV mirror used by training + btc-specialist."""
     r = root or repo_root()
@@ -142,8 +148,8 @@ def build_rule_trade_agent_snapshot(
     Single JSON-serializable dict for **rule prediction / trade subagents** (read-only).
 
     Keys: ``whitelist``, ``registry``, ``training_channel``, ``btc_prediction``,
-    ``nautilus_btc_1h``, ``overseer`` (overview + filtered trades), ``plays_file``,
-    ``r_guidance``, ``leverage_note``.
+    ``btc_24h_movement``, ``nautilus_btc_1h``, ``overseer`` (overview + filtered trades),
+    ``plays_file``, ``r_guidance``, ``leverage_note``.
     """
     r = root or repo_root()
     reg = load_rule_registry(r)
@@ -173,6 +179,7 @@ def build_rule_trade_agent_snapshot(
         "r_guidance": r_guidance,
         "training_channel": load_training_channel(r),
         "btc_prediction": load_btc_prediction(r),
+        "btc_24h_movement": load_btc_24h_movement_prediction(r),
         "nautilus_btc_1h": load_nautilus_btc_1h(r),
         "overseer": {
             "overview": ov_overview,
@@ -200,6 +207,13 @@ def format_brief_lines(snapshot: dict[str, Any], *, max_lines: int = 12) -> str:
     tc = snapshot.get("training_channel")
     if isinstance(tc, dict):
         lines.append(f"training_channel_generated={tc.get('generated_utc', '?')[:24]}")
+    m24 = snapshot.get("btc_24h_movement")
+    if isinstance(m24, dict):
+        syn = m24.get("synthesis") or {}
+        lines.append(
+            f"btc_24h|bias={syn.get('bias_24h')}|conf={syn.get('confidence_0_100')}|"
+            f"utc={str(m24.get('generated_utc', '?'))[:24]}"
+        )
     return "\n".join(lines[:max_lines])
 
 
