@@ -14,6 +14,7 @@ Usage:
   python3 btc_predict_runner.py              # defaults to 1h data
   python3 btc_predict_runner.py --timeframe daily
   python3 btc_predict_runner.py --window 10  # look-back window size
+  python3 btc_predict_runner.py --calibrate --dir-C 0.25  # calibrated direction + tuned C
 """
 
 import json
@@ -21,6 +22,7 @@ import os
 import sys
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -31,11 +33,44 @@ from sklearn.metrics import (
     mean_absolute_error, mean_squared_error,
     accuracy_score, precision_score, recall_score, f1_score,
 )
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import TimeSeriesSplit
 import xgboost as xgb
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Repo layout: <SYGNIF>/prediction_agent/this.py  →  data in <SYGNIF>/finance_agent/...
 DATA_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "..", "finance_agent", "btc_specialist", "data"))
+
+
+def load_nautilus_research_hints(data_dir: str) -> dict:
+    """Metadata from Nautilus research sink + sidecar (same dir as OHLCV)."""
+    out: dict = {}
+    sidecar = os.path.join(data_dir, "nautilus_strategy_signal.json")
+    bundle = os.path.join(data_dir, "nautilus_spot_btc_market_bundle.json")
+    for path, key in ((sidecar, "sidecar_signal"), (bundle, "spot_market_bundle")):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        if key == "sidecar_signal":
+            out[key] = {
+                "generated_utc": raw.get("generated_utc"),
+                "bias": raw.get("bias"),
+                "close": raw.get("close"),
+                "rsi14": raw.get("rsi14"),
+            }
+        else:
+            out[key] = {
+                "generated_utc": raw.get("generated_utc"),
+                "symbol": raw.get("symbol") or raw.get("instrument_id"),
+            }
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -87,6 +122,16 @@ def add_ta_features(df):
     df["VOL_SMA_20"] = v.rolling(20).mean()
     df["Close_pct"] = c.pct_change()
     df["Mean_pct"] = m.pct_change()
+
+    # Regime / structure features (causal — no future leak)
+    df["EMA_200"] = c.ewm(span=200, adjust=False).mean()
+    df["dist_ema200_pct"] = (c - df["EMA_200"]) / df["EMA_200"].replace(0, np.nan) * 100.0
+    mid_bb = df["BB_mid"].replace(0, np.nan)
+    df["BB_width_pct"] = (df["BB_upper"] - df["BB_lower"]) / mid_bb * 100.0
+    df["MACD_hist_delta"] = df["MACD_hist"].diff(2)
+    vol_std = v.rolling(20).std().replace(0, np.nan)
+    df["VOL_z"] = (v - df["VOL_SMA_20"]) / vol_std
+    df["RSI_x_Close_pct"] = df["RSI_14"] * df["Close_pct"]
 
     df.dropna(inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -166,7 +211,32 @@ def run_xgboost(X_train, y_train, X_test, y_test):
     }
 
 
-def run_direction_classifier(X_train, y_train_raw, X_test, y_test_raw):
+def _make_direction_model(*, calibrate: bool, C: float):
+    # saga + elasticnet l1_ratio=1 ≈ L1; avoids sklearn 1.8+ liblinear penalty deprecations
+    base = LogisticRegression(
+        solver="saga",
+        penalty="elasticnet",
+        l1_ratio=1.0,
+        C=C,
+        max_iter=1200,
+        random_state=42,
+    )
+    if not calibrate:
+        return base
+    n_splits = 3
+    cv = TimeSeriesSplit(n_splits=n_splits)
+    return CalibratedClassifierCV(estimator=base, cv=cv, method="isotonic")
+
+
+def run_direction_classifier(
+    X_train,
+    y_train_raw,
+    X_test,
+    y_test_raw,
+    *,
+    calibrate: bool = False,
+    C: float = 1.0,
+):
     y_train_dir = (np.diff(np.concatenate([[y_train_raw[0]], y_train_raw])) > 0).astype(int)[1:]
     y_test_dir = (np.diff(np.concatenate([[y_test_raw[0]], y_test_raw])) > 0).astype(int)[1:]
 
@@ -177,7 +247,7 @@ def run_direction_classifier(X_train, y_train_raw, X_test, y_test_raw):
     X_tr_s = scaler.fit_transform(X_tr)
     X_te_s = scaler.transform(X_te)
 
-    model = LogisticRegression(solver="liblinear", l1_ratio=1, C=1.0, max_iter=300)
+    model = _make_direction_model(calibrate=calibrate, C=C)
     model.fit(X_tr_s, y_train_dir)
     preds = model.predict(X_te_s)
     proba = model.predict_proba(X_te_s)
@@ -188,6 +258,36 @@ def run_direction_classifier(X_train, y_train_raw, X_test, y_test_raw):
         "Recall": recall_score(y_test_dir, preds, zero_division=0),
         "F1": f1_score(y_test_dir, preds, zero_division=0),
     }, y_test_dir
+
+
+def nautilus_enhanced_consensus(
+    consensus: str,
+    consensus_up_votes: int,
+    logreg_up: bool,
+    nautilus_hints: dict,
+) -> tuple[str, dict]:
+    """
+    Adjust displayed consensus using **current** Nautilus sidecar bias (live metadata only).
+    Does not affect backtest metrics (no historical sidecar per bar).
+    """
+    meta: dict = {"sidecar_bias": None, "note": None}
+    side = (nautilus_hints or {}).get("sidecar_signal") or {}
+    bias = (side.get("bias") or "").lower().strip()
+    meta["sidecar_bias"] = bias or None
+
+    if bias == "short" and consensus_up_votes >= 2:
+        meta["note"] = "Sidecar short vs bullish models — marked cautious"
+        return "MIXED", meta
+    if bias == "long" and consensus_up_votes <= 1:
+        meta["note"] = "Sidecar long vs bearish models — marked cautious"
+        return "MIXED", meta
+    if bias == "long" and logreg_up and consensus == "BULLISH":
+        meta["note"] = "Sidecar aligned with bullish stack"
+        return "STRONG_BULLISH", meta
+    if bias == "short" and not logreg_up and consensus == "BEARISH":
+        meta["note"] = "Sidecar aligned with bearish stack"
+        return "STRONG_BEARISH", meta
+    return consensus, meta
 
 
 def direction_accuracy(actual, predicted):
@@ -214,6 +314,22 @@ def main():
     parser.add_argument("--timeframe", choices=["1h", "daily"], default="1h")
     parser.add_argument("--window", type=int, default=5, help="Look-back window size")
     parser.add_argument("--test-ratio", type=float, default=0.2, help="Fraction held out for testing")
+    parser.add_argument(
+        "--journal",
+        action="store_true",
+        help="Append btc_prediction_output.json to btc_nauti_prediction_journal.jsonl (nauti agent dataset)",
+    )
+    parser.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="Isotonic probability calibration on direction LogReg (time-series CV on train)",
+    )
+    parser.add_argument(
+        "--dir-C",
+        type=float,
+        default=1.0,
+        help="L1 LogReg C for direction model (try values from btc_nauti_predict_agent tune)",
+    )
     args = parser.parse_args()
 
     data_file = {
@@ -223,7 +339,10 @@ def main():
 
     print(f"\n{'='*70}")
     print(f"  BTC Price Prediction — Bybit {args.timeframe} candles")
-    print(f"  Window: {args.window} bars  |  Test split: {args.test_ratio*100:.0f}%")
+    print(
+        f"  Window: {args.window} bars  |  Test split: {args.test_ratio*100:.0f}%"
+        f"  |  dir_C={args.dir_C}  |  calibrate={args.calibrate}"
+    )
     print(f"{'='*70}\n")
 
     # Load & feature-engineer
@@ -264,7 +383,14 @@ def main():
     print(f"\n{'─'*70}")
     print("  MODEL 3: Logistic Regression (next-bar direction: UP / DOWN)")
     print(f"{'─'*70}")
-    dir_preds, dir_proba, dir_metrics, y_test_dir = run_direction_classifier(X_train, y_train, X_test, y_test)
+    dir_preds, dir_proba, dir_metrics, y_test_dir = run_direction_classifier(
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        calibrate=args.calibrate,
+        C=args.dir_C,
+    )
     for k, v in dir_metrics.items():
         print(f"    {k:20s}  {fmt_pct(v * 100)}")
 
@@ -277,16 +403,19 @@ def main():
     xgb_next = xgb_preds[-1]
 
     scaler = StandardScaler()
-    scaler.fit(X_train[1:])
+    X_tr_tail = X_train[1:]
+    scaler.fit(X_tr_tail)
     last_scaled = scaler.transform(last_window)
-    lr_model = LogisticRegression(solver="liblinear", l1_ratio=1, C=1.0, max_iter=300)
     y_dir_train = (np.diff(np.concatenate([[y_train[0]], y_train])) > 0).astype(int)[1:]
-    lr_model.fit(scaler.transform(X_train[1:]), y_dir_train)
-    dir_next = lr_model.predict(last_scaled)[0]
+    lr_model = _make_direction_model(calibrate=args.calibrate, C=args.dir_C)
+    lr_model.fit(scaler.transform(X_tr_tail), y_dir_train)
+    dir_next = int(lr_model.predict(last_scaled)[0])
     dir_proba_next = lr_model.predict_proba(last_scaled)[0]
 
     rf_delta = rf_next - last_close
     xgb_delta = xgb_next - last_close
+
+    nautilus_hints = load_nautilus_research_hints(DATA_DIR)
 
     print(f"\n{'='*70}")
     print(f"  PREDICTIONS (next bar after {last_date.strftime('%Y-%m-%d %H:%M UTC')})")
@@ -298,21 +427,34 @@ def main():
     print(f"  Direction (LogReg):      {'UP' if dir_next == 1 else 'DOWN'}  (confidence: {max(dir_proba_next)*100:.1f}%)")
     print()
 
-    consensus_up = sum([rf_delta > 0, xgb_delta > 0, dir_next == 1])
+    logreg_up = dir_next == 1
+    consensus_up = sum([rf_delta > 0, xgb_delta > 0, logreg_up])
     if consensus_up >= 2:
         consensus = "BULLISH"
     elif consensus_up <= 1:
         consensus = "BEARISH"
     else:
         consensus = "MIXED"
+    enhanced, n_consensus_meta = nautilus_enhanced_consensus(
+        consensus, consensus_up, logreg_up, nautilus_hints
+    )
     print(f"  Consensus ({consensus_up}/3 up):       {consensus}")
+    print(f"  Nautilus-enhanced:            {enhanced}")
+    if n_consensus_meta.get("note"):
+        print(f"    ({n_consensus_meta['note']})")
     print(f"{'='*70}\n")
 
-    # Save predictions to JSON
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "timeframe": args.timeframe,
         "window_size": args.window,
+        "model_options": {
+            "dir_C": args.dir_C,
+            "calibrate": args.calibrate,
+            "regime_features": True,
+        },
+        "nautilus_research": nautilus_hints,
+        "nautilus_consensus_meta": n_consensus_meta,
         "last_candle_utc": last_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "current_close": round(last_close, 2),
         "predictions": {
@@ -323,6 +465,7 @@ def main():
                 "confidence": round(max(dir_proba_next) * 100, 1),
             },
             "consensus": consensus,
+            "consensus_nautilus_enhanced": enhanced,
         },
         "backtest_metrics": {
             "random_forest": {k: round(v, 4) for k, v in rf_metrics.items()},
@@ -351,6 +494,18 @@ def main():
     with open(out_path, "w") as f:
         json.dump(out, f, indent=2, cls=NumpyEncoder)
     print(f"  Results saved → {out_path}\n")
+
+    if args.journal:
+        _pd = Path(__file__).resolve().parent
+        if str(_pd) not in sys.path:
+            sys.path.insert(0, str(_pd))
+        from btc_nauti_predict_agent import append_journal_from_output
+
+        row = append_journal_from_output(Path(out_path), skip_duplicate_bar=True)
+        if row:
+            print(f"  Nauti journal appended id={row['id']} bar={row['pred_bar_utc']}\n")
+        else:
+            print("  Nauti journal: skip (duplicate open bar or missing file)\n")
 
 
 if __name__ == "__main__":

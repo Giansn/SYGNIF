@@ -15,7 +15,7 @@ Design notes and **plans** that may land in main Sygnif code later. Most of this
 | `../user_data/config_btc_strategy_0_1_bybit_demo.example.json` | **Futures demo** template for `BTC_Strategy_0_1` — copy to gitignored `config_futures.json`; keys from Bybit demo UI |
 | [BTC_DUMP_PROTECTION_DESIGN.md](./BTC_DUMP_PROTECTION_DESIGN.md) | BTC **Dump-Schutz** / Short+Trail-Inspiration (QuantumEdge + chikaharu MA), Mapping zu Sygnif + **`ruleprediction-agent`**-Loop |
 | `../user_data/config_btc_spot_dedicated.bybit_demo.example.json` | **Bybit demo** CCXT URLs (`api-demo.bybit.com`) + `defaultType: spot` — copy/merge for demo keys |
-| [../research/nautilus_lab/README.md](../research/nautilus_lab/README.md) | **Implementiert:** Nautilus **`BybitHttpClient`** (spot **BTC/USDT** only) → `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `nautilus_spot_btc_market_bundle.json`; Compose **`docker-compose.btc-nautilus-research.yml`**; **`ruleprediction-agent`** globs erweitert |
+| [../research/nautilus_lab/README.md](../research/nautilus_lab/README.md) | **Implementiert:** Nautilus **`BybitHttpClient`** (spot **BTC/USDT** only) → `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `nautilus_spot_btc_market_bundle.json`; Compose **`docker-compose.yml`** profile **`btc-nautilus`** |
 
 ### Nautilus ↔ training (kurz, Apr 2026)
 

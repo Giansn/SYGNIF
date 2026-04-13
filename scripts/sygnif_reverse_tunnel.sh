@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Persistent reverse SSH tunnel: remote host:port → local Sygnif HTTP (default BTC Terminal :8891).
+# Persistent reverse SSH tunnel: remote host:port → local Sygnif HTTP (default BTC Terminal :8888).
 # Run under systemd (see systemd/sygnif-reverse-tunnel.service). Requires outbound SSH to a gateway
 # you control; on the gateway, set GatewayPorts / PermitOpen as needed for public bind.
 set -euo pipefail
@@ -10,9 +10,9 @@ if [[ -z "${SYGNIF_REVERSE_TUNNEL_GATEWAY:-}" ]]; then
 fi
 
 REMOTE_BIND="${SYGNIF_REVERSE_TUNNEL_REMOTE_BIND:-127.0.0.1}"
-REMOTE_PORT="${SYGNIF_REVERSE_TUNNEL_REMOTE_PORT:-19891}"
+REMOTE_PORT="${SYGNIF_REVERSE_TUNNEL_REMOTE_PORT:-19888}"
 LOCAL_HOST="${SYGNIF_REVERSE_TUNNEL_LOCAL_HOST:-127.0.0.1}"
-LOCAL_PORT="${SYGNIF_REVERSE_TUNNEL_LOCAL_PORT:-8891}"
+LOCAL_PORT="${SYGNIF_REVERSE_TUNNEL_LOCAL_PORT:-8888}"
 
 SSH_OPTS=(
   -N

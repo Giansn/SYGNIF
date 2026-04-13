@@ -4,10 +4,7 @@
 
 ```bash
 cd ~/SYGNIF
-export COMPOSE_FILE=docker-compose.yml:docker-compose.nautilus-research.yml
-docker compose build nautilus-research
-docker compose up -d finance-agent   # if not already up
-docker compose up -d nautilus-research
+docker compose --profile btc-nautilus up -d --build finance-agent nautilus-research
 ```
 
 ## Exec examples
@@ -66,7 +63,8 @@ To attach **`GridMarketMaker`** live instead, reuse the same `TradingNodeConfig`
 
 - **Canonical script:** **`bybit_nautilus_spot_btc_training_feed.py`** — Nautilus **`BybitHttpClient`**: `request_instruments`, `request_bars` (1h + 1d), `request_tickers`, `request_trades`, `request_orderbook_snapshot`, `request_instrument_statuses`; optional **`request_fee_rates`** if `BYBIT_*` / `BYBIT_DEMO_*` keys exist in the container env.
 - **Outputs** (under `NAUTILUS_BTC_OHLCV_DIR`, default `/lab/btc_specialist_data`): **`btc_1h_ohlcv.json`**, **`btc_daily_90d.json`** (training + `btc_predict_runner`), **`btc_1h_ohlcv_nautilus_bybit.json`** (regime), **`nautilus_spot_btc_market_bundle.json`** (market snapshot JSON).
-- **Loop (bundled):** Service **`nautilus-research`** in **`docker-compose.yml`** (profile **`btc-nautilus`**) runs **`run_nautilus_bundled.sh`** — **sink** + **sidecar** in one container. Intervals **`NAUTILUS_BYBIT_POLL_SEC`** / **`NAUTILUS_STRATEGY_POLL_SEC`** (default 300s).
+- **Loop (bundled):** Service **`nautilus-research`** in **`docker-compose.yml`** (profile **`btc-nautilus`**) runs **`run_nautilus_bundled.sh`** — **sink** + **sidecar** in one container. Intervals **`NAUTILUS_BYBIT_POLL_SEC`** / **`NAUTILUS_STRATEGY_POLL_SEC`** (default 300s). Same profile also starts **`nautilus-sygnif-btc-node`** (`run_sygnif_btc_trading_node.py`) for BTC logic on a Nautilus **`TradingNode`** (Bybit **demo** keys).
+- **Bybit testnet bar node:** profile **`btc-testnet`** → **`nautilus-btc-testnet`** runs the same script with **`--testnet`** and **`BYBIT_TESTNET_API_KEY`** / **`BYBIT_TESTNET_API_SECRET`**. Start: [`scripts/start_nautilus_btc_testnet.sh`](../../scripts/start_nautilus_btc_testnet.sh).
 - **Legacy one-liner:** `bybit_nautilus_btc_ohlcv_sink.py` (1h only) remains for manual use.
 - **Env:** `NAUTILUS_BYBIT_DEMO` / `NAUTILUS_BYBIT_TESTNET`, `NAUTILUS_TRAINING_BAR_LIMIT_1H` (default 1600), `NAUTILUS_TRAINING_BAR_LIMIT_1D` (120), `NAUTILUS_TRAINING_TRADES_LIMIT`, `NAUTILUS_TRAINING_BOOK_LEVELS`, `NAUTILUS_TRAINING_BOOK_DELTA_CAP`.
 - **Consumers:** `training_pipeline/channel_training.py`, `prediction_agent/btc_predict_runner.py`, `btc_regime_assessment.py`.
@@ -74,7 +72,7 @@ To attach **`GridMarketMaker`** live instead, reuse the same `TradingNodeConfig`
 ### Strategy sidecar (same container as sink)
 
 - **Script:** `nautilus_sidecar_strategy.py` — reads sink `btc_1h_ohlcv.json`, writes **`nautilus_strategy_signal.json`**. Started by **`run_nautilus_bundled.sh`** alongside the Bybit sink (no second container).
-- **Optional second container:** merge **`docker-compose.nautilus-strategy-sidecar.yml`** only if you intentionally split sink vs sidecar.
+- **Split sink vs sidecar:** not supported as a separate compose file anymore; fork **`run_nautilus_bundled.sh`** if you need two processes in two containers.
 
 Upstream framework: [nautechsystems/nautilus_trader](https://github.com/nautechsystems/nautilus_trader). Official **example strategies** (develop): [nautilus_trader/examples/strategies](https://github.com/nautechsystems/nautilus_trader/tree/develop/nautilus_trader/examples/strategies) — includes **`ema_cross_hedge_mode.py`** (venue hedge-style / dual-side patterns in Nautilus’ OMS; not the same as this repo’s read-only **spot** HTTP sink). Other useful references: `ema_cross.py`, `orderbook_imbalance.py`, `blank.py` (template).
 
@@ -88,7 +86,7 @@ Upstream framework: [nautechsystems/nautilus_trader](https://github.com/nautechs
   - Optional env: `NAUTILUS_GRID_CATALOG` (default temp dir under `/tmp`).
 - **Host helper:** [`scripts/start_grid_market_maker.sh`](../../scripts/start_grid_market_maker.sh) — uses `docker exec` into `nautilus-research` when that container is running, else local `python3` if `nautilus_trader` is importable.
 - **Live demo (real orders on Bybit demo):** [`run_bybit_demo_grid_market_maker.py`](./run_bybit_demo_grid_market_maker.py) wires the same `TradingNode` + `BybitLive*Factory` pattern as the ExecTester demo runner, then runs **`GridMarketMaker`**. Requires **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** and **`BYBIT_DEMO_*`** (see [`.env.example`](../../.env.example)). Host: [`scripts/start_bybit_demo_grid_mm.sh`](../../scripts/start_bybit_demo_grid_mm.sh). **Default hedge:** `BybitExecClientConfig.position_mode` is set to **`BothSides`** for the symbol (Nautilus calls Bybit `switch-mode`); use **`--merged-single`** for one-way.
-- **BTC 0.1 pair (linear) — dedicated compose service:** profile **`btc-grid-mm`** → **`nautilus-grid-btc01`** in [`docker-compose.yml`](../../docker-compose.yml) runs the same script with **`BTCUSDT-LINEAR.BYBIT`** and env-tunable sizes (`NAUTILUS_GRID_BTC01_*`). **`restart: unless-stopped`**; add **`COMPOSE_PROFILES=btc-grid-mm`** to `.env` so `docker compose up -d` brings the grid back after reboot. Start: [`scripts/start_btc01_nautilus_grid.sh`](../../scripts/start_btc01_nautilus_grid.sh). Cancel all demo opens for the symbol: [`scripts/bybit_demo_cancel_open_orders.py`](../../scripts/bybit_demo_cancel_open_orders.py) (stop `nautilus-grid-btc01` first if you do not want immediate re-quotes). **Not** Freqtrade `BTC_Strategy_0_1` — avoid the same demo API keys as `freqtrade-btc-0-1` unless you use a separate subaccount.
+- **BTCUSDT linear — dedicated compose service:** profile **`btc-grid-mm`** → **`nautilus-grid-btc01`** in [`docker-compose.yml`](../../docker-compose.yml) runs the same script with **`BTCUSDT-LINEAR.BYBIT`** and env-tunable sizes (`NAUTILUS_GRID_BTC01_*`). **`restart: unless-stopped`**; add **`COMPOSE_PROFILES=btc-grid-mm`** to `.env` so `docker compose up -d` brings the grid back after reboot. Start: [`scripts/start_btc01_nautilus_grid.sh`](../../scripts/start_btc01_nautilus_grid.sh). Cancel all demo opens for the symbol: [`scripts/bybit_demo_cancel_open_orders.py`](../../scripts/bybit_demo_cancel_open_orders.py) (stop `nautilus-grid-btc01` first if you do not want immediate re-quotes). Prefer **`BYBIT_DEMO_GRID_*`** if you run multiple demo linear bots on the same host.
 
 ```bash
 export NAUTILUS_GRID_MM_DEMO_ACK=YES

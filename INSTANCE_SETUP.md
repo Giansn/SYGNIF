@@ -119,19 +119,24 @@ sudo cp systemd/sygnif-dashboard-spot.service /etc/systemd/system/
 sudo cp systemd/sygnif-dashboard-futures.service /etc/systemd/system/
 sudo cp systemd/sygnif-dashboard-btc-terminal.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now sygnif-dashboard-spot sygnif-dashboard-futures sygnif-dashboard-btc-terminal
+sudo systemctl enable --now sygnif-dashboard-futures
+# Use **either** spot **or** BTC Terminal on 8888 (not both):
+sudo systemctl enable --now sygnif-dashboard-btc-terminal
+# sudo systemctl enable --now sygnif-dashboard-spot
 ```
 
 Verify:
 ```bash
-curl -s http://localhost:8888 | head -1   # Spot dashboard
+curl -s http://localhost:8888 | head -1   # Spot **or** BTC Terminal (only one may use 8888)
+curl -s http://localhost:8888/interface | head -1   # BTC Interface (when btc-terminal owns 8888)
 curl -s http://localhost:8889 | head -1   # Futures dashboard
-curl -s http://localhost:8891 | head -1   # Sygnif BTC Terminal (prediction / training)
 ```
+
+**Port 8888 — one listener only:** `sygnif-dashboard-btc-terminal` and `sygnif-dashboard-spot` **cannot both** bind **8888**. Run **either** spot Freqtrade dashboard **or** BTC Terminal (+ `/interface`), or set `SYGNIF_BTC_TERMINAL_PORT` (e.g. 8891) in `.env` for the terminal unit. If the service is `inactive` with `Address already in use`, stop the other process on 8888 (e.g. `sudo systemctl stop sygnif-dashboard-spot`) or remove the conflicting Docker publish, then `sudo systemctl restart sygnif-dashboard-btc-terminal`.
 
 ### Reverse SSH tunnel (optional — stable URL via your own gateway)
 
-The instance opens **outbound** SSH and requests **remote port forward** so a VPS/home server you control exposes a port that maps to **this host’s** `127.0.0.1:8891` (Sygnif BTC Terminal by default). That gives a **fixed hostname** (your gateway) instead of opening `8891` on the EC2 security group.
+The instance opens **outbound** SSH and requests **remote port forward** so a VPS/home server you control exposes a port that maps to **this host’s** `127.0.0.1:8888` (Sygnif BTC Terminal by default, if it holds :8888). That gives a **fixed hostname** (your gateway) instead of opening `8888` on the EC2 security group.
 
 1. On the **gateway**: create a Linux user, add **this instance’s** SSH public key to `~/.ssh/authorized_keys`. For a **public** listen address on the gateway, set in `sshd_config`: `GatewayPorts clientspecified` or `yes`, then `sudo systemctl reload ssh`.
 2. In **`~/SYGNIF/.env`** set (see `.env.example` tail):
@@ -139,7 +144,7 @@ The instance opens **outbound** SSH and requests **remote port forward** so a VP
    - `SYGNIF_REVERSE_TUNNEL_ENABLE=1`
    - `SYGNIF_REVERSE_TUNNEL_GATEWAY=ubuntu@your-vps.example.com`
    - `SYGNIF_REVERSE_TUNNEL_IDENTITY_FILE=/home/ubuntu/.ssh/id_ed25519_sygnif_tunnel` (chmod `600`)
-   - Optional: `SYGNIF_REVERSE_TUNNEL_REMOTE_BIND=0.0.0.0`, `SYGNIF_REVERSE_TUNNEL_REMOTE_PORT=19891`, `SYGNIF_REVERSE_TUNNEL_LOCAL_PORT=8891`
+   - Optional: `SYGNIF_REVERSE_TUNNEL_REMOTE_BIND=0.0.0.0`, `SYGNIF_REVERSE_TUNNEL_REMOTE_PORT=19888`, `SYGNIF_REVERSE_TUNNEL_LOCAL_PORT=8888`
 
 3. Install and start the unit:
 
@@ -153,7 +158,7 @@ sudo systemctl status sygnif-reverse-tunnel
 
 The unit is **disabled by default** until you set `SYGNIF_REVERSE_TUNNEL_ENABLE=1` in `.env`; otherwise `start` is skipped (`ConditionEnvironment`).
 
-4. On the **gateway**, browse `http://127.0.0.1:19891/` (or your public IP + port if `REMOTE_BIND=0.0.0.0`). From your laptop: `ssh -L 8891:127.0.0.1:19891 ubuntu@your-vps` then open `http://127.0.0.1:8891/`.
+4. On the **gateway**, browse `http://127.0.0.1:19888/` (or your public IP + port if `REMOTE_BIND=0.0.0.0`). From your laptop: `ssh -L 8888:127.0.0.1:19888 ubuntu@your-vps` then open `http://127.0.0.1:8888/`.
 
 `systemd` restarts the tunnel if SSH drops (`Restart=always`). Optional: `sudo apt install autossh` and swap `ExecStart` to `autossh` for extra watchdog behaviour (not required).
 
@@ -264,7 +269,7 @@ curl -fsS http://127.0.0.1:8090/overview 2>/dev/null | head -c 200
 curl -fsS http://127.0.0.1:8093/healthz   # Cursor worker
 ```
 
-Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /health`; `notification-handler` → `GET /`; Freqtrade containers → `GET /api/v1/ping` on their listen ports; `trade-overseer` → `GET /health`; `nautilus-research` → `python3 /lab/workspace/nautilus_smoke.py`. Traders and overseer **wait on** `finance-agent` + `notification-handler` **healthy** (and overseer waits on **healthy** Freqtrade spot/futures) where `depends_on` is set — rebuild/recreate may take longer on first boot until `start_period` elapses.
+Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /health`; `notification-handler` → `GET /`; Freqtrade containers (when started) → `GET /api/v1/ping`; `trade-overseer` (when started) → `GET /health`; `nautilus-research` → `python3 /lab/workspace/nautilus_smoke.py`. Freqtrade-based services **wait on** `finance-agent` + `notification-handler` **healthy** where `depends_on` is set — rebuild/recreate may take longer on first boot until `start_period` elapses.
 
 ## Services Summary
 
@@ -274,9 +279,9 @@ Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /he
 | `freqtrade-futures` | Docker (`unless-stopped`) | **8081** host/container | yes |
 | `notification-handler` | Docker | 8089 (**localhost only**) | yes |
 | `trade-overseer` | Docker | 8090 (**localhost only**) | yes |
-| `sygnif-dashboard-spot` | systemd | 8888 | yes |
+| `sygnif-dashboard-spot` | systemd | 8888 | yes (**exclusive** with btc-terminal on same port) |
 | `sygnif-dashboard-futures` | systemd | 8889 | yes |
-| `sygnif-dashboard-btc-terminal` | systemd | 8891 | yes |
+| `sygnif-dashboard-btc-terminal` | systemd | 8888 (`/interface` = Bybit demo) | yes (**exclusive** with spot on same port) |
 | `sygnif-reverse-tunnel` | systemd (optional) | — (outbound SSH) | yes |
 | `sygnif-notify` | systemd | — | yes |
 | `cursor-agent-worker` | systemd (optional) | 8093 (**localhost**, management) | yes |
@@ -320,23 +325,31 @@ Treat the **EC2 host** as one **control plane**: processes are **nodes** that ta
 |------|---------|--------|
 | 8080 | Freqtrade API (spot) | Typically open for UI/API access |
 | 8081 | Freqtrade API (futures) | Same |
-| 8888 | Spot dashboard | |
+| 8888 | Spot dashboard **or** BTC Terminal + `/interface` | **One** service only on this port |
 | 8889 | Futures dashboard | |
-| 8891 | Sygnif BTC Terminal (prediction / training JSON) | Optional public UI — or SSH tunnel |
 | 8089 | Notification handler | **Bound to localhost** in compose — not exposed publicly by default |
 | 8090 | Trade overseer HTTP | **Localhost** — use SSH tunnel if needed remotely |
 | 8091 | Finance agent briefing | Default **127.0.0.1** — overseer container uses `host.docker.internal` |
 | 8093 | Cursor worker management | **Localhost** |
 
-## Optional: `nautilus-research` (Docker — Nautilus + Sygnif mounts)
+## BTC dock: pure Nautilus (`btc-nautilus`)
 
-Research container with **`nautilus_trader`** plus read-only mounts: `finance_agent/` (incl. **btc_specialist** data), `prediction_agent/`, `user_data/`. Uses **`SYGNIF_SPOT_NOTIONAL_USDT`** (default **100**, matches spot `dry_run_wallet`) for regime notes. Merge with base compose so **`finance-agent`** resolves on `sygnif_backend`.
+Profile **`btc-nautilus`** starts **`nautilus-research`** (Bybit HTTP sink → `finance_agent/btc_specialist/data/` for **`btc_predict_runner`** / training) + **`nautilus-sygnif-btc-node`** (Nautilus **`TradingNode`** bar strategy — extend for BTC execution logic). **No Freqtrade** in this profile. Optional archived Freqtrade BTC dock + **`trade-overseer`**: profile **`archived-freqtrade-btc-dock`** (see `archive/freqtrade-btc-dock-2026-04-13/RESTORE.txt`).
 
 ```bash
 cd ~/SYGNIF
-export COMPOSE_FILE=docker-compose.yml:docker-compose.nautilus-research.yml
-docker compose up -d finance-agent   # once
-docker compose build nautilus-research && docker compose up -d nautilus-research
+docker compose --profile btc-nautilus up -d --build
+```
+
+## Optional: `nautilus-research` only (same image as BTC dock)
+
+Profile **`btc-nautilus`** groups **`nautilus-research`** and **`nautilus-sygnif-btc-node`**. Start **only** the sink container by naming the service. Legacy merge files **`docker-compose.nautilus-research.yml`** / **`docker-compose.nautilus-strategy-sidecar.yml`** / **`docker-compose.btc-nautilus-research.yml`** were removed — use **`docker-compose.yml`** only.
+
+```bash
+cd ~/SYGNIF
+docker compose --profile btc-nautilus up -d --build finance-agent nautilus-research
+# full BTC Nautilus dock (research + bar node): omit the service name
+# docker compose --profile btc-nautilus up -d --build
 docker exec -it nautilus-research python3 /lab/workspace/btc_regime_assessment.py
 ```
 
@@ -344,7 +357,7 @@ See `research/nautilus_lab/README.md` and `SWING_FAILURE_ANALYSIS.md`.
 
 ## Optional: `nautilus-grid-btc01` (Nautilus **GridMarketMaker** on Bybit demo, BTCUSDT linear)
 
-Profile **`btc-grid-mm`**: places live **demo** orders via Nautilus (not Freqtrade `BTC_Strategy_0_1`). Set **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** in `.env` plus **`BYBIT_DEMO_*`**. Prefer a **separate** demo subaccount from `freqtrade-btc-0-1`, or stop that bot while testing.
+Profile **`btc-grid-mm`**: places live **demo** orders via Nautilus `GridMarketMaker`. Set **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** in `.env` plus **`BYBIT_DEMO_*`**. Prefer **`BYBIT_DEMO_GRID_*`** (or a separate demo key) if you also run other Bybit demo linear bots.
 
 **Persistent after reboot:** service uses **`restart: unless-stopped`**. Add **`COMPOSE_PROFILES=btc-grid-mm`** (alone or comma-appended) to `.env` so a normal **`docker compose up -d`** from `~/SYGNIF` recreates the grid after a host restart (still needs `finance-agent` healthy).
 

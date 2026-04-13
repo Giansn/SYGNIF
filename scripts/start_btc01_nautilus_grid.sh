@@ -8,7 +8,7 @@
 #   NAUTILUS_GRID_BTC01_TRADE_SIZE, NAUTILUS_GRID_BTC01_MAX_POSITION, NAUTILUS_GRID_BTC01_NUM_LEVELS,
 #   NAUTILUS_GRID_BTC01_GRID_STEP_BPS, NAUTILUS_GRID_BTC01_REQUOTE_BPS
 #
-# **Do not** run against the same Bybit demo account as ``freqtrade-btc-0-1`` unless you accept conflicting orders.
+# **Do not** run against the same Bybit demo account as other linear demo bots unless you accept conflicting orders.
 # For always-on + reboot: ``COMPOSE_PROFILES=btc-grid-mm`` in ``.env`` and ``docker compose up -d`` from repo root.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -188,12 +188,78 @@ def create_market_order(
     return _post("/v5/order/create", body)
 
 
-def position_list(symbol: str) -> Dict[str, Any]:
+def position_list(
+    symbol: str,
+    *,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> Dict[str, Any]:
     """GET /v5/position/list for linear symbol."""
     sym = (symbol or "").replace("/", "").upper().strip()
     if not sym:
         return {"retCode": -1, "retMsg": "symbol required"}
-    return _get("/v5/position/list", {"category": "linear", "symbol": sym})
+    params: Dict[str, str] = {"category": "linear", "symbol": sym}
+    if api_key and api_secret:
+        return _get_with_creds(
+            "/v5/position/list",
+            params,
+            api_key.strip(),
+            api_secret.strip(),
+            "https://api-demo.bybit.com",
+        )
+    return _get("/v5/position/list", params)
+
+
+def wallet_balance_unified_coin(
+    coin: str = "USDT",
+    *,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    GET /v5/account/wallet-balance — UNIFIED account, single ``coin`` row.
+
+    Uses demo (``api-demo``) with ``BYBIT_DEMO_*`` unless ``api_key`` / ``api_secret``
+    are passed (same host), e.g. grid-isolated keys.
+    """
+    c = (coin or "USDT").upper().strip() or "USDT"
+    params: Dict[str, str] = {"accountType": "UNIFIED", "coin": c}
+    if api_key and api_secret:
+        return _get_with_creds(
+            "/v5/account/wallet-balance",
+            params,
+            api_key.strip(),
+            api_secret.strip(),
+            "https://api-demo.bybit.com",
+        )
+    return _get("/v5/account/wallet-balance", params)
+
+
+def closed_pnl_linear(
+    symbol: str,
+    limit: str = "100",
+    cursor: str = "",
+    *,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+) -> Dict[str, Any]:
+    """GET /v5/position/closed-pnl for USDT linear symbol (paginated via ``cursor``)."""
+    sym = (symbol or "").replace("/", "").upper().strip()
+    if not sym:
+        return {"retCode": -1, "retMsg": "symbol required"}
+    params: Dict[str, str] = {"category": "linear", "symbol": sym, "limit": str(limit)}
+    cur = (cursor or "").strip()
+    if cur:
+        params["cursor"] = cur
+    if api_key and api_secret:
+        return _get_with_creds(
+            "/v5/position/closed-pnl",
+            params,
+            api_key.strip(),
+            api_secret.strip(),
+            "https://api-demo.bybit.com",
+        )
+    return _get("/v5/position/closed-pnl", params)
 
 
 def cancel_all_open_orders_linear(symbol: str = "BTCUSDT") -> Dict[str, Any]:

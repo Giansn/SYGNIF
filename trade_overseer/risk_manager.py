@@ -1,6 +1,9 @@
 """
 Sygnif Risk Manager — modeled on NautilusTrader's RiskEngine.
 
+Used from Freqtrade strategies (e.g. ``SygnifStrategy``). **Nautilus** live nodes use the
+library ``LiveRiskEngine`` in ``research/nautilus_lab/run_sygnif_btc_trading_node.py``, not this module.
+
 NT reference implementation:
   - crates/risk/src/engine/mod.rs       → RiskEngine struct + pre-trade checks
   - crates/risk/src/engine/config.rs    → RiskEngineConfig

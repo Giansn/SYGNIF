@@ -45,6 +45,25 @@
       "max_entries": 5,
       "drawdown_step": -0.018,
       "notes": "More scale-in tranches, slightly earlier vs parent -3% (more entry events in logs on one position)."
+    },
+    "entry_prediction": {
+      "enabled": true,
+      "also_gate_tags": ["orb_long"],
+      "notes": "When training+runner = bearish (r01_training_runner_bearish), block longs on BTC-0.1-R* and also_gate_tags. Legacy blocks (R01/strong_ta/orb_long/sygnif_s long) stay on even if enabled=false."
+    },
+    "tp_sl": {
+      "BTC-0.1-R01": {
+        "sl_doom": 0.06,
+        "tp_profit_pct": 0.025,
+        "notes": "sl_doom: same units as Sygnif doom (÷ leverage for futures → custom_stoploss). tp_profit_pct: ROI fraction, × leverage like R03 scalp."
+      },
+      "BTC-0.1-R02": { "sl_doom": 0.08, "tp_profit_pct": 0.04 },
+      "BTC-0.1-R03": {
+        "sl_doom": 0.05,
+        "tp_profit_pct": null,
+        "notes": "tp_profit_pct null → use tuning.r03_scalp.tp_profit_pct"
+      },
+      "notes": "Every open carries an exchange SL via stoploss_on_exchange + custom_stoploss; TP exits via custom_exit (market per order_types)."
     }
   },
   "rules": [

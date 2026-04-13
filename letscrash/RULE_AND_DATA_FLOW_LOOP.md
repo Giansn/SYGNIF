@@ -52,7 +52,7 @@ flowchart TD
 | **In** | `SYGNIF_SENTIMENT_HTTP_URL` | `finance-agent:8091/sygnif/sentiment` — MLP / HTTP sentiment for strategy |
 | **In** | Mounted `user_data/` | `SygnifStrategy`, `strategy_adaptation.json`, configs, feather data |
 | **In** | Exchange REST/WS | Bybit spot **BTC/USDT** (Freqtrade **CCXT**) |
-| **In** | `nautilus-research` + **`bybit_nautilus_spot_btc_training_feed.py`** | **Nautilus `BybitHttpClient`** (not CCXT), **spot BTC/USDT only** — writes `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `btc_1h_ohlcv_nautilus_bybit.json`, `nautilus_spot_btc_market_bundle.json` → **training channel** + `btc_predict_runner` + regime; compose: **`docker-compose.yml` profile `btc-nautilus`** (deprecated stub `docker-compose.btc-nautilus-research.yml`) |
+| **In** | `nautilus-research` + **`bybit_nautilus_spot_btc_training_feed.py`** | **Nautilus `BybitHttpClient`** (not CCXT), **spot BTC/USDT only** — writes `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `btc_1h_ohlcv_nautilus_bybit.json`, `nautilus_spot_btc_market_bundle.json` → **training channel** + `btc_predict_runner` + regime; compose: **`docker-compose.yml` profile `btc-nautilus`** |
 | **In** | (optional future) | Read-only mount or HTTP for **prediction** / **yfinance** sidecars — document before enable |
 | **Out** | Webhooks | `notification-handler:8089` — trades, fills (align `trading_mode` / `bot_name`) |
 | **Out** | Freqtrade REST | Host-mapped port (e.g. **8282** → container **8080**) |

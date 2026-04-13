@@ -7,7 +7,7 @@ Submits **post-only** limit grid orders. Requires demo keys + explicit ACK.
 Env:
 
 - ``NAUTILUS_GRID_MM_DEMO_ACK=YES``
-- **Isolated vs** ``freqtrade-btc-0-1``: ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (recommended).
+- **Isolated vs other demo linear bots:** ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (recommended).
 - Or shared demo account: ``BYBIT_DEMO_API_KEY`` / ``BYBIT_DEMO_API_SECRET`` only (grid and 0.1 then share one wallet).
 
 Bybit **hedge (default)** for USDT linear / inverse: ``BybitExecClientConfig.position_mode`` is set to
@@ -27,7 +27,7 @@ if str(_LAB) not in sys.path:
 
 
 def _require_demo_grid_credentials() -> tuple[str, str, bool]:
-    """ACK + demo keys. Prefer ``BYBIT_DEMO_GRID_*`` so grid does not share orders/position with ``freqtrade-btc-0-1``."""
+    """ACK + demo keys. Prefer ``BYBIT_DEMO_GRID_*`` so grid does not share orders/position with other demo bots."""
     ack = os.environ.get("NAUTILUS_GRID_MM_DEMO_ACK", "").strip().upper()
     gk = os.environ.get("BYBIT_DEMO_GRID_API_KEY", "").strip()
     gs = os.environ.get("BYBIT_DEMO_GRID_API_SECRET", "").strip()
@@ -95,15 +95,15 @@ def main() -> int:
     os.environ["BYBIT_DEMO_API_SECRET"] = grid_secret
     if not isolated_account:
         print(
-            "[grid-mm-live] WARNING: Grid uses the same BYBIT_DEMO_* as freqtrade-btc-0-1 — one demo account; "
-            "orders and net position interact. For a fair A/B vs BTC_Strategy_0_1, set "
+            "[grid-mm-live] WARNING: Grid uses the same BYBIT_DEMO_* as your other demo linear bots — one demo account; "
+            "orders and net position interact. For isolation, set "
             "BYBIT_DEMO_GRID_API_KEY and BYBIT_DEMO_GRID_API_SECRET (second Bybit demo API key).",
             file=sys.stderr,
             flush=True,
         )
     else:
         print(
-            "[grid-mm-live] Using BYBIT_DEMO_GRID_* (isolated from freqtrade-btc-0-1 default demo keys).",
+            "[grid-mm-live] Using BYBIT_DEMO_GRID_* (isolated from main BYBIT_DEMO_* keys).",
             flush=True,
         )
 

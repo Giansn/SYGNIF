@@ -6,7 +6,7 @@ Reads 1h OHLCV already written by ``bybit_nautilus_spot_btc_training_feed.py``,
 computes a simple regime hint, writes ``nautilus_strategy_signal.json`` next to it.
 
 **Does not** place exchange orders and **does not** call Bybit — avoids racing the sink.
-Freqtrade / SygnifStrategy remain the execution plane; this file is an optional signal feed.
+Downstream execution is outside this sidecar; this file is an optional signal feed for research and dashboards.
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def analyze(df: pd.DataFrame) -> dict[str, Any]:
         "ema20": round(float(ema20), 2),
         "ema50": round(float(ema50), 2),
         "bias": bias,
-        "disclaimer": "Research hint only — not wired to Freqtrade entries by default.",
+        "disclaimer": "Research hint only — not wired to live entries by default.",
     }
 
 

@@ -2,8 +2,8 @@
 # Post-deploy / operator health sweep: HTTP endpoints + optional Docker ps.
 # Run from repo root. Ports follow docker-compose.yml / INSTANCE_SETUP defaults.
 #
-# Exit code: non-zero if any **core** check fails (finance-agent, notification-handler,
-# overseer, spot+futures Freqtrade ping). Optional profile/systemd targets are warn-only.
+# Exit code: non-zero if any **core** check fails (finance-agent, notification-handler).
+# Freqtrade / overseer / optional BTC-dock targets are warn-only (pure Nautilus dock has no FT API).
 #
 # Optional env: SYGNIF_FT_SPOT_PING_PORT (default 8181), SYGNIF_FT_BTC01_PING_PORT (8185),
 # SYGNIF_COMPOSE_CMD (default: docker compose -f docker-compose.yml)
@@ -58,11 +58,11 @@ echo
 
 try_curl_core "finance-agent /health" "http://127.0.0.1:8091/health"
 try_curl_core "notification-handler GET /" "http://127.0.0.1:8089/"
-try_curl_core "trade-overseer /health" "http://127.0.0.1:8090/health"
-try_curl_core "trade-overseer /overview" "http://127.0.0.1:8090/overview"
-try_curl_core "freqtrade spot /api/v1/ping (:${FT_SPOT})" "http://127.0.0.1:${FT_SPOT}/api/v1/ping"
-try_curl_core "freqtrade futures /api/v1/ping (:8081)" "http://127.0.0.1:8081/api/v1/ping"
 
+try_curl_opt "trade-overseer /health" "http://127.0.0.1:8090/health"
+try_curl_opt "trade-overseer /overview" "http://127.0.0.1:8090/overview"
+try_curl_opt "freqtrade spot /api/v1/ping (:${FT_SPOT})" "http://127.0.0.1:${FT_SPOT}/api/v1/ping"
+try_curl_opt "freqtrade futures /api/v1/ping (:8081)" "http://127.0.0.1:8081/api/v1/ping"
 try_curl_opt "freqtrade-btc-0-1 /api/v1/ping (:${FT_B01})" "http://127.0.0.1:${FT_B01}/api/v1/ping"
 try_curl_opt "freqtrade-btc-spot /api/v1/ping (:8282)" "http://127.0.0.1:8282/api/v1/ping"
 try_curl_opt "dashboard BTC01+Grid / (:8892)" "http://127.0.0.1:8892/"

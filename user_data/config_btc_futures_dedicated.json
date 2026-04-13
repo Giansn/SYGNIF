@@ -1,0 +1,126 @@
+{
+    "_comment": "Freqtrade futures BTC dedicated: SygnifStrategy on Bybit USDT linear BTC. Runtime merge via apply_bybit_demo_to_btc_futures_config.py (not part of compose profile btc-nautilus).",
+    "strategy": "SygnifStrategy",
+    "can_short": true,
+    "trading_mode": "futures",
+    "margin_mode": "isolated",
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.95,
+    "fiat_display_currency": "CHF",
+    "dry_run": true,
+    "dry_run_wallet": 10000,
+    "timeframe": "5m",
+    "use_exit_signal": true,
+    "exit_profit_only": false,
+    "ignore_roi_if_entry_signal": true,
+    "unfilledtimeout": {
+        "entry": 3,
+        "exit": 2,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0
+    },
+    "exchange": {
+        "name": "bybit",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "swap",
+                "defaultSettle": "USDT",
+                "enableDemoTrading": true,
+                "hostname": "bybit.com"
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "options": {
+                "defaultType": "swap",
+                "defaultSettle": "USDT",
+                "enableDemoTrading": true,
+                "hostname": "bybit.com"
+            }
+        },
+        "pair_whitelist": ["BTC/USDT:USDT"],
+        "pair_blacklist": [
+            ".*(5L|5S|3L|3S|2L|2S)/.*",
+            "(BUSD|CUSD|DAI|TUSD|USDC|USDT|USDD|FDUSD|USDP|USDS|XUSD|USD1|RLUSD|AUSD|EURI|U)/.*",
+            "(ACM|AFA|ALA|ALL|ALPINE|APL|ASR|ATM|BAR|CAI|CITY|FOR|GAL|GOZ|JUV|LEG|NAVI|PORTO|PSG|ROUSH|TRA|UCH|UFC|YBO)/.*",
+            "(XAUT|PAXG)/.*"
+        ]
+    },
+    "order_types": {
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_exit": "market",
+        "force_entry": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": true,
+        "stoploss_on_exchange_interval": 60,
+        "stoploss_on_exchange_limit_ratio": 0.99
+    },
+    "order_time_in_force": {
+        "entry": "GTC",
+        "exit": "GTC"
+    },
+    "liquidation_buffer_ratio": 0.05,
+    "pairlists": [{ "method": "StaticPairList" }],
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": "",
+        "notification_settings": {
+            "status": "on",
+            "warning": "on",
+            "startup": "on",
+            "entry": "on",
+            "exit": "off",
+            "entry_fill": "on",
+            "exit_fill": "on",
+            "entry_cancel": "on",
+            "exit_cancel": "on"
+        }
+    },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": true,
+        "jwt_secret_key": "c2a8f1e9b4d7605382c1a9e7f3b5d8640a1c2e3f405162738495a6b7c8d9e0f1",
+        "CORS_origins": [
+            "http://localhost:8283",
+            "http://127.0.0.1:8283"
+        ],
+        "username": "freqtrader",
+        "password": "Kp9mBx2nQvL4wRt8sYh6Zj3Fc7Dg1Ea0"
+    },
+    "bot_name": "Sygnif BTC futures (nautilus)",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 3
+    },
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather",
+    "position_adjustment_enable": true
+}

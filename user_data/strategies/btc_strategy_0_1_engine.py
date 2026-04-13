@@ -243,3 +243,94 @@ def bucket_used_stake_usdt(open_trades) -> float:
         except (TypeError, ValueError):
             continue
     return total
+
+
+def entry_prediction_enabled() -> bool:
+    g = (tuning_config().get("entry_prediction") or {})
+    if g.get("enabled") is False:
+        return False
+    return True
+
+
+def entry_prediction_extra_tags() -> list[str]:
+    g = (tuning_config().get("entry_prediction") or {})
+    extra = g.get("also_gate_tags")
+    if extra is None:
+        return ["orb_long"]
+    if isinstance(extra, list):
+        return [str(x) for x in extra]
+    return []
+
+
+def entry_prediction_blocks_long_under_bearish(tag: str) -> bool:
+    """
+    When ``r01_training_runner_bearish()`` is true, should this long ``enter_tag`` be blocked?
+
+    - Always (legacy): R01 label, strong_ta, orb_long, sygnif_s* longs.
+    - If ``entry_prediction.enabled``: also BTC-0.1-R02/R03 and ``also_gate_tags``.
+    """
+    t = (tag or "").strip()
+    if t in (TAG_R01, "strong_ta", "orb_long"):
+        return True
+    if t.startswith("sygnif_s") and not t.startswith("sygnif_short"):
+        return True
+    if not entry_prediction_enabled():
+        return False
+    if t.startswith("BTC-0.1-R"):
+        return True
+    return t in frozenset(entry_prediction_extra_tags())
+
+
+def _tp_sl_block_for_tag(tag: str) -> dict[str, Any]:
+    raw = (tuning_config().get("tp_sl") or {})
+    if not isinstance(raw, dict):
+        return {}
+    b = raw.get(tag)
+    return b if isinstance(b, dict) else {}
+
+
+def tag_sl_return_cap(trade, tag: str, *, is_futures: bool) -> float | None:
+    """
+    Tighter bound for ``custom_stoploss`` return (negative float), or ``None`` to use parent only.
+    Uses ``sl_doom`` in the same spirit as Sygnif doom: futures → ``-(sl_doom / leverage)``.
+    """
+    if trade.is_short:
+        return None
+    t = (tag or "").strip()
+    if not t.startswith("BTC-0.1-R"):
+        return None
+    block = _tp_sl_block_for_tag(t)
+    try:
+        d = float(block.get("sl_doom", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0:
+        return None
+    lev = float(getattr(trade, "leverage", None) or 1.0)
+    lev = max(1.0, lev)
+    if is_futures:
+        return -(d / lev)
+    return -d
+
+
+def tag_takeprofit_profit_pct(tag: str) -> float | None:
+    """ROI fraction for ``custom_exit`` TP (× max(1, leverage) in strategy). ``None`` = no tag TP."""
+    t = (tag or "").strip()
+    if not t.startswith("BTC-0.1-R"):
+        return None
+    block = _tp_sl_block_for_tag(t)
+    if t == TAG_R03:
+        if "tp_profit_pct" not in block or block.get("tp_profit_pct") is None:
+            return r03_scalp_tp_profit_pct()
+        try:
+            v = float(block["tp_profit_pct"])
+            return max(0.0005, min(v, 0.15))
+        except (TypeError, ValueError):
+            return r03_scalp_tp_profit_pct()
+    if block.get("tp_profit_pct") is None:
+        return None
+    try:
+        v = float(block["tp_profit_pct"])
+        return max(0.0005, min(v, 0.25))
+    except (TypeError, ValueError):
+        return None

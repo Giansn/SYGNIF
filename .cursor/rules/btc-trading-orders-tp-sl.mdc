@@ -1,0 +1,12 @@
+---
+description: BTC_Strategy_0_1 — entries follow predictions; orders use TP+SL via registry
+globs: user_data/strategies/BTC_Strategy_0_1.py,user_data/strategies/btc_strategy_0_1_engine.py,letscrash/btc_strategy_0_1_rule_registry.json
+alwaysApply: false
+---
+
+# BTC 0.1 trading — orders, predictions, TP/SL
+
+- **Entry gate:** Longs on `BTC-0.1-R*` (and `orb_long` when `entry_prediction.enabled`) are blocked when `training_channel_output.json` implies **R01 bearish stack** (`r01_training_runner_bearish`). Legacy blocks for `strong_ta`, `BTC-0.1-R01`, `sygnif_s*` longs stay on even if the gate is disabled. RPC tag `btc_analysis_consensus` is not an `BTC-0.1-R*` tag — not covered by the R-extension (still subject to existing confirm logic).
+- **Stop loss:** Per-tag caps in `letscrash/btc_strategy_0_1_rule_registry.json` → `tuning.tp_sl.<TAG>.sl_doom` (same units as Sygnif doom; futures ÷ leverage). Composes with parent `custom_stoploss` (tighter wins). Exchange SL remains `stoploss_on_exchange` in futures config.
+- **Take profit:** `tuning.tp_sl.<TAG>.tp_profit_pct` — ROI fraction, scaled by `max(1, leverage)` like R03. R03 uses `tuning.r03_scalp.tp_profit_pct` when `tp_profit_pct` is null.
+- **Tuning:** Edit the registry JSON; `/reload_config` or restart Freqtrade. Do not hard-code thresholds in the strategy without updating the registry and tests.

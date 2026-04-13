@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sygnif BTC Interface</title>
+<link rel="icon" type="image/png" href="assets/logo_sygnif_spot.png" />
+<link rel="apple-touch-icon" href="assets/logo_sygnif_spot.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #06080c;
+  --s1: #0c1018;
+  --s2: #121822;
+  --s3: #1a2232;
+  --bd: #1e2a3a;
+  --bd2: #2a3a50;
+  --t1: #e8ecf2;
+  --t2: #6a7a92;
+  --t3: #3a4a5e;
+  --ac: #5ae0b5;
+  --ac2: #42c89c;
+  --ac-glow: #5ae0b518;
+  --g: #00e87b;
+  --g-bg: #00e87b08;
+  --g-bd: #00e87b20;
+  --r: #ff3b5c;
+  --r-bg: #ff3b5c08;
+  --r-bd: #ff3b5c20;
+  --y: #ffc23b;
+  --y-bg: #ffc23b08;
+  --y-bd: #ffc23b20;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Outfit', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--t1);
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 400px;
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, #5ae0b510 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+.wrap { max-width: 1440px; margin: 0 auto; padding: 16px 20px; position: relative; z-index: 1; }
+.ops-banner {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--y-bd);
+  background: var(--y-bg);
+  color: var(--y);
+}
+.ops-banner strong { color: var(--t1); font-weight: 600; }
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0 20px;
+}
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo-mark-img {
+  width: 54px; height: 54px; border-radius: 14px; object-fit: cover;
+  box-shadow: 0 0 30px #5ae0b545; background: var(--s1); border: 1px solid #5ae0b525;
+}
+.logo h1 { font-size: 20px; font-weight: 900; letter-spacing: 2px; }
+.logo h1 small {
+  font-size: 11px; font-weight: 500; color: var(--t2); letter-spacing: 3px;
+  display: block; margin-top: -2px;
+}
+.head-right { display: flex; align-items: center; gap: 10px; }
+.badges { display: flex; gap: 6px; align-items: center; }
+.badge {
+  padding: 4px 12px; border-radius: 20px; font-family: var(--mono); font-size: 10px;
+  font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+}
+.b-run { background: var(--g-bg); color: var(--g); border: 1px solid var(--g-bd); }
+.b-stop { background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd); }
+.clock {
+  font-family: var(--mono); font-size: 11px; color: var(--t3); text-align: right; margin-top: 4px;
+}
+.pulse {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--g); margin-right: 6px;
+  animation: pulse 2s ease infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 #00e87b60; }
+  50% { opacity: .6; box-shadow: 0 0 0 6px #00e87b00; }
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.stat {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-lbl {
+  font-size: 10px; color: var(--t2); text-transform: uppercase;
+  letter-spacing: 1.5px; font-weight: 500; margin-bottom: 8px;
+}
+.stat-val {
+  font-family: var(--mono); font-size: 24px; font-weight: 800;
+  letter-spacing: -1px; line-height: 1.1;
+}
+.stat-sub {
+  font-family: var(--mono); font-size: 11px; color: var(--t3); margin-top: 6px;
+}
+.up { color: var(--g) !important; }
+.dn { color: var(--r) !important; }
+.nt { color: var(--y) !important; }
+.sec { margin-bottom: 24px; }
+.sec-head {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+}
+.sec-t { font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+.sec-count { font-family: var(--mono); font-size: 11px; color: var(--t3); }
+.card {
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  overflow: hidden;
+}
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 10px 14px; font-size: 10px; color: var(--t3);
+  text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+  border-bottom: 1px solid var(--bd); position: sticky; top: 0; background: var(--s1);
+}
+td {
+  padding: 10px 14px; border-bottom: 1px solid #0e1520;
+  font-family: var(--mono); font-size: 12px; white-space: nowrap;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #ffffff04; }
+.tag {
+  display: inline-block; padding: 3px 8px; border-radius: 6px;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  background: var(--ac-glow); color: var(--ac); border: 1px solid #5ae0b515;
+}
+.tag.side-long {
+  background: var(--g-bg); color: var(--g); border: 1px solid var(--g-bd);
+}
+.tag.side-short {
+  background: var(--r-bg); color: var(--r); border: 1px solid var(--r-bd);
+}
+.portfolio-chart-wrap {
+  margin-bottom: 24px;
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  padding: 14px 16px 10px;
+  position: relative;
+  overflow: hidden;
+}
+.portfolio-chart-wrap .sec-head { margin-bottom: 6px; }
+.chart-svg-wrap { width: 100%; height: 180px; min-height: 140px; }
+.portfolio-svg { width: 100%; height: 100%; display: block; }
+.portfolio-svg .grid-line { stroke: var(--bd); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.5; }
+.portfolio-svg .line-area { opacity: 0.35; }
+.portfolio-svg .line-main {
+  fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.tf-btns { display: flex; gap: 2px; background: var(--s2); border-radius: 8px; padding: 3px; border: 1px solid var(--bd); }
+.tf-btn {
+  padding: 4px 14px; border-radius: 6px; font-family: var(--mono); font-size: 10px;
+  font-weight: 600; color: var(--t3); background: transparent; border: none; cursor: pointer;
+}
+.tf-btn:hover { color: var(--t1); }
+.tf-btn.active { background: var(--ac); color: var(--bg); box-shadow: 0 0 8px var(--ac-glow); }
+.chart-tooltip {
+  position: absolute; display: none; background: var(--s2); border: 1px solid var(--bd2);
+  border-radius: 8px; padding: 8px 12px; font-family: var(--mono); font-size: 11px;
+  color: var(--t1); pointer-events: none; z-index: 10;
+}
+.chart-dates {
+  display: flex; justify-content: space-between; font-family: var(--mono);
+  font-size: 9px; color: var(--t3); margin-top: 4px;
+}
+#err {
+  display: none; background: var(--r-bg); border: 1px solid var(--r-bd);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px;
+  color: var(--r); font-family: var(--mono); font-size: 12px;
+}
+.trade-cards { display: none; }
+.tc {
+  background: var(--s1); border: 1px solid var(--bd); border-radius: 14px;
+  padding: 16px; margin-bottom: 10px;
+}
+.tc-top { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.tc-pair { font-size: 16px; font-weight: 700; color: var(--ac); }
+.tc-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.tc-item { background: var(--s2); border-radius: 8px; padding: 8px 10px; }
+.tc-item-lbl { font-size: 9px; color: var(--t3); text-transform: uppercase; margin-bottom: 3px; }
+.tc-item-val { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.closed-actions { text-align: center; padding: 12px 0 4px; }
+.btn-closed-toggle {
+  padding: 8px 20px; border-radius: 10px; border: 1px solid var(--bd2);
+  background: var(--s2); color: var(--ac); font-family: var(--sans); font-size: 12px;
+  font-weight: 700; cursor: pointer;
+}
+.foot { text-align: center; padding: 20px 0 30px; font-size: 11px; color: var(--t3); letter-spacing: 2px; text-transform: uppercase; }
+.empty { padding: 24px; text-align: center; color: var(--t3); font-size: 13px; }
+@media (max-width: 900px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 768px) {
+  .wrap { padding: 12px 14px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat-val { font-size: 18px; }
+  .desktop-table { display: none !important; }
+  .trade-cards { display: block !important; }
+  .tc-grid { grid-template-columns: 1fr 1fr; }
+  .logo h1 { font-size: 16px; }
+  .logo-mark-img { width: 42px; height: 42px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="err"></div>
+  <div class="ops-banner" role="status">
+    <strong>Read-only</strong> — Bybit <strong>linear demo</strong> (<span id="iface-symbol">BTCUSDT</span>).
+    Data from signed REST on the host; no orders or position changes from this page.
+    Keys: <code>BYBIT_DEMO_*</code> or <code>BYBIT_DEMO_GRID_*</code> + <code>SYGNIF_BTC_IFACE_USE_GRID_KEYS=1</code>.
+    Same server as <a href="/" style="color:var(--ac)">BTC Terminal</a> (port <span id="iface-port-hint">8888</span>).
+  </div>
+  <div class="head">
+    <div class="logo">
+      <img class="logo-mark-img" src="assets/logo_sygnif_spot.png" alt="Sygnif" width="54" height="54" decoding="async" />
+      <h1>Sygnif BTC<small>INTERFACE · VIEW</small></h1>
+    </div>
+    <div class="head-right">
+      <div class="badges">
+        <span id="badge" class="badge b-run"><span class="pulse"></span>OK</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat fade-in"><div class="stat-lbl">Equity (USDT)</div><div class="stat-val" id="st-equity">--</div><div class="stat-sub" id="st-equity-s">wallet + unreal</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Available</div><div class="stat-val" id="st-avail">--</div><div class="stat-sub">withdraw / free</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Unrealized P/L</div><div class="stat-val" id="st-upl">--</div><div class="stat-sub" id="st-upl-s">positions</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Cum. realized</div><div class="stat-val" id="st-cum">--</div><div class="stat-sub">wallet field</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Open orders</div><div class="stat-val" id="st-ord">--</div><div class="stat-sub" id="st-ord-s">working</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Win rate</div><div class="stat-val" id="st-wr">--</div><div class="stat-sub" id="st-wr-s">closed sample</div></div>
+  </div>
+  <div class="stats" style="grid-template-columns: repeat(3, 1fr); margin-top:-12px">
+    <div class="stat fade-in"><div class="stat-lbl">Today's P/L</div><div class="stat-val" id="st-today" style="font-size:22px">--</div><div class="stat-sub" id="st-today-s">Europe/Zurich</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Open positions</div><div class="stat-val" id="st-posn">--</div><div class="stat-sub">linear</div></div>
+    <div class="stat fade-in"><div class="stat-lbl">Closed rows</div><div class="stat-val" id="st-closed-n">--</div><div class="stat-sub">paginated fetch</div></div>
+  </div>
+
+  <div class="portfolio-chart-wrap fade-in">
+    <div class="sec-head">
+      <div class="sec-t">Realized P/L (cumulative)</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="tf-btns">
+          <button type="button" class="tf-btn active" data-tf="1">1D</button>
+          <button type="button" class="tf-btn" data-tf="7">7D</button>
+          <button type="button" class="tf-btn" data-tf="30">30D</button>
+        </div>
+        <div class="sec-count" id="chart-range">1d</div>
+      </div>
+    </div>
+    <div class="chart-tooltip" id="chart-tooltip"></div>
+    <div class="chart-svg-wrap" id="portfolio-chart"><div class="empty">Loading…</div></div>
+    <div class="chart-dates" id="chart-dates"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head"><div class="sec-t">Open positions</div><div class="sec-count" id="pos-hdr"></div></div>
+    <div class="card desktop-table" style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Lev</th><th>Unreal P/L</th><th>Notional</th><th>Liq</th>
+        </tr></thead>
+        <tbody id="pos-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="trade-cards" id="pos-cards"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head"><div class="sec-t">Current orders</div><div class="sec-count" id="ord-hdr"></div></div>
+    <div class="card desktop-table" style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Side</th><th>Price</th><th>Qty</th><th>Leaves</th><th>Type</th><th>Status</th><th>Order ID</th>
+        </tr></thead>
+        <tbody id="ord-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="trade-cards" id="ord-cards"></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head"><div class="sec-t">Closed P/L</div><div class="sec-count" id="closed-count">—</div></div>
+    <div class="card desktop-table" style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Closed P/L</th>
+        </tr></thead>
+        <tbody id="closed-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="trade-cards" id="closed-cards"></div>
+    <div class="closed-actions" id="closed-actions" style="display:none">
+      <button type="button" class="btn-closed-toggle" id="closed-toggle">Show all</button>
+    </div>
+  </div>
+
+  <div class="foot" id="foot-port">Sygnif BTC Interface</div>
+</div>
+
+<script>
+const API = window.location.origin + '/api/btciface/snapshot.json';
+const DASH_LOC = 'de-CH';
+let chartTF = '1';
+let snapCache = null;
+let closedShowAll = false;
+let closedList = [];
+
+const pc = v => v > 0 ? 'up' : v < 0 ? 'dn' : 'nt';
+const fmt4 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(4);
+const fmt2 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(2);
+const prec = v => v < 0.01 ? 6 : v < 1 ? 4 : v < 100 ? 2 : 2;
+
+function dashClockStr() {
+  return new Date().toLocaleTimeString(DASH_LOC, { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function fmtTs(ms) {
+  if (!ms) return '--';
+  const d = new Date(Number(ms));
+  if (isNaN(d.getTime())) return '--';
+  return d.toLocaleString(DASH_LOC, { timeZone: 'Europe/Zurich', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function updateChartFromSnap() {
+  const wrap = document.getElementById('portfolio-chart');
+  const tooltip = document.getElementById('chart-tooltip');
+  const datesEl = document.getElementById('chart-dates');
+  const rangeEl = document.getElementById('chart-range');
+  if (!wrap || !snapCache || !snapCache.charts) return;
+
+  const ch = snapCache.charts[chartTF] || { values: [], labels: [] };
+  let vals = ch.values || [];
+  let lbs = ch.labels || [];
+  if (rangeEl) rangeEl.textContent = chartTF + 'd · realized cum.';
+
+  if (!vals.length) {
+    wrap.innerHTML = '<div class="empty">No closed P/L in this window</div>';
+    if (datesEl) datesEl.innerHTML = '';
+    return;
+  }
+
+  if (vals.length === 1) { vals = [vals[0], vals[0]]; lbs = [lbs[0] || '', lbs[0] || '']; }
+
+  const W = 600, H = 160, padX = 12, padY = 12;
+  const cW = W - 2 * padX, cH = H - 2 * padY;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = Math.max(max - min, 1e-8);
+  const n = vals.length;
+  const lnColor = 'var(--ac)';
+
+  const pts = vals.map((v, i) => {
+    const x = padX + (i / (n - 1)) * cW;
+    const y = padY + (1 - (v - min) / span) * cH;
+    return [x, y];
+  });
+
+  let grid = '';
+  for (let g = 0; g <= 3; g++) {
+    const gy = padY + (g / 3) * cH;
+    grid += `<line class="grid-line" x1="${padX}" y1="${gy.toFixed(1)}" x2="${W - padX}" y2="${gy.toFixed(1)}"/>`;
+  }
+
+  const linePts = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const baseY = H - padY;
+  const areaPts = `${padX},${baseY} ${linePts} ${pts[n - 1][0].toFixed(1)},${baseY}`;
+
+  wrap.innerHTML = `
+<svg class="portfolio-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ifaceGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" style="stop-color:${lnColor};stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:${lnColor};stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+  ${grid}
+  <polygon class="line-area" fill="url(#ifaceGrad)" points="${areaPts}"/>
+  <polyline class="line-main" stroke="${lnColor}" points="${linePts}"/>
+</svg>`;
+
+  const svg = wrap.querySelector('svg');
+  if (svg && tooltip) {
+    svg.style.cursor = 'crosshair';
+    svg.addEventListener('mousemove', (e) => {
+      const rect = svg.getBoundingClientRect();
+      const sx = (e.clientX - rect.left) / rect.width * W;
+      let idx = 0, best = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const d = Math.abs(pts[i][0] - sx);
+        if (d < best) { best = d; idx = i; }
+      }
+      const v = vals[idx];
+      const chg = v - vals[0];
+      const pctChg = vals[0] ? (chg / Math.max(Math.abs(vals[0]), 1e-8) * 100) : 0;
+      const cls = chg >= 0 ? 'up' : 'dn';
+      tooltip.innerHTML = `<div style="font-weight:700">${fmt4(v)} USDT</div><div style="color:var(--t2);font-size:10px">${lbs[idx] || ''}</div><div class="${cls}" style="font-size:10px;margin-top:2px">${fmt4(chg)} (${pctChg >= 0 ? '+' : ''}${pctChg.toFixed(1)}% vs start)</div>`;
+      tooltip.style.display = 'block';
+      const wr = wrap.parentElement.getBoundingClientRect();
+      let tx = e.clientX - wr.left + 14;
+      if (tx + 170 > wr.width) tx -= 190;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = (e.clientY - wr.top - 8) + 'px';
+    });
+    svg.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+  }
+
+  if (datesEl && lbs.length) {
+    datesEl.innerHTML = `<span>${lbs[0] || ''}</span><span>${lbs[lbs.length - 1] || ''}</span>`;
+  }
+}
+
+function renderClosed() {
+  const list = closedShowAll ? closedList : closedList.slice(0, 15);
+  const tb = document.getElementById('closed-body');
+  const cc = document.getElementById('closed-cards');
+  const act = document.getElementById('closed-actions');
+  document.getElementById('closed-count').textContent = closedShowAll
+    ? `${closedList.length} rows`
+    : `${Math.min(15, closedList.length)} of ${closedList.length}`;
+
+  if (!closedList.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="empty">No closed P/L rows</td></tr>';
+    cc.innerHTML = '<div class="card"><div class="empty">No closed P/L rows</div></div>';
+    if (act) act.style.display = 'none';
+    return;
+  }
+  if (act) act.style.display = closedList.length > 15 ? 'block' : 'none';
+
+  tb.innerHTML = list.map(r => {
+    const side = (r.side || '').toLowerCase();
+    const tag = side === 'sell' ? 'side-short' : 'side-long';
+    const lbl = side === 'sell' ? 'SHORT' : 'LONG';
+    return `<tr>
+      <td style="color:var(--t2)">${fmtTs(r.created_ms)}</td>
+      <td><span class="tag ${tag}">${lbl}</span></td>
+      <td>${Number(r.qty || 0).toFixed(4)}</td>
+      <td>${Number(r.avg_entry || 0).toFixed(prec(r.avg_entry))}</td>
+      <td>${Number(r.avg_exit || 0).toFixed(prec(r.avg_exit))}</td>
+      <td class="${pc(r.closed_pnl)}">${fmt4(r.closed_pnl)}</td>
+    </tr>`;
+  }).join('');
+
+  cc.innerHTML = list.map(r => {
+    const side = (r.side || '').toLowerCase();
+    const tag = side === 'sell' ? 'side-short' : 'side-long';
+    const lbl = side === 'sell' ? 'SHORT' : 'LONG';
+    return `<div class="tc">
+      <div class="tc-top">
+        <div class="tc-pair">Closed <span class="tag ${tag}">${lbl}</span></div>
+        <div class="${pc(r.closed_pnl)}" style="font-family:var(--mono);font-weight:800">${fmt4(r.closed_pnl)}</div>
+      </div>
+      <div class="tc-grid">
+        <div class="tc-item"><div class="tc-item-lbl">Time</div><div class="tc-item-val">${fmtTs(r.created_ms)}</div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Qty</div><div class="tc-item-val">${Number(r.qty || 0).toFixed(4)}</div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val">${Number(r.avg_entry || 0).toFixed(prec(r.avg_entry))}</div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Exit</div><div class="tc-item-val">${Number(r.avg_exit || 0).toFixed(prec(r.avg_exit))}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function refresh() {
+  const errEl = document.getElementById('err');
+  try {
+    const r = await fetch(API, { cache: 'no-store' });
+    const d = await r.json();
+    snapCache = d;
+    errEl.style.display = 'none';
+
+    document.getElementById('iface-symbol').textContent = d.symbol || 'BTCUSDT';
+    document.getElementById('clock').textContent = dashClockStr();
+
+    const badge = document.getElementById('badge');
+    if (!d.ok) {
+      badge.innerHTML = '<span class="pulse"></span>ERR';
+      badge.className = 'badge b-stop';
+      errEl.textContent = d.error || 'snapshot failed';
+      errEl.style.display = 'block';
+      return;
+    }
+    badge.innerHTML = '<span class="pulse"></span>LIVE';
+    badge.className = 'badge b-run';
+
+    const w = d.wallet;
+    if (w) {
+      document.getElementById('st-equity').textContent = '$' + w.equity.toFixed(2);
+      document.getElementById('st-avail').textContent = '$' + w.available.toFixed(2);
+      const upl = w.unrealised_pnl;
+      document.getElementById('st-upl').textContent = fmt2(upl) + ' USDT';
+      document.getElementById('st-upl').className = 'stat-val ' + pc(upl);
+      document.getElementById('st-cum').textContent = fmt2(w.cum_realised_pnl) + ' USDT';
+      document.getElementById('st-cum').className = 'stat-val ' + pc(w.cum_realised_pnl);
+    } else {
+      document.getElementById('st-equity').textContent = '—';
+      document.getElementById('st-avail').textContent = '—';
+      document.getElementById('st-upl').textContent = '—';
+      document.getElementById('st-cum').textContent = '—';
+    }
+
+    const s = d.summary || {};
+    document.getElementById('st-ord').textContent = String(s.open_order_count ?? 0);
+    document.getElementById('st-ord-s').textContent = 'ret ' + (d.order_raw_ret ?? '—');
+    document.getElementById('st-posn').textContent = String(s.open_position_count ?? 0);
+    document.getElementById('st-closed-n').textContent = String(s.closed_row_count ?? 0);
+
+    const wn = s.winning_trades || 0, ls = s.losing_trades || 0, tot = wn + ls;
+    document.getElementById('st-wr').textContent = tot ? ((wn / tot) * 100).toFixed(0) + '%' : '—';
+    document.getElementById('st-wr').className = 'stat-val ' + (tot && wn >= ls ? 'up' : tot ? 'dn' : '');
+    document.getElementById('st-wr-s').textContent = `${wn}W / ${ls}L`;
+
+    const td = s.today_realized_pnl ?? 0, tdn = s.today_close_count ?? 0;
+    document.getElementById('st-today').textContent = fmt2(td) + ' USDT';
+    document.getElementById('st-today').className = 'stat-val ' + pc(td);
+    document.getElementById('st-today-s').textContent = tdn + ' closes · Zurich';
+
+    const pos = d.positions || [];
+    document.getElementById('pos-hdr').textContent = pos.length + ' leg(s)';
+    const pb = document.getElementById('pos-body');
+    const pcards = document.getElementById('pos-cards');
+    if (!pos.length) {
+      pb.innerHTML = '<tr><td colspan="8" class="empty">Flat</td></tr>';
+      pcards.innerHTML = '<div class="card"><div class="empty">No open positions</div></div>';
+    } else {
+      pb.innerHTML = pos.map(p => {
+        const buy = (p.side || '').toLowerCase() === 'buy';
+        return `<tr>
+          <td><span class="tag ${buy ? 'side-long' : 'side-short'}">${buy ? 'LONG' : 'SHORT'}</span></td>
+          <td>${Number(p.size).toFixed(4)}</td>
+          <td>${p.avg_price.toFixed(prec(p.avg_price))}</td>
+          <td>${p.mark_price.toFixed(prec(p.mark_price))}</td>
+          <td>${Number(p.leverage || 0).toFixed(0)}×</td>
+          <td class="${pc(p.unrealised_pnl)}">${fmt4(p.unrealised_pnl)}</td>
+          <td>${Number(p.position_value || 0).toFixed(2)}</td>
+          <td style="color:var(--t3)">${p.liq_price != null ? p.liq_price.toFixed(prec(p.liq_price)) : '—'}</td>
+        </tr>`;
+      }).join('');
+      pcards.innerHTML = pos.map(p => {
+        const buy = (p.side || '').toLowerCase() === 'buy';
+        return `<div class="tc">
+          <div class="tc-top">
+            <div class="tc-pair">${buy ? 'LONG' : 'SHORT'} <span class="tag">${Number(p.size).toFixed(4)} BTC</span></div>
+            <div class="${pc(p.unrealised_pnl)}" style="font-family:var(--mono);font-weight:800">${fmt4(p.unrealised_pnl)}</div>
+          </div>
+          <div class="tc-grid">
+            <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val">${p.avg_price.toFixed(prec(p.avg_price))}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Mark</div><div class="tc-item-val">${p.mark_price.toFixed(prec(p.mark_price))}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Lev</div><div class="tc-item-val">${Number(p.leverage || 0).toFixed(0)}×</div></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    const ord = d.orders || [];
+    document.getElementById('ord-hdr').textContent = ord.length + ' working';
+    const ob = document.getElementById('ord-body');
+    const ocards = document.getElementById('ord-cards');
+    if (!ord.length) {
+      ob.innerHTML = '<tr><td colspan="7" class="empty">No open orders</td></tr>';
+      ocards.innerHTML = '<div class="card"><div class="empty">No open orders</div></div>';
+    } else {
+      ob.innerHTML = ord.map(o => {
+        const buy = (o.side || '').toLowerCase() === 'buy';
+        return `<tr>
+          <td><span class="tag ${buy ? 'side-long' : 'side-short'}">${buy ? 'BUY' : 'SELL'}</span></td>
+          <td>${o.price.toFixed(prec(o.price))}</td>
+          <td>${o.qty.toFixed(4)}</td>
+          <td>${o.leaves_qty.toFixed(4)}</td>
+          <td>${o.order_type || '—'}</td>
+          <td>${o.status || '—'}</td>
+          <td style="color:var(--t3);font-size:11px">${o.order_id || '—'}</td>
+        </tr>`;
+      }).join('');
+      ocards.innerHTML = ord.map(o => {
+        const buy = (o.side || '').toLowerCase() === 'buy';
+        return `<div class="tc">
+          <div class="tc-top">
+            <div class="tc-pair">${buy ? 'BUY' : 'SELL'}</div>
+            <div style="font-family:var(--mono)">${o.price.toFixed(prec(o.price))}</div>
+          </div>
+          <div class="tc-grid">
+            <div class="tc-item"><div class="tc-item-lbl">Qty</div><div class="tc-item-val">${o.qty.toFixed(4)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Leaves</div><div class="tc-item-val">${o.leaves_qty.toFixed(4)}</div></div>
+            <div class="tc-item"><div class="tc-item-lbl">Status</div><div class="tc-item-val">${o.status || '—'}</div></div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    closedList = d.closed_pnl_recent || [];
+    renderClosed();
+    updateChartFromSnap();
+  } catch (e) {
+    errEl.textContent = 'Fetch error: ' + (e && e.message ? e.message : e);
+    errEl.style.display = 'block';
+  }
+}
+
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    chartTF = btn.getAttribute('data-tf') || '1';
+    updateChartFromSnap();
+  });
+});
+
+(function () {
+  const btn = document.getElementById('closed-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    closedShowAll = !closedShowAll;
+    btn.textContent = closedShowAll ? 'Show less' : 'Show all';
+    renderClosed();
+  });
+})();
+
+setInterval(() => {
+  const el = document.getElementById('clock');
+  if (el && snapCache && snapCache.ok) el.textContent = dashClockStr();
+}, 1000);
+
+let _busy = false;
+async function tick() {
+  if (_busy) return;
+  _busy = true;
+  try { await refresh(); } finally { _busy = false; }
+}
+tick();
+setInterval(tick, 8000);
+
+const _port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+document.getElementById('foot-port').textContent = 'Sygnif BTC Interface · port ' + _port;
+const _ph = document.getElementById('iface-port-hint');
+if (_ph) _ph.textContent = _port;
+</script>
+</body>
+</html>

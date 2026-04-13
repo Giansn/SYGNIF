@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Bounded ML refresh: wider-window btc_predict_runner passes, channel_training (skip runner),
 # proof + horizon check. Shares SYGNIF_ML_LOCK_FILE with ruleprediction-pipeline + btc_predict_runner_host.
+# Last 1h `btc_predict_runner` pass writes `prediction_agent/btc_prediction_output.json` — consumed by
+# Docker `nautilus-sygnif-btc-node` when NAUTILUS_SYGNIF_NODE_PREDICTION_GATE=1 (compose default).
 #
 # Modes:
 #   (default)  one shot

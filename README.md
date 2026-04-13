@@ -52,10 +52,10 @@ Overseer Telegram token priority:
 | --------- | ------- | ----------------------------- |
 | Spot      | `:8888` | `dashboard_server.py`         |
 | Futures   | `:8889` | `dashboard_server_futures.py` |
-| BTC Terminal | `:8891` | `dashboard_server_btc_terminal.py` |
+| BTC Terminal + Interface | `:8888` | `dashboard_server_btc_terminal.py` (`/interface` = Bybit demo; **exclusive** with spot dashboard on 8888) |
 
 
-Dark theme, mobile-responsive. Spot/futures: balance, open/closed P/L, win rate, open positions, pairlist, movers, performance. **BTC Terminal:** `training_channel_output.json`, `btc_prediction_output.json`, rule registry, R01 gate — prediction / training only (no Freqtrade API proxy). Optional **reverse SSH tunnel** (`systemd/sygnif-reverse-tunnel.service` + `scripts/sygnif_reverse_tunnel.sh`) exposes that UI via a stable host you control — see **INSTANCE_SETUP.md**.
+Dark theme, mobile-responsive. Spot/futures: balance, open/closed P/L, win rate, open positions, pairlist, movers, performance. **BTC Terminal** (`/`): `training_channel_output.json`, `btc_prediction_output.json`, rule registry, R01 gate — prediction / training (read-only JSON). **BTC Interface** (`/interface`): read-only **Bybit linear demo** — wallet, open orders, positions, closed P/L (`BYBIT_DEMO_*` or grid keys). Optional **reverse SSH tunnel** (`systemd/sygnif-reverse-tunnel.service` + `scripts/sygnif_reverse_tunnel.sh`) exposes that UI via a stable host you control — see **INSTANCE_SETUP.md**.
 
 ## Leverage Tiers (Futures)
 
@@ -130,7 +130,8 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 | `dashboard_futures_full.html`                   | Futures dashboard (adds Side/Leverage columns)          |
 | `dashboard_server.py`                           | Serves spot dashboard on :8888                          |
 | `dashboard_server_futures.py`                   | Serves futures dashboard on :8889                       |
-| `dashboard_btc_terminal.html` / `dashboard_server_btc_terminal.py` | Sygnif BTC Terminal (:8891) — prediction + training |
+| `dashboard_btc_terminal.html` / `dashboard_server_btc_terminal.py` | Sygnif BTC Terminal (:8888) — prediction + training + serves `/interface` |
+| `dashboard_btc_interface.html` / `dashboard_server_btc_interface.py` | Bybit demo UI (served under `/interface` on :8888; standalone script optional) |
 | `letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` | **BTC_Strategy_0_1** + Bybit **demo** CCXT bridge (`bybit_ccxt_demo_patch`, Docker, configs) |
 | `user_data/config_btc_strategy_0_1_bybit_demo.example.json` | Example futures **demo** config for `BTC_Strategy_0_1` (no secrets in git) |
 | `prediction_agent/btc_predict_runner.py`        | BTC prediction runner (RF + XGB + LogReg)               |

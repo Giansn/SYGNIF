@@ -10,6 +10,8 @@ Adds **tag-specific** entry/exit paths for **BTC-0.1-R01–R03**: each path is s
 **Futures (USDT linear):** **leverage** is **not** set manually — inherited ``SygnifStrategy.leverage()`` (major tier, short cap, ATR vol scaling). **Entries / exits** run on **strategy math** (this class + parent); RPC ``forceenter`` is optional operator override only. With ``position_adjustment_enable`` in config, **scale-in** (multiple fills on the **same** trade) is allowed for R01–R03 and ``manual_*`` tags — not venue **hedge mode** long+short on one symbol under Freqtrade’s Bybit one-way default.
 
 **Research data path:** **Nautilus** container (compose profile ``btc-nautilus``) processes Bybit/BTC feeds into ``finance_agent/btc_specialist/data/`` for training + **ruleprediction** — see ``letscrash/RULE_AND_DATA_FLOW_LOOP.md`` §3.
+
+**TP / SL (registry):** ``tuning.tp_sl`` + ``tuning.entry_prediction`` in ``btc_strategy_0_1_rule_registry.json`` — tighter SL via ``custom_stoploss``, TP via ``custom_exit``; futures keep ``stoploss_on_exchange`` from config.
 """
 
 from __future__ import annotations
@@ -196,10 +198,12 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         open_trades = Trade.get_trades_proxy(is_open=True)
 
         if btc_trend_regime.is_btc_pair(pair) and side == "long" and b01.r01_training_runner_bearish():
-            if tag in (b01.TAG_R01, "strong_ta", "orb_long") or (
-                tag.startswith("sygnif_s") and not tag.startswith("sygnif_short")
-            ):
-                logger.info("BTC-0.1-R01 governance: blocking %s %s under bearish training+runner", tag, pair)
+            if b01.entry_prediction_blocks_long_under_bearish(tag):
+                logger.info(
+                    "BTC-0.1 entry_prediction: blocking long %s %s under bearish training+runner",
+                    tag,
+                    pair,
+                )
                 return False
 
         if tag.startswith("BTC-0.1-R"):
@@ -312,6 +316,10 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         parent_sl = super().custom_stoploss(
             pair, trade, current_time, current_rate, current_profit, after_fill, **kwargs
         )
+        is_futures = self.config.get("trading_mode", "") == "futures"
+        cap = b01.tag_sl_return_cap(trade, tag, is_futures=is_futures)
+        if cap is not None:
+            parent_sl = max(parent_sl, cap)
         if tag == b01.TAG_R03 and not trade.is_short:
             return max(parent_sl, b01.R03_STOPLOSS_FLOOR_VS_PARENT)
         return parent_sl
@@ -336,11 +344,16 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                     return "exit_btc01_r01_stack_guard"
                 if tag == b01.TAG_R02 and not b01.btc01_r02_trend_long_row(last):
                     return "exit_btc01_r02_regime_break"
+                tp_pct = b01.tag_takeprofit_profit_pct(tag)
+                if tp_pct is not None and tag in (b01.TAG_R01, b01.TAG_R02):
+                    if current_profit >= tp_pct * max(1.0, lev):
+                        return "exit_btc01_r01_tp" if tag == b01.TAG_R01 else "exit_btc01_r02_tp"
                 if tag == b01.TAG_R03:
                     rsi14 = float(last.get("RSI_14", 50) or 50)
                     if rsi14 > b01.r03_scalp_rsi_overbought():
                         return "exit_btc01_r03_scalp_overbought"
-                    if current_profit >= b01.r03_scalp_tp_profit_pct() * max(1.0, lev):
+                    r3_tp = b01.tag_takeprofit_profit_pct(b01.TAG_R03)
+                    if r3_tp is not None and current_profit >= r3_tp * max(1.0, lev):
                         return "exit_btc01_r03_scalp_take"
                 if tag in (b01.TAG_R02, b01.TAG_R03) and b01.r01_training_runner_bearish():
                     if current_profit < b01.r01_r03_stack_guard_loss_pct() * max(1.0, lev):

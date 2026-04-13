@@ -14,6 +14,6 @@ if command -v python3 >/dev/null 2>&1 && python3 -c 'import nautilus_trader' 2>/
 fi
 
 echo "Neither docker container 'nautilus-research' nor a Python env with nautilus_trader is available." >&2
-echo "Build/start:  cd $ROOT && export COMPOSE_FILE=docker-compose.yml:docker-compose.nautilus-research.yml && docker compose up -d nautilus-research" >&2
+echo "Build/start:  cd $ROOT && docker compose --profile btc-nautilus up -d --build nautilus-research" >&2
 echo "Then:         $0 \"\$@\"" >&2
 exit 1
