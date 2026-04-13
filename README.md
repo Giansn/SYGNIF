@@ -1,6 +1,6 @@
 # SYGNIF
 
-NFI-enhanced Freqtrade bot with Claude AI sentiment layer. Runs spot + futures on Bybit via dual Docker containers.
+NFI-enhanced Freqtrade bot with Claude AI sentiment layer, optional **Nautilus Trader** BTC dock (demo/testnet), and a local **prediction** pipeline. Docker is **profile-based**: the default compose stack is `finance-agent` + `notification-handler`; legacy **spot + futures** Freqtrade and **BTC Nautilus** services are started with explicit profiles (see **Containers**).
 
 ## Architecture
 
@@ -19,15 +19,48 @@ SygnifStrategy.py          Main strategy (shared by both containers)
 
 ## Containers
 
+### Default stack (no profile)
 
-| Container           | Mode    | Port | Config                          | Telegram            | DB                        |
-| ------------------- | ------- | ---- | ------------------------------- | ------------------- | ------------------------- |
-| `freqtrade`         | Spot    | 8080 | `user_data/config.json`         | `@sygnif_bot`       | `tradesv3.sqlite`         |
-| `freqtrade-futures` | Futures | 8081 | `user_data/config_futures.json` | `@sygnifuture_bot`  | `tradesv3-futures.sqlite` |
-| `trade-overseer`    | Monitor | 8090 | `trade_overseer/overseer.py`    | `@Sygnif_hedge_bot` | `trade_overseer/data`     |
+| Service                 | Port   | Role |
+| ----------------------- | ------ | ---- |
+| `finance-agent`         | `8091` | Telegram research bot HTTP: `/briefing`, sentiment, hooks |
+| `notification-handler`| `8089` | Freqtrade webhooks → Telegram routing |
 
+```bash
+docker compose up -d
+```
 
-Both mount the same `./user_data` volume and share the strategy file. The compact `/status` patch is auto-applied on container start via the entrypoint.
+### Legacy multi-pair Freqtrade (profile `archived-main-traders`)
+
+| Container           | Mode    | Port (example) | Config                          | Telegram            | DB                        |
+| ------------------- | ------- | -------------- | ------------------------------- | ------------------- | ------------------------- |
+| `freqtrade`         | Spot    | 8181→8080      | `user_data/config.json`         | `@sygnif_bot`       | `tradesv3.sqlite`         |
+| `freqtrade-futures` | Futures | 8081           | `user_data/config_futures.json` | `@sygnifuture_bot`  | `tradesv3-futures.sqlite` |
+| `trade-overseer`    | Monitor | 8090           | `trade_overseer/overseer.py`    | hedge / agent hooks | `trade_overseer/data`     |
+
+```bash
+docker compose --profile archived-main-traders up -d
+```
+
+Both traders mount `./user_data` and share strategy files. The compact `/status` patch is applied when those images are built with `Dockerfile.custom`.
+
+### BTC Nautilus dock (profile `btc-nautilus`)
+
+| Service                   | Role |
+| ------------------------- | ---- |
+| `nautilus-research`       | Bybit OHLCV sink + `nautilus_sidecar_strategy` → `btc_specialist/data/` |
+| `nautilus-sygnif-btc-node` | `SygnifBtcBarNodeStrategy` on **5m** linear bars: optional post-only demo buys, sidecar + ML gates |
+| `nautilus-grid-btc01`     | (profile `btc-grid-mm`) Grid market maker on BTC linear **demo** |
+
+```bash
+docker compose --profile btc-nautilus up -d --build
+# optional grid on same demo wallet (or use BYBIT_DEMO_GRID_* to isolate)
+docker compose --profile btc-grid-mm up -d nautilus-grid-btc01
+```
+
+The bar node can run **in-process live retrain** (`prediction_agent/btc_predict_live.py`, env `NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=1`) on rolling 5m OHLCV and mirror `btc_prediction_output.json`. See `.env.example` and `docker-compose.yml` header for `NAUTILUS_SYGNIF_NODE_*` knobs.
+
+**Testnet bar node:** profile `btc-testnet`, service `nautilus-btc-testnet` — `scripts/start_nautilus_btc_testnet.sh`.
 
 ### Trade Overseer (agent endpoint first)
 
@@ -37,7 +70,7 @@ Both mount the same `./user_data` volume and share the strategy file. The compac
 - Fallback: if no endpoint, it can still use `ANTHROPIC_API_KEY` (legacy path).
 - Final fallback: rules-only summary if no model backend is reachable.
 
-`docker compose up` wires `**trade-overseer**` with `**FT_SPOT_URL` / `FT_FUTURES_URL**` pointing at the `**freqtrade**` and `**freqtrade-futures**` service names (not `127.0.0.1`), `**OVERSEER_HTTP_HOST=0.0.0.0**`, and `**FINANCE_AGENT_BRIEFING_URL**` defaulting to `**host.docker.internal**` so TA briefing can reach a finance agent running on the host.
+With the archived traders profile, compose wires `trade-overseer` with `FT_SPOT_URL` / `FT_FUTURES_URL` pointing at the `freqtrade` / `freqtrade-futures` service names (not `127.0.0.1`), `OVERSEER_HTTP_HOST=0.0.0.0`, and `FINANCE_AGENT_BRIEFING_URL` defaulting to `host.docker.internal` when the finance agent runs on the host.
 
 Overseer Telegram token priority:
 
@@ -134,7 +167,10 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 | `dashboard_btc_interface.html` / `dashboard_server_btc_interface.py` | Bybit demo UI (served under `/interface` on :8888; standalone script optional) |
 | `letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` | **BTC_Strategy_0_1** + Bybit **demo** CCXT bridge (`bybit_ccxt_demo_patch`, Docker, configs) |
 | `user_data/config_btc_strategy_0_1_bybit_demo.example.json` | Example futures **demo** config for `BTC_Strategy_0_1` (no secrets in git) |
-| `prediction_agent/btc_predict_runner.py`        | BTC prediction runner (RF + XGB + LogReg)               |
+| `prediction_agent/btc_predict_runner.py`        | BTC batch prediction runner (RF + XGB + LogReg) → `btc_prediction_output.json` |
+| `prediction_agent/btc_predict_live.py`          | Rolling 5m OHLCV fit for Nautilus bar node (lighter estimators) |
+| `research/nautilus_lab/run_sygnif_btc_trading_node.py` | Nautilus `TradingNode` entrypoint (demo / testnet) |
+| `research/nautilus_lab/sygnif_btc_bar_node_strategy.py` | Bar strategy: quotes, gates, optional live ML + orders |
 | `scripts/btc_analysis_forceenter.py` / `prediction_agent/btc_analysis_order_signal.py` | Optional **forceenter** from prediction JSON (dry-run default; see `BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` §7) |
 | `prediction_agent/prediction_code_extracted.py` | Consolidated upstream prediction library                |
 | `status_patch.py` / `status_patch_v2.py`        | Compact `/status` Telegram command                      |
@@ -176,6 +212,8 @@ python3 prediction_agent/btc_predict_runner.py --window 10 --timeframe 1h
 ```
 
 Output: console summary + `prediction_agent/btc_prediction_output.json`.
+
+**Live loop (Nautilus):** `btc_predict_live.py` reuses the same feature engineering; it seeds from public Bybit **linear 5m** klines, refits smaller RF/XGB/LogReg on each closed bar (background thread), applies `nautilus_enhanced_consensus` from sidecar JSON, and can rewrite `btc_prediction_output.json` for dashboards. Host jobs such as `scripts/sygnif_finetune_automation.sh` remain a heavier offline pass.
 
 ### Backtest Metrics (sample)
 
@@ -232,8 +270,14 @@ cp config_claude_bot.example.json user_data/config.json
 # Edit user_data/config.json and user_data/config_futures.json with API keys
 # Edit .env with BYBIT keys, ANTHROPIC_API_KEY, TELEGRAM tokens
 
-# Build and run
+# Build and run — default: finance-agent + notification-handler
 docker compose up -d
+
+# Optional: archived spot + futures Freqtrade + overseer
+# docker compose --profile archived-main-traders up -d --build
+
+# Optional: Nautilus BTC research + bar node (+ grid profile separately)
+# docker compose --profile btc-nautilus up -d --build
 
 # Dashboards
 python3 dashboard_server.py &
