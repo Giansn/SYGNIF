@@ -1,16 +1,15 @@
 [Unit]
-Description=BTC next-bar ML predict (Sygnif prediction_agent/btc_predict_runner.py)
-Documentation=file:///home/ubuntu/SYGNIF/prediction_agent/btc_predict_runner.py
-After=network-online.target
-Wants=network-online.target
+Description=BTC next-bar ML predict (btc_predict_runner; flock with ruleprediction + finetune)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/btc_predict_runner_host.sh
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=oneshot
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/SYGNIF/prediction_agent
-# Reads: ../../finance_agent/btc_specialist/data/btc_1h_ohlcv.json (and daily if --timeframe daily)
-# Writes: btc_prediction_output.json in this directory
-ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/prediction_agent/btc_predict_runner.py
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+# Reads/writes under repo; skips quietly if SYGNIF_ML_LOCK_FILE is held.
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/btc_predict_runner_host.sh
 StandardOutput=journal
 StandardError=journal

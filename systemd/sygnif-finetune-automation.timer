@@ -1,0 +1,12 @@
+[Unit]
+Description=Start SYGNIF finetune loop after boot (persistent; coordinates with ruleprediction via flock)
+Documentation=file:///home/ubuntu/SYGNIF/systemd/sygnif-finetune-automation.service
+
+[Timer]
+OnBootSec=120
+AccuracySec=30
+Unit=sygnif-finetune-automation.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

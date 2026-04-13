@@ -12,21 +12,24 @@
 #
 # Install: sudo cp systemd/ruleprediction-pipeline.{service,timer} /etc/systemd/system/
 #          sudo systemctl daemon-reload
-#          sudo systemctl disable --now btc-predict-runner.timer   # optional: avoid duplicate hourly ML
+#          sudo systemctl enable --now btc-predict-runner.timer sygnif-finetune-automation.timer
+#          # optional: disable btc-predict-runner.timer if ruleprediction + finetune loop suffice
 #          sudo systemctl enable --now ruleprediction-pipeline.timer
 #
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="${RULEPREDICTION_PIPELINE_LOG_DIR:-$REPO_ROOT/user_data/logs}"
 mkdir -p "$LOG_DIR"
+LOCK_FILE="${SYGNIF_ML_LOCK_FILE:-$LOG_DIR/sygnif_ml_pipeline.lock}"
 LOG="$LOG_DIR/ruleprediction_pipeline.log"
 export PYTHONUNBUFFERED=1
 
 {
+  flock -n 200 || { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') ruleprediction-pipeline skip (lock held)"; exit 0; }
   echo "===== $(date -u '+%Y-%m-%dT%H:%M:%SZ') ruleprediction-pipeline ====="
   cd "$REPO_ROOT"
   /usr/bin/python3 training_pipeline/channel_training.py
   /usr/bin/python3 prediction_agent/btc_prediction_proof.py
   /usr/bin/python3 scripts/prediction_horizon_check.py check --symbol BTC || true
   echo "===== done ====="
-} >>"$LOG" 2>&1
+} 200>>"$LOCK_FILE" >>"$LOG" 2>&1
