@@ -77,7 +77,32 @@ Rebuild after changing **`Dockerfile.custom`**, the patch script, or **Freqtrade
 
 ---
 
-## 7. Cross-links
+## 7. Optional: open order from **BTC analysis** (forceenter)
+
+**Not automatic trading** — explicit operator step. Script: `scripts/btc_analysis_forceenter.py` reads `prediction_agent/btc_prediction_output.json` + `training_channel_output.json`, applies the same **R01** gate as `btc_strategy_0_1_engine`, then **prints** a plan (default) or POSTs **`/api/v1/forceenter`** with `--execute`.
+
+Requirements:
+
+- Bot config **`force_entry_enable`: true** (see `user_data/config_futures.json` when you intentionally enable RPC entries).
+- REST auth: **`FT_API_URL`** (e.g. `http://127.0.0.1:8081/api/v1` or host port **8185** for `freqtrade-btc-0-1`), **`FT_USER`** / **`FT_PASS`** (or `FT_FUTURES_PASS` / `API_PASSWORD`).
+
+Examples:
+
+```bash
+# Plan only (safe default)
+python3 scripts/btc_analysis_forceenter.py
+
+# Short if consensus BEARISH
+python3 scripts/btc_analysis_forceenter.py --allow-short
+
+# Actually send (after reviewing JSON plan)
+FT_API_URL=http://127.0.0.1:8185/api/v1 FT_PASS='your-api-password' \
+  python3 scripts/btc_analysis_forceenter.py --execute --ordertype limit
+```
+
+Pure logic (tests): `prediction_agent/btc_analysis_order_signal.py`.
+
+## 8. Cross-links
 
 - Rule / training inflow: [`RULE_AND_DATA_FLOW_LOOP.md`](./RULE_AND_DATA_FLOW_LOOP.md)  
 - R01 live gate vs Nautilus: same doc **Cross-link** + [`BTC_Strategy_0.1.md`](./BTC_Strategy_0.1.md) §7.1  

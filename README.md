@@ -134,6 +134,7 @@ Systemd service `sygnif-notify` sends Telegram messages on system reboot:
 | `letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` | **BTC_Strategy_0_1** + Bybit **demo** CCXT bridge (`bybit_ccxt_demo_patch`, Docker, configs) |
 | `user_data/config_btc_strategy_0_1_bybit_demo.example.json` | Example futures **demo** config for `BTC_Strategy_0_1` (no secrets in git) |
 | `prediction_agent/btc_predict_runner.py`        | BTC prediction runner (RF + XGB + LogReg)               |
+| `scripts/btc_analysis_forceenter.py` / `prediction_agent/btc_analysis_order_signal.py` | Optional **forceenter** from prediction JSON (dry-run default; see `BTC_STRATEGY_0_1_BYBIT_BRIDGE.md` §7) |
 | `prediction_agent/prediction_code_extracted.py` | Consolidated upstream prediction library                |
 | `status_patch.py` / `status_patch_v2.py`        | Compact `/status` Telegram command                      |
 | `fill_patch.py`                                 | Order fill notification patch                           |
