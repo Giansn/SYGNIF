@@ -1,0 +1,9 @@
+# Nautilus live Bybit **demo** adapter (same stack as docker/Dockerfile.nautilus_research).
+# Use for a venv on the host, e.g.:
+#   python3 -m venv .venv-nt && . .venv-nt/bin/activate
+#   pip install -r research/nautilus_lab/requirements-bybit-demo-live.txt
+#
+nautilus_trader>=1.211.0,<2
+pandas>=2.0
+numpy>=1.26
+requests>=2.28

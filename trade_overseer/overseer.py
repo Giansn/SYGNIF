@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
+import bybit_linear_hedge
 import ensure_entry
 import ft_client
 import llm_client
@@ -444,7 +445,8 @@ class OverseerHandler(BaseHTTPRequestHandler):
         pass  # Silence access logs
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        raw = self.path
+        path = raw.split("?", 1)[0].rstrip("/") or "/"
         if path == "/orderbook":
             body = json.dumps(orderbook_snapshot.build_orderbook_overview(), indent=2)
             self.send_response(200)
@@ -463,6 +465,11 @@ class OverseerHandler(BaseHTTPRequestHandler):
                 "http_port": config.HTTP_PORT,
                 "orderbook_endpoint": "/orderbook",
                 "ensure_entry_endpoint": "/ensure_entry (POST + X-Overseer-Ensure-Token)",
+                "bybit_hedge_endpoints": [
+                    "POST /bybit/hedge/switch-mode (X-Overseer-Hedge-Token)",
+                    "POST /bybit/hedge/order (X-Overseer-Hedge-Token)",
+                    "GET /bybit/hedge/positions?symbol=BTCUSDT (X-Overseer-Hedge-Token)",
+                ],
             })
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -476,6 +483,46 @@ class OverseerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode())
+        elif path == "/bybit/hedge/positions":
+            if not config.HEDGE_TOKEN:
+                err = json.dumps({"ok": False, "error": "Set OVERSEER_HEDGE_TOKEN or OVERSEER_ENSURE_TOKEN"})
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            got = self.headers.get("X-Overseer-Hedge-Token") or self.headers.get(
+                "X-Overseer-Ensure-Token", ""
+            )
+            if got != config.HEDGE_TOKEN:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"bad token"}')
+                return
+            from urllib.parse import parse_qs
+
+            q = parse_qs(raw.split("?", 1)[1]) if "?" in raw else {}
+            sym = (q.get("symbol") or ["BTCUSDT"])[0]
+            try:
+                raw_bybit = bybit_linear_hedge.position_list(sym)
+            except Exception as e:
+                logger.exception("GET /bybit/hedge/positions failed")
+                err = json.dumps({"ok": False, "error": str(e)})
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            body = json.dumps(
+                {"ok": raw_bybit.get("retCode") == 0, "bybit": raw_bybit},
+                default=str,
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
         elif path == "/health":
             self.send_response(200)
             self.end_headers()
@@ -514,6 +561,145 @@ class OverseerHandler(BaseHTTPRequestHandler):
                 ignore_signal=bool(data.get("ignore_signal", False)),
             )
             body = json.dumps(res, default=str)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
+        if path == "/bybit/hedge/switch-mode":
+            if not config.HEDGE_TOKEN:
+                err = json.dumps({"ok": False, "error": "Set OVERSEER_HEDGE_TOKEN or OVERSEER_ENSURE_TOKEN"})
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            got = self.headers.get("X-Overseer-Hedge-Token") or self.headers.get(
+                "X-Overseer-Ensure-Token", ""
+            )
+            if got != config.HEDGE_TOKEN:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"bad token"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(length).decode() if length else "{}")
+            except json.JSONDecodeError:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            symbol = str(data.get("symbol", "BTCUSDT"))
+            mode_raw = data.get("mode", "hedge")
+            if isinstance(mode_raw, int):
+                mode = mode_raw
+            else:
+                m = str(mode_raw).strip().lower()
+                if m in ("hedge", "both", "3"):
+                    mode = bybit_linear_hedge.MODE_HEDGE
+                elif m in ("oneway", "one-way", "merged", "0"):
+                    mode = bybit_linear_hedge.MODE_ONE_WAY
+                else:
+                    err = json.dumps({"ok": False, "error": f"unknown mode: {mode_raw!r}"})
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(err.encode())
+                    return
+            try:
+                raw_bybit = bybit_linear_hedge.switch_position_mode(symbol, mode)
+            except Exception as e:
+                logger.exception("POST /bybit/hedge/switch-mode failed")
+                err = json.dumps({"ok": False, "error": str(e)})
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            logger.info(
+                "Bybit switch-mode symbol=%s mode=%s retCode=%s",
+                symbol,
+                mode,
+                raw_bybit.get("retCode"),
+            )
+            body = json.dumps(
+                {"ok": raw_bybit.get("retCode") == 0, "bybit": raw_bybit},
+                default=str,
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
+        if path == "/bybit/hedge/order":
+            if not config.HEDGE_TOKEN:
+                err = json.dumps({"ok": False, "error": "Set OVERSEER_HEDGE_TOKEN or OVERSEER_ENSURE_TOKEN"})
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            got = self.headers.get("X-Overseer-Hedge-Token") or self.headers.get(
+                "X-Overseer-Ensure-Token", ""
+            )
+            if got != config.HEDGE_TOKEN:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"bad token"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(length).decode() if length else "{}")
+            except json.JSONDecodeError:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            symbol = str(data.get("symbol", "BTCUSDT"))
+            side = str(data.get("side", "Buy"))
+            qty = str(data.get("qty", ""))
+            try:
+                position_idx = int(data.get("positionIdx", data.get("position_idx", 1)))
+            except (TypeError, ValueError):
+                err = json.dumps({"ok": False, "error": "positionIdx must be an integer"})
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            reduce_only = bool(data.get("reduceOnly", data.get("reduce_only", False)))
+            if not qty:
+                err = json.dumps({"ok": False, "error": "qty required"})
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            try:
+                raw_bybit = bybit_linear_hedge.create_market_order(
+                    symbol, side, qty, position_idx, reduce_only=reduce_only
+                )
+            except Exception as e:
+                logger.exception("POST /bybit/hedge/order failed")
+                err = json.dumps({"ok": False, "error": str(e)})
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            logger.info(
+                "Bybit hedge order symbol=%s side=%s qty=%s positionIdx=%s retCode=%s",
+                symbol,
+                side,
+                qty,
+                position_idx,
+                raw_bybit.get("retCode"),
+            )
+            body = json.dumps(
+                {"ok": raw_bybit.get("retCode") == 0, "bybit": raw_bybit},
+                default=str,
+            )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()

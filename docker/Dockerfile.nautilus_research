@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Heavy wheel; pin loosely for reproducible builds.
+# Heavy wheel; pin loosely for reproducible builds (mirrors research/nautilus_lab/requirements-bybit-demo-live.txt).
 RUN pip install --no-cache-dir \
     "nautilus_trader>=1.211.0,<2" \
     pandas \

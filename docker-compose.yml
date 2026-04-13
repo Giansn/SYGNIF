@@ -8,6 +8,13 @@
 # **Default stack (no profile):** `finance-agent` + `notification-handler` only.
 # **Main Sygnif spot/futures + overseer:** `docker compose --profile main-traders up -d`
 # **BTC spot trader + Nautilus sink/sidecar:** `docker compose --profile btc-nautilus up -d` (same file — no second compose merge).
+# **BTCUSDT linear grid (Nautilus GridMarketMaker, demo):** `docker compose --profile btc-grid-mm up -d nautilus-grid-btc01`
+# or set `COMPOSE_PROFILES=btc-grid-mm` in `.env` so `docker compose up -d` includes it after reboot.
+# (needs `NAUTILUS_GRID_MM_DEMO_ACK=YES` + `BYBIT_DEMO_*`; avoid same keys as live `freqtrade-btc-0-1` unless isolated).
+#
+# **Health:** `healthcheck` on finance-agent, notification-handler, Freqtrade*, trade-overseer,
+# nautilus-research; `depends_on: service_healthy` chains traders → notification + finance-agent,
+# overseer → healthy traders. Post-deploy sweep: `./scripts/deploy_health_check.sh`.
 #
 # To use a finance-agent already running on the EC2 host, set in .env e.g.
 #   SYGNIF_SENTIMENT_HTTP_URL=http://host.docker.internal:8091/sygnif/sentiment
@@ -97,9 +104,19 @@ services:
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
     depends_on:
       finance-agent:
-        condition: service_started
+        condition: service_healthy
       notification-handler:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/ping', timeout=8)\"",
+        ]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
     command: >
       trade
       --logfile /freqtrade/user_data/logs/freqtrade.log
@@ -131,9 +148,19 @@ services:
       SYGNIF_PROFILE: btc_trend
     depends_on:
       finance-agent:
-        condition: service_started
+        condition: service_healthy
       notification-handler:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/v1/ping', timeout=8)\"",
+        ]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
     command:
       - "python3 /freqtrade/user_data/bybit_ccxt_demo_patch.py && exec /home/ftuser/.local/bin/freqtrade trade --strategy BTC_Strategy_0_1 --logfile /freqtrade/user_data/logs/freqtrade-futures.log --db-url sqlite:////freqtrade/user_data/tradesv3-futures-btc01-demo.sqlite --config /freqtrade/user_data/config_futures.json"
 
@@ -163,9 +190,19 @@ services:
       SYGNIF_PROFILE: btc_trend
     depends_on:
       finance-agent:
-        condition: service_started
+        condition: service_healthy
       notification-handler:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/api/v1/ping', timeout=8)\"",
+        ]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
     entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_0_1_demo.sh"]
     command: []
 
@@ -198,9 +235,19 @@ services:
       SYGNIF_BTC_SPOT_SERVE_ONLY: "${SYGNIF_BTC_SPOT_SERVE_ONLY:-1}"
     depends_on:
       finance-agent:
-        condition: service_started
+        condition: service_healthy
       notification-handler:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/ping', timeout=8)\"",
+        ]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
     # Override freqtrade image ENTRYPOINT so we can run demo config merge first
     entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_spot_demo.sh"]
     command: []
@@ -236,7 +283,66 @@ services:
       NAUTILUS_TRAINING_BAR_LIMIT_1H: "${NAUTILUS_TRAINING_BAR_LIMIT_1H:-1600}"
       NAUTILUS_TRAINING_BAR_LIMIT_1D: "${NAUTILUS_TRAINING_BAR_LIMIT_1D:-120}"
       NAUTILUS_STRATEGY_POLL_SEC: "${NAUTILUS_STRATEGY_POLL_SEC:-300}"
+    depends_on:
+      finance-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "/lab/workspace/nautilus_smoke.py"]
+      interval: 60s
+      timeout: 25s
+      retries: 3
+      start_period: 120s
     command: ["/bin/bash", "/lab/workspace/run_nautilus_bundled.sh"]
+
+  # Nautilus vendored **GridMarketMaker** on Bybit **demo**, **BTCUSDT linear** (same instrument class as
+  # ``freqtrade-btc-0-1`` / ``BTC_Strategy_0_1``). This is **not** Freqtrade — it is a separate ``TradingNode``.
+  # **Conflict risk:** same ``BYBIT_DEMO_*`` keys as the Freqtrade bot → two systems placing orders; use a
+  # **separate** demo subaccount for grid, or stop ``freqtrade-btc-0-1`` while testing. Requires
+  # ``NAUTILUS_GRID_MM_DEMO_ACK=YES`` in ``.env``. Survives crashes + host reboot when compose is brought up
+  # with profile ``btc-grid-mm`` (e.g. ``COMPOSE_PROFILES=btc-grid-mm`` in ``.env``). Cancel demo opens:
+  # ``PYTHONPATH=. python3 scripts/bybit_demo_cancel_open_orders.py`` (stop this container first if needed).
+  nautilus-grid-btc01:
+    <<: *sygnif-env-files
+    profiles: ["btc-grid-mm"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nautilus_research
+    image: sygnif-nautilus-research:latest
+    container_name: nautilus-grid-btc01
+    restart: unless-stopped
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./finance_agent:/lab/finance_agent:ro"
+      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
+      - "./research/nautilus_lab:/lab/workspace:rw"
+      - "./user_data:/lab/user_data:ro"
+      - "./prediction_agent:/lab/prediction_agent:ro"
+    environment:
+      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
+      # Grid MM: ``run_bybit_demo_grid_market_maker.py`` requires ACK + ``BYBIT_DEMO_*`` together; keys load via ``*sygnif-env-files``.
+      NAUTILUS_GRID_MM_DEMO_ACK: "${NAUTILUS_GRID_MM_DEMO_ACK:-}"
+      NAUTILUS_BYBIT_DEMO: "true"
+    depends_on:
+      finance-agent:
+        condition: service_healthy
+    command:
+      - python3
+      - /lab/workspace/run_bybit_demo_grid_market_maker.py
+      - --instrument
+      - BTCUSDT-LINEAR.BYBIT
+      - --trade-size
+      - "${NAUTILUS_GRID_BTC01_TRADE_SIZE:-0.001}"
+      - --max-position
+      - "${NAUTILUS_GRID_BTC01_MAX_POSITION:-0.02}"
+      - --num-levels
+      - "${NAUTILUS_GRID_BTC01_NUM_LEVELS:-2}"
+      - --grid-step-bps
+      - "${NAUTILUS_GRID_BTC01_GRID_STEP_BPS:-15}"
+      - --requote-threshold-bps
+      - "${NAUTILUS_GRID_BTC01_REQUOTE_BPS:-4}"
 
   notification-handler:
     <<: *sygnif-env-files
@@ -258,6 +364,16 @@ services:
     ports:
       - "127.0.0.1:8089:8089"
     command: python3 /app/notification_handler.py --port 8089
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8089/', timeout=5)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   # Trade overseer: same Docker network as Freqtrade APIs (not 127.0.0.1 from host).
   # NPU/OpenVINO: run overseer on host if needed; this image is requests-only.
@@ -291,11 +407,21 @@ services:
       - "127.0.0.1:8090:8090"
     depends_on:
       finance-agent:
-        condition: service_started
+        condition: service_healthy
       freqtrade:
-        condition: service_started
+        condition: service_healthy
       freqtrade-futures:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=8)\"",
+        ]
+      interval: 45s
+      timeout: 15s
+      retries: 4
+      start_period: 120s
     volumes:
       - "./trade_overseer/data:/app/trade_overseer/data"
       # Read-only API passwords for overseer when .env has no FT_* / API_PASSWORD (same files as traders).

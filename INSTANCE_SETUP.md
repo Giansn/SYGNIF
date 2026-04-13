@@ -232,22 +232,28 @@ sudo systemctl status sygnif-notify
 # Test Telegram notifications
 ./notify.sh up
 
-# API health
-curl -s http://localhost:8080/api/v1/ping
-curl -s http://localhost:8081/api/v1/ping
+# API health (host ports match docker-compose: spot API → host 8181 by default, not 8080)
+curl -fsS "http://127.0.0.1:8181/api/v1/ping"
+curl -fsS "http://127.0.0.1:8081/api/v1/ping"
+
+# One-shot sweep (core stack + optional profiles / worker)
+./scripts/deploy_health_check.sh
 
 # Local-only services (from host)
 curl -fsS http://127.0.0.1:8089/   # notification-handler GET → {"status":"healthy"}
+curl -fsS http://127.0.0.1:8090/health
 curl -fsS http://127.0.0.1:8090/overview 2>/dev/null | head -c 200
 curl -fsS http://127.0.0.1:8093/healthz   # Cursor worker
 ```
+
+Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /health`; `notification-handler` → `GET /`; Freqtrade containers → `GET /api/v1/ping` on their listen ports; `trade-overseer` → `GET /health`; `nautilus-research` → `python3 /lab/workspace/nautilus_smoke.py`. Traders and overseer **wait on** `finance-agent` + `notification-handler` **healthy** (and overseer waits on **healthy** Freqtrade spot/futures) where `depends_on` is set — rebuild/recreate may take longer on first boot until `start_period` elapses.
 
 ## Services Summary
 
 | Service | Type | Port | Persists reboot |
 |---------|------|------|-----------------|
-| `freqtrade` | Docker (`unless-stopped`) | 8080 (all interfaces) | yes |
-| `freqtrade-futures` | Docker (`unless-stopped`) | 8081 (all interfaces) | yes |
+| `freqtrade` | Docker (`unless-stopped`) | API **8181→8080** in compose (all interfaces on 8181) | yes |
+| `freqtrade-futures` | Docker (`unless-stopped`) | **8081** host/container | yes |
 | `notification-handler` | Docker | 8089 (**localhost only**) | yes |
 | `trade-overseer` | Docker | 8090 (**localhost only**) | yes |
 | `sygnif-dashboard-spot` | systemd | 8888 | yes |
@@ -316,6 +322,27 @@ docker exec -it nautilus-research python3 /lab/workspace/btc_regime_assessment.p
 ```
 
 See `research/nautilus_lab/README.md` and `SWING_FAILURE_ANALYSIS.md`.
+
+## Optional: `nautilus-grid-btc01` (Nautilus **GridMarketMaker** on Bybit demo, BTCUSDT linear)
+
+Profile **`btc-grid-mm`**: places live **demo** orders via Nautilus (not Freqtrade `BTC_Strategy_0_1`). Set **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** in `.env` plus **`BYBIT_DEMO_*`**. Prefer a **separate** demo subaccount from `freqtrade-btc-0-1`, or stop that bot while testing.
+
+**Persistent after reboot:** service uses **`restart: unless-stopped`**. Add **`COMPOSE_PROFILES=btc-grid-mm`** (alone or comma-appended) to `.env` so a normal **`docker compose up -d`** from `~/SYGNIF` recreates the grid after a host restart (still needs `finance-agent` healthy).
+
+**Cancel all open BTCUSDT linear orders on demo** (stop the grid container first if you do not want immediate re-quotes):
+
+```bash
+cd ~/SYGNIF
+docker stop nautilus-grid-btc01 2>/dev/null || true
+PYTHONPATH=. python3 scripts/bybit_demo_cancel_open_orders.py
+```
+
+```bash
+cd ~/SYGNIF
+./scripts/start_btc01_nautilus_grid.sh
+# or: docker compose --profile btc-grid-mm up -d nautilus-grid-btc01
+docker logs nautilus-grid-btc01 -f
+```
 
 ## Optional: `btc-predict-runner` (ML bot on host, not Docker)
 

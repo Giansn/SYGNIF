@@ -122,3 +122,6 @@ HTTP_HOST = os.environ.get("OVERSEER_HTTP_HOST", "127.0.0.1")
 
 # POST /ensure_entry — requires header X-Overseer-Ensure-Token matching this (empty = disabled).
 ENSURE_TOKEN = os.environ.get("OVERSEER_ENSURE_TOKEN", "").strip()
+
+# POST/GET /bybit/hedge/* — X-Overseer-Hedge-Token (falls back to ENSURE_TOKEN if unset).
+HEDGE_TOKEN = os.environ.get("OVERSEER_HEDGE_TOKEN", "").strip() or ENSURE_TOKEN
