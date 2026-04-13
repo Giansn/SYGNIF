@@ -83,6 +83,14 @@ Rebuild after changing **`Dockerfile.custom`**, the patch script, or **Freqtrade
 
 **Direct path (btc-0-1 demo / manual RPC, no prediction JSON):** `scripts/ft_btc_0_1_forceenter.py` — in order: **`POST {FT_BTC_0_1_API_URL}/token/login`** (HTTP Basic) → **`POST …/forceenter`** (Bearer JWT). Default base URL **`http://127.0.0.1:8185/api/v1`**. Use **`entry_tag`** like `manual_demo_open` (`manual_*` bypasses Sygnif volume regime on BTC-only lists). See `.env.example` (`FT_BTC_0_1_*`).
 
+| Purpose | Path |
+|---------|------|
+| Force enter on **btc-0-1** (default host **8185**) | `scripts/ft_btc_0_1_forceenter.py` |
+| Force enter from **BTC analysis** JSON (runner + channel + R01 gate) | `scripts/btc_analysis_forceenter.py` |
+| Force enter from **24h movement** JSON (`FORECAST_FORCEENTER_OK=YES`) | `scripts/ft_btc_0_1_from_24h_forecast.py` |
+
+**Concurrency:** `user_data/config_btc_strategy_0_1_paper_market.json` sets **`max_open_trades`: 100** so you can experiment on paper within Freqtrade’s global cap. **`BTC_Strategy_0_1.confirm_trade_entry`** still applies **per-tag slot caps** (R01/R02/R03). With the default **single-pair** `BTC/USDT:USDT` whitelist and **`position_adjustment_enable`: false**, you still get **at most one open position per pair** — raising `max_open_trades` mainly matters for **multi-pair** whitelists or if you later enable position stacking.
+
 Requirements:
 
 - Bot config **`force_entry_enable`: true** (see `user_data/config_futures.json` when you intentionally enable RPC entries).

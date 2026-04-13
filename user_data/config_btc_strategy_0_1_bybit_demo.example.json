@@ -1,11 +1,11 @@
 {
-    "_comment": "Bybit **USDT linear demo** (perpetual) + **BTC_Strategy_0_1**. Copy to a **gitignored** file (e.g. user_data/config_futures.json). Keys: Bybit **Demo Trading** UI only. CCXT: enableDemoTrading + hostname bybit.com (see letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md). Patch: user_data/bybit_ccxt_demo_patch.py at Docker build + freqtrade-futures entrypoint.",
+    "_comment": "Bybit **USDT linear demo** (perpetual) + **BTC_Strategy_0_1**. Copy to a **gitignored** file (e.g. user_data/config_futures.json). Keys: Bybit **Demo Trading** UI only. CCXT: enableDemoTrading + hostname bybit.com (see letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md). Patch: user_data/bybit_ccxt_demo_patch.py at Docker build + freqtrade-futures entrypoint. max_open_trades=100 matches paper headroom; single-pair list = one concurrent BTC position unless position_adjustment / more pairs.",
     "_ruleprediction": "Do not commit real keys. Prefer BYBIT_DEMO_* from .env via your private config merge.",
     "strategy": "BTC_Strategy_0_1",
     "can_short": true,
     "trading_mode": "futures",
     "margin_mode": "isolated",
-    "max_open_trades": 20,
+    "max_open_trades": 100,
     "stake_currency": "USDT",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.8,

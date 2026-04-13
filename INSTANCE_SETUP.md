@@ -74,6 +74,16 @@ Edit both configs and set:
 
 6. **Optional — open order from BTC analysis:** `python3 scripts/btc_analysis_forceenter.py` (dry-run) posts a plan from `prediction_agent/btc_prediction_output.json` + training channel; `--execute` calls Freqtrade **`/forceenter`** (needs `force_entry_enable` + `FT_API_URL` / `FT_PASS` in env). See **`letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md`** §7.
 
+**Force-enter scripts (btc-0-1, default API `http://127.0.0.1:8185/api/v1`):**
+
+| Purpose | Path |
+|---------|------|
+| Force enter on btc-0-1 | `scripts/ft_btc_0_1_forceenter.py` |
+| Force enter from BTC analysis JSON | `scripts/btc_analysis_forceenter.py` |
+| Force enter from 24h movement JSON | `scripts/ft_btc_0_1_from_24h_forecast.py` |
+
+Paper config **`user_data/config_btc_strategy_0_1_paper_market.json`** uses **`max_open_trades`: 100** for headroom; single-pair mode still yields **one open BTC position** unless you add pairs or enable position adjustment. Strategy slot caps (R01–R03) still apply.
+
 **Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
 
 ## 5. Build and Start Containers
