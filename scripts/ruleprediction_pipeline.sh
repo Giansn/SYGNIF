@@ -9,6 +9,7 @@
 #   1) runs ``channel_training`` (includes ``btc_predict_runner``),
 #   2) appends a settled-bar proof row when the next 1h candle exists,
 #   3) runs ``prediction_horizon_check check`` if a BTC snapshot exists (non-fatal).
+#      (Redundant but cheap vs. ``sygnif-checkin`` loop — keep both or rely on check-in only.)
 #
 # Install: sudo cp systemd/ruleprediction-pipeline.{service,timer} /etc/systemd/system/
 #          sudo systemctl daemon-reload

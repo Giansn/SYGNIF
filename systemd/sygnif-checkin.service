@@ -1,0 +1,16 @@
+[Unit]
+Description=SYGNIF self-organized prediction horizon check-in loop (check + adaptive save)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/sygnif_checkin_loop.sh
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/sygnif_checkin_loop.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal

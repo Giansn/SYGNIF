@@ -1,0 +1,12 @@
+[Unit]
+Description=Start SYGNIF check-in loop shortly after boot
+Documentation=file:///home/ubuntu/SYGNIF/systemd/sygnif-checkin.service
+
+[Timer]
+OnBootSec=45
+AccuracySec=15
+Unit=sygnif-checkin.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
