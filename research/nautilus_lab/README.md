@@ -34,4 +34,4 @@ docker exec -it nautilus-research python3 /lab/workspace/btc_dump_run_framework.
 - **Script:** `nautilus_sidecar_strategy.py` — reads sink `btc_1h_ohlcv.json`, writes **`nautilus_strategy_signal.json`**. Started by **`run_nautilus_bundled.sh`** alongside the Bybit sink (no second container).
 - **Optional second container:** merge **`docker-compose.nautilus-strategy-sidecar.yml`** only if you intentionally split sink vs sidecar.
 
-Upstream framework: [nautechsystems/nautilus_trader](https://github.com/nautechsystems/nautilus_trader).
+Upstream framework: [nautechsystems/nautilus_trader](https://github.com/nautechsystems/nautilus_trader). Official **example strategies** (develop): [nautilus_trader/examples/strategies](https://github.com/nautechsystems/nautilus_trader/tree/develop/nautilus_trader/examples/strategies) — includes **`ema_cross_hedge_mode.py`** (venue hedge-style / dual-side patterns in Nautilus’ OMS; not the same as this repo’s read-only **spot** HTTP sink). Other useful references: `ema_cross.py`, `orderbook_imbalance.py`, `blank.py` (template).
