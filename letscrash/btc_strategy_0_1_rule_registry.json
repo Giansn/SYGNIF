@@ -27,8 +27,9 @@
     {
       "id": "BTC-0.1-R03",
       "kind": "sleeve",
+      "pattern": "scalping",
       "rule_tag": "BTC-0.1-R03",
-      "tags": ["justunclel-pac-pullback", "capital-bucket-third", "journal-by-tag", "L1"],
+      "tags": ["scalping", "justunclel-pac-pullback", "capital-bucket-third", "journal-by-tag", "L1"],
       "log": "letscrash/RULE_GENERATION_FROM_INCOMING_DATA.md §7",
       "pine_reference": "prediction_agent/reference/justunclel_scalping_pullback_tool_r1_1_v4.pine; prediction_agent/reference/bullbyte_pro_scalper_ai_mpl2.pine"
     }

@@ -101,7 +101,7 @@ def main() -> int:
     ap.add_argument(
         "--loop",
         action="store_true",
-        help="repeat forever; sleep NAUTILUS_BYBIT_POLL_SEC (default 3600) between pulls",
+        help="repeat forever; sleep NAUTILUS_BYBIT_POLL_SEC (default 300) between pulls",
     )
     args = ap.parse_args()
 
@@ -111,7 +111,7 @@ def main() -> int:
     out_dir = Path(os.environ.get("NAUTILUS_BTC_OHLCV_DIR", "/lab/btc_specialist_data"))
     out_name = os.environ.get("NAUTILUS_BTC_OHLCV_NAME", "btc_1h_ohlcv_nautilus_bybit.json")
     out_path = out_dir / out_name
-    interval = int(os.environ.get("NAUTILUS_BYBIT_POLL_SEC", "3600"))
+    interval = int(os.environ.get("NAUTILUS_BYBIT_POLL_SEC", "300"))
 
     def pull_and_log() -> int:
         t0 = time.perf_counter()

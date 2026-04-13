@@ -7,7 +7,7 @@
 #
 # **Default stack (no profile):** `finance-agent` + `notification-handler` only.
 # **Main Sygnif spot/futures + overseer:** `docker compose --profile main-traders up -d`
-# **BTC spot + Nautilus research:** merge `docker-compose.btc-nautilus-research.yml` (see file header).
+# **BTC spot trader + Nautilus sink/sidecar:** `docker compose --profile btc-nautilus up -d` (same file — no second compose merge).
 #
 # To use a finance-agent already running on the EC2 host, set in .env e.g.
 #   SYGNIF_SENTIMENT_HTTP_URL=http://host.docker.internal:8091/sygnif/sentiment
@@ -20,15 +20,22 @@ networks:
     # driver omitted so merge with docker-compose.sygnif-network.yml does not keep bridge+external
     name: ${SYGNIF_DOCKER_NETWORK_NAME:-sygnif_backend}
 
+# Secrets: first env_file, then repo `.env`. Compose applies files in order — **later wins** (override).
+# Default canonical file: `~/xrp_claude_bot/.env` (BYBIT_*, BYBIT_DEMO_*, Telegram, …). Set
+# `SYGNIF_SECRETS_ENV_FILE` to relocate (must exist, or compose fails to start).
+x-sygnif-env-files: &sygnif-env-files
+  env_file:
+    - ${SYGNIF_SECRETS_ENV_FILE:-/home/ubuntu/xrp_claude_bot/.env}
+    - .env
+
 services:
   finance-agent:
+    <<: *sygnif-env-files
     build:
       context: .
       dockerfile: "./docker/Dockerfile.finance_agent"
     restart: unless-stopped
     container_name: finance-agent
-    env_file:
-      - .env
     networks:
       - sygnif_backend
     extra_hosts:
@@ -67,6 +74,7 @@ services:
       start_period: 60s
 
   freqtrade:
+    <<: *sygnif-env-files
     profiles: ["main-traders"]
     build:
       context: .
@@ -80,8 +88,8 @@ services:
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
-    env_file:
-      - .env
+      # Nautilus sink + sidecar JSON (read-only) for SygnifStrategy ``nautilus_*`` columns
+      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
     ports:
       # Spot Freqtrade API: host 8181 → container listen_port (config.json api_server 8080)
       - "0.0.0.0:8181:8080"
@@ -100,6 +108,7 @@ services:
       --strategy SygnifStrategy
 
   freqtrade-futures:
+    <<: *sygnif-env-files
     profiles: ["main-traders"]
     build:
       context: .
@@ -114,8 +123,7 @@ services:
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
-    env_file:
-      - .env
+      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
     ports:
       - "0.0.0.0:8081:8081"
     environment:
@@ -129,10 +137,11 @@ services:
     command:
       - "python3 /freqtrade/user_data/bybit_ccxt_demo_patch.py && exec /home/ftuser/.local/bin/freqtrade trade --strategy BTC_Strategy_0_1 --logfile /freqtrade/user_data/logs/freqtrade-futures.log --db-url sqlite:////freqtrade/user_data/tradesv3-futures-btc01-demo.sqlite --config /freqtrade/user_data/config_futures.json"
 
-  # BTC_Strategy_0_1 — futures, BTC/USDT:USDT only (see user_data/config_btc_strategy_0_1_paper_market.json).
+  # BTC_Strategy_0_1 — Bybit **demo** USDT perp BTC only (runtime config + BYBIT_DEMO_* from env).
   # Start: docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1
-  # API: host 127.0.0.1:8185 → container :8085 (JWT in config; keys like main futures: exchange.key/secret or dry_run).
+  # API: host 127.0.0.1:8185 → container :8085
   freqtrade-btc-0-1:
+    <<: *sygnif-env-files
     profiles: ["btc-0-1"]
     build:
       context: .
@@ -146,26 +155,91 @@ services:
     volumes:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
-    env_file:
-      - .env
     ports:
       - "127.0.0.1:8185:8085"
     environment:
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
+      # btc_trend maps btc_trend_long→R02; full R01 governance + R03 sleeve still run (no early return).
       SYGNIF_PROFILE: btc_trend
     depends_on:
       finance-agent:
         condition: service_started
       notification-handler:
         condition: service_started
-    command: >
-      trade
-      --logfile /freqtrade/user_data/logs/freqtrade-btc-0-1.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3-btc01-paper.sqlite
-      --config /freqtrade/user_data/config_btc_strategy_0_1_paper_market.json
-      --strategy BTC_Strategy_0_1
+    entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_0_1_demo.sh"]
+    command: []
+
+  # Dedicated BTC/USDT spot SygnifStrategy + Nautilus JSON mount (see user_data/config_btc_spot_dedicated.json).
+  freqtrade-btc-spot:
+    <<: *sygnif-env-files
+    profiles: ["btc-nautilus"]
+    build:
+      context: .
+      dockerfile: "./docker/Dockerfile.btc_trader"
+    image: sygnif-freqtrade-btc:latest
+    restart: unless-stopped
+    container_name: freqtrade-btc-spot
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+      - "./trade_overseer:/freqtrade/trade_overseer"
+      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
+    ports:
+      - "127.0.0.1:8282:8080"
+    environment:
+      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
+      NAUTILUS_BTC_DATA_DIR: "/freqtrade/user_data/btc_specialist_data"
+      # Bybit **demo** spot bridge: runtime config merges api-demo + BYBIT_DEMO_* from .env
+      SYGNIF_BTC_SPOT_USE_BYBIT_DEMO: "${SYGNIF_BTC_SPOT_USE_BYBIT_DEMO:-1}"
+      # Paper only: API/strategy runs; no exchange orders (only freqtrade-btc-0-1 is live-capable).
+      SYGNIF_BTC_SPOT_SERVE_ONLY: "${SYGNIF_BTC_SPOT_SERVE_ONLY:-1}"
+    depends_on:
+      finance-agent:
+        condition: service_started
+      notification-handler:
+        condition: service_started
+    # Override freqtrade image ENTRYPOINT so we can run demo config merge first
+    entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_spot_demo.sh"]
+    command: []
+
+  nautilus-research:
+    <<: *sygnif-env-files
+    profiles: ["btc-nautilus"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nautilus_research
+    image: sygnif-nautilus-research:latest
+    restart: unless-stopped
+    container_name: nautilus-research
+    networks:
+      - sygnif_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - "./finance_agent:/lab/finance_agent:ro"
+      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
+      - "./research/nautilus_lab:/lab/workspace:rw"
+      - "./user_data:/lab/user_data:ro"
+      - "./prediction_agent:/lab/prediction_agent:ro"
+    environment:
+      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
+      SYGNIF_SPOT_NOTIONAL_USDT: "${SYGNIF_SPOT_NOTIONAL_USDT:-100}"
+      NAUTILUS_BTC_OHLCV_DIR: "/lab/btc_specialist_data"
+      # Bybit sink interval (default 300s); host ruleprediction timer stays :07 for 1h bar close.
+      NAUTILUS_BYBIT_POLL_SEC: "${NAUTILUS_BYBIT_POLL_SEC:-300}"
+      NAUTILUS_BTC_BAR_LIMIT: "${NAUTILUS_BTC_BAR_LIMIT:-900}"
+      NAUTILUS_BYBIT_DEMO: "${NAUTILUS_BYBIT_DEMO:-true}"
+      NAUTILUS_BYBIT_TESTNET: "${NAUTILUS_BYBIT_TESTNET:-false}"
+      NAUTILUS_TRAINING_BAR_LIMIT_1H: "${NAUTILUS_TRAINING_BAR_LIMIT_1H:-1600}"
+      NAUTILUS_TRAINING_BAR_LIMIT_1D: "${NAUTILUS_TRAINING_BAR_LIMIT_1D:-120}"
+      NAUTILUS_STRATEGY_POLL_SEC: "${NAUTILUS_STRATEGY_POLL_SEC:-300}"
+    command: ["/bin/bash", "/lab/workspace/run_nautilus_bundled.sh"]
 
   notification-handler:
+    <<: *sygnif-env-files
     build:
       context: .
       dockerfile: "./docker/Dockerfile.notifications"
@@ -173,8 +247,6 @@ services:
     container_name: notification-handler
     networks:
       - sygnif_backend
-    env_file:
-      - .env
     environment:
       # Explicit passthrough so tokens resolve even when /app/.env is absent in the image.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -190,6 +262,7 @@ services:
   # Trade overseer: same Docker network as Freqtrade APIs (not 127.0.0.1 from host).
   # NPU/OpenVINO: run overseer on host if needed; this image is requests-only.
   trade-overseer:
+    <<: *sygnif-env-files
     profiles: ["main-traders"]
     build:
       context: .
@@ -200,8 +273,6 @@ services:
       - sygnif_backend
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    env_file:
-      - .env
     environment:
       FT_SPOT_URL: ${FT_SPOT_URL:-http://freqtrade:8080/api/v1}
       FT_FUTURES_URL: ${FT_FUTURES_URL:-http://freqtrade-futures:8081/api/v1}
@@ -214,6 +285,8 @@ services:
       OVERSEER_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_BRIEFING_URL: ${FINANCE_AGENT_BRIEFING_URL:-http://finance-agent:8091/briefing}
       OVERSEER_AGENT_URL: ${OVERSEER_AGENT_URL:-http://finance-agent:8091/overseer/commentary}
+      # Plays from finance_agent: BTC/USDT-only view (see trade_overseer/plays_store.py)
+      SYGNIF_PLAYS_BTC_USDT_ONLY: "${SYGNIF_PLAYS_BTC_USDT_ONLY:-1}"
     ports:
       - "127.0.0.1:8090:8090"
     depends_on:
@@ -228,3 +301,5 @@ services:
       # Read-only API passwords for overseer when .env has no FT_* / API_PASSWORD (same files as traders).
       - "./user_data/config.json:/ro/ft_spot_config.json:ro"
       - "./user_data/config_futures.json:/ro/ft_futures_config.json:ro"
+      # Nautilus bundle + sidecar signal for GET /orderbook and ensure_entry signal gate
+      - "./finance_agent/btc_specialist/data:/ro/btc_specialist_data:ro"

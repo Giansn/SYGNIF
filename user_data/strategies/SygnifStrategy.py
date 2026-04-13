@@ -4,6 +4,8 @@ SygnifStrategy - NFI-Enhanced Trading Bot with AI Sentiment Layer
 Architecture (inspired by NostalgiaForInfinityX7):
 - Multi-timeframe analysis: 5m base + 5m/15m/1h/4h/1d informative
 - BTC correlation: BTC/USDT indicators merged into all pairs
+- **Nautilus sidecar (optional):** ``user_data/btc_specialist_data/nautilus_strategy_signal.json``
+  (written by Docker ``nautilus-research`` bundle) → columns ``nautilus_bias`` / ``nautilus_signal_score`` → small TA-score nudge
 - NFI-style indicators: RSI_3/14, Aroon, StochRSI, CMF, CCI, ROC, BB, EMA, Williams %R
 - Global protections: Multi-TF cascade prevents buying during crashes
 - Sentiment layer: ambiguous TA zone → **local finance-agent HTTP** (`/sygnif/sentiment`)
@@ -696,6 +698,65 @@ class _SygnifStrategyDefault(IStrategy):
             instance = "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
             self._event_log = EventLog(instance=instance)
 
+        # Nautilus sidecar JSON cache (mtime-invalidated)
+        self._nautilus_signal_mtime: float = -1.0
+        self._nautilus_signal_doc: Optional[dict] = None
+
+    def _nautilus_sidecar_json_path(self) -> Path:
+        env = os.environ.get("NAUTILUS_SIGNAL_JSON", "").strip()
+        if env:
+            return Path(env).expanduser()
+        return Path(__file__).resolve().parent.parent / "btc_specialist_data" / "nautilus_strategy_signal.json"
+
+    def _load_nautilus_sidecar_signal(self) -> Optional[dict]:
+        p = self._nautilus_sidecar_json_path()
+        try:
+            st = p.stat().st_mtime
+        except OSError:
+            return None
+        if self._nautilus_signal_doc is not None and st == self._nautilus_signal_mtime:
+            return self._nautilus_signal_doc
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            self._nautilus_signal_doc = None
+            self._nautilus_signal_mtime = st
+            return None
+        if not isinstance(doc, dict):
+            self._nautilus_signal_doc = None
+            self._nautilus_signal_mtime = st
+            return None
+        self._nautilus_signal_doc = doc
+        self._nautilus_signal_mtime = st
+        return doc
+
+    def _attach_nautilus_sidecar_columns(self, df: DataFrame, metadata: dict) -> None:
+        """Broadcast Nautilus container sidecar hint onto the dataframe (see ``nautilus_sidecar_strategy.py``)."""
+        if os.environ.get("SYGNIF_NAUTILUS_SIGNAL", "1").lower() in ("0", "false", "no", "off"):
+            df.loc[:, "nautilus_bias"] = "off"
+            df.loc[:, "nautilus_signal_score"] = 0.0
+            return
+        doc = self._load_nautilus_sidecar_signal()
+        if not doc:
+            df.loc[:, "nautilus_bias"] = "neutral"
+            df.loc[:, "nautilus_signal_score"] = 0.0
+            return
+        bias = str(doc.get("bias") or "neutral").lower()
+        if bias not in ("long", "short", "neutral"):
+            bias = "neutral"
+        bonus = 3.0 if bias == "long" else (-3.0 if bias == "short" else 0.0)
+        df.loc[:, "nautilus_bias"] = bias
+        df.loc[:, "nautilus_signal_score"] = float(bonus)
+        try:
+            logger.debug(
+                "[%s] nautilus sidecar: bias=%s score_delta=%s",
+                metadata.get("pair", ""),
+                bias,
+                bonus,
+            )
+        except Exception:
+            pass
+
     def _refresh_strategy_adaptation(self, force: bool = False) -> None:
         """Load bounded overrides from user_data/strategy_adaptation.json (hot-reload)."""
         now = time.time()
@@ -1189,6 +1250,8 @@ class _SygnifStrategyDefault(IStrategy):
         except Exception as e:
             logger.debug("[%s] ML signal skipped: %s", metadata.get("pair"), e)
 
+        self._attach_nautilus_sidecar_columns(df, metadata)
+
         tok = time.perf_counter()
         logger.debug(f"[{metadata['pair']}] populate_indicators took: {tok - tik:0.4f}s")
         return df
@@ -1526,6 +1589,9 @@ class _SygnifStrategyDefault(IStrategy):
             score += _get_adx_cdl().adx_ta_score_component(df)
         except Exception:
             pass
+
+        if "nautilus_signal_score" in df.columns:
+            score = score + pd.to_numeric(df["nautilus_signal_score"], errors="coerce").fillna(0.0)
 
         return score.clip(0, 100)
 

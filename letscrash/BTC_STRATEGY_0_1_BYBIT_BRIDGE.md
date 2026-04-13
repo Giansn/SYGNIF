@@ -81,6 +81,8 @@ Rebuild after changing **`Dockerfile.custom`**, the patch script, or **Freqtrade
 
 **Not automatic trading** — explicit operator step. Script: `scripts/btc_analysis_forceenter.py` reads `prediction_agent/btc_prediction_output.json` + `training_channel_output.json`, applies the same **R01** gate as `btc_strategy_0_1_engine`, then **prints** a plan (default) or POSTs **`/api/v1/forceenter`** with `--execute`.
 
+**Direct path (btc-0-1 demo / manual RPC, no prediction JSON):** `scripts/ft_btc_0_1_forceenter.py` — in order: **`POST {FT_BTC_0_1_API_URL}/token/login`** (HTTP Basic) → **`POST …/forceenter`** (Bearer JWT). Default base URL **`http://127.0.0.1:8185/api/v1`**. Use **`entry_tag`** like `manual_demo_open` (`manual_*` bypasses Sygnif volume regime on BTC-only lists). See `.env.example` (`FT_BTC_0_1_*`).
+
 Requirements:
 
 - Bot config **`force_entry_enable`: true** (see `user_data/config_futures.json` when you intentionally enable RPC entries).

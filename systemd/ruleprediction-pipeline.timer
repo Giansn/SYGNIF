@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly Sygnif ruleprediction pipeline (:07 — after 1h candle + Nautilus sink window)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/ruleprediction_pipeline.sh
+
+[Timer]
+# :07 past each hour: 1h Bybit candle is closed; Nautilus BYBIT poll (default 3600s) can finish before training.
+OnCalendar=*-*-* *:07:00
+AccuracySec=1min
+Persistent=true
+RandomizedDelaySec=90
+
+[Install]
+WantedBy=timers.target

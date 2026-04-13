@@ -7,7 +7,8 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/SYGNIF
 EnvironmentFile=-/home/ubuntu/SYGNIF/.env
-# Optional: SYGNIF_BTC_TERMINAL_PORT=8891
+# Bind BTC Terminal on 8888 (spot Freqtrade proxy uses the same port — keep sygnif-dashboard-spot stopped).
+Environment=SYGNIF_BTC_TERMINAL_PORT=8888
 ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/dashboard_server_btc_terminal.py
 Restart=always
 RestartSec=5

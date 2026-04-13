@@ -5,6 +5,11 @@ Spec: ``letscrash/BTC_Strategy_0.1.md`` + ``btc_strategy_0_1_rule_registry.json`
 Adds **tag-specific** entry/exit paths for **BTC-0.1-R01–R03**: each path is selected by
 ``enter_tag`` (``BTC-0.1-R01`` … ``R03``) in ``populate_entry_trend`` / ``custom_exit`` /
 ``confirm_trade_entry`` (see ``letscrash/BTC_Strategy_0.1.md`` §7).
+**R03** = **scalping pattern** (pullback sleeve + scalp TP/RSI exits in ``custom_exit``).
+
+**Futures (USDT linear):** **leverage** is **not** set manually — inherited ``SygnifStrategy.leverage()`` (major tier, short cap, ATR vol scaling). **Entries / exits** run on **strategy math** (this class + parent); RPC ``forceenter`` is optional operator override only.
+
+**Research data path:** **Nautilus** container (compose profile ``btc-nautilus``) processes Bybit/BTC feeds into ``finance_agent/btc_specialist/data/`` for training + **ruleprediction** — see ``letscrash/RULE_AND_DATA_FLOW_LOOP.md`` §3.
 """
 
 from __future__ import annotations
@@ -32,11 +37,14 @@ except ImportError:
 
 
 class BTC_Strategy_0_1(_SygnifStrategyBase):
-    """Sygnif stack + BTC 0.1 rule tags, bucket cap, and R01/R02/R03 exits."""
+    """Sygnif stack + BTC 0.1 rule tags, bucket cap, R01/R02/R03 exits; leverage from parent."""
 
     max_slots_btc_0_1_r03 = 3
     # Futures: allow opens when whitelist is BTC-only (``_active_volume_pairs`` < 3).
-    _tags_bypass_volume_regime = frozenset({"BTC-0.1-R01", "BTC-0.1-R02", "BTC-0.1-R03"})
+    # ``btc_analysis_consensus`` = RPC from ``scripts/btc_analysis_forceenter.py`` (prediction JSON + R01 gate).
+    _tags_bypass_volume_regime = frozenset(
+        {"BTC-0.1-R01", "BTC-0.1-R02", "BTC-0.1-R03", "btc_analysis_consensus"}
+    )
 
     def bot_start(self, **kwargs) -> None:
         """BTC-only portfolio: skip movers/new_pairs injection (``StaticPairList`` is source of truth)."""
@@ -81,13 +89,20 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
     def populate_entry_trend(self, df: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         pair = metadata.get("pair", "")
 
-        if btc_trend_regime.sygnif_profile() == "btc_trend" and btc_trend_regime.is_btc_pair(pair):
-            df = super().populate_entry_trend(df, metadata)
-            if len(df) and str(df.iloc[-1].get("enter_tag") or "") == "btc_trend_long":
-                df.iloc[-1, df.columns.get_loc("enter_tag")] = b01.TAG_R02
-            return df
-
         df = super().populate_entry_trend(df, metadata)
+
+        # ``btc_trend`` profile: map parent ``btc_trend_long`` → **R02** tag, but do **not**
+        # return early — R01 governance / ``strong_ta``→R01 / R03 sleeve must still run so
+        # Docker btc-0-1 keeps full **R01–R03** entry + ``custom_exit`` paths alive.
+        if (
+            btc_trend_regime.sygnif_profile() == "btc_trend"
+            and btc_trend_regime.is_btc_pair(pair)
+            and len(df) > 0
+        ):
+            last_i = len(df) - 1
+            if str(df.iloc[last_i].get("enter_tag") or "") == "btc_trend_long":
+                df.iloc[last_i, df.columns.get_loc("enter_tag")] = b01.TAG_R02
+
         if not btc_trend_regime.is_btc_pair(pair) or len(df) < 6:
             return df
 
@@ -107,7 +122,7 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
             if t == "strong_ta":
                 df.iloc[last_i, df.columns.get_loc("enter_tag")] = b01.TAG_R01
 
-        # --- R03 sleeve (last bar; blocked under R01 extreme stack) ---
+        # --- R03 scalping-pattern sleeve (last bar; blocked under R01 extreme stack) ---
         if int(df.iloc[last_i].get("enter_long", 0) or 0) == 0 and not b01.r01_training_runner_bearish():
             prot = df.get("protections_long_global", pd.Series(True, index=df.index))
             empty_ok = df.get("num_empty_288", pd.Series(0, index=df.index)).fillna(0) <= 60
@@ -171,6 +186,11 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
             if n >= cap_slots:
                 logger.info("BTC-0.1-R01 slot cap %s/%s (same band as strong_ta)", n, cap_slots)
                 return False
+
+        # RPC / operator forceenter (e.g. manual_demo_open): bypass Sygnif volume/premium gates
+        # so BTC-only whitelist still allows a demo order when <3 alts pass volume regime.
+        if str(tag).startswith("manual_"):
+            return True
 
         return super().confirm_trade_entry(
             pair,

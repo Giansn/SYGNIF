@@ -56,14 +56,23 @@ def channel_inflow_report() -> list[dict]:
         with open(p) as f:
             raw = json.load(f)
         last_ts = None
-        if raw:
-            last_ts = raw[-1].get("t")
+        if isinstance(raw, list):
+            nrows = len(raw)
+            if raw:
+                last_ts = raw[-1].get("t")
+        elif isinstance(raw, dict) and name == "nautilus_spot_btc_bundle":
+            # Nautilus sink: summary object, not a candle list
+            b1h = raw.get("bars_1h") or {}
+            nrows = int(b1h.get("count") or 0)
+            last_ts = b1h.get("last_t")
+        else:
+            nrows = len(raw) if hasattr(raw, "__len__") else 0
         out.append(
             {
                 "name": name,
                 "path": str(p),
                 "status": "ok",
-                "rows": len(raw),
+                "rows": nrows,
                 "last_candle_ms": last_ts,
             }
         )

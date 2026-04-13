@@ -119,3 +119,6 @@ STATE_FILE = os.path.join(DATA_DIR, "state.json")
 # HTTP server (OVERSEER_HTTP_PORT for a second process; OVERSEER_HTTP_HOST to bind beyond localhost)
 HTTP_PORT = int(os.environ.get("OVERSEER_HTTP_PORT", "8090"))
 HTTP_HOST = os.environ.get("OVERSEER_HTTP_HOST", "127.0.0.1")
+
+# POST /ensure_entry — requires header X-Overseer-Ensure-Token matching this (empty = disabled).
+ENSURE_TOKEN = os.environ.get("OVERSEER_ENSURE_TOKEN", "").strip()

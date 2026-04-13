@@ -1,0 +1,2 @@
+# Host-side Bybit WebSocket monitor: pip install -r scripts/requirements_bybit_stream.txt
+websocket-client>=1.6.0,<2

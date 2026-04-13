@@ -12,12 +12,16 @@ Uses ``prediction_agent/btc_analysis_order_signal.decide_forceenter_intent``.
 Requires ``force_entry_enable: true`` in the bot config.
 
 Auth (same as dashboards / notify):
-  ``FT_API_URL`` — default ``http://127.0.0.1:8081/api/v1``
+  ``FT_API_URL`` — default ``http://127.0.0.1:8081/api/v1`` (btc-0-1 demo: ``http://127.0.0.1:8185/api/v1``)
   ``FT_USER`` / ``FT_PASS`` or ``FREQTRADE_API_USERNAME`` / ``FT_FUTURES_PASS`` / ``API_PASSWORD``
+  Optional: ``FT_BTC_0_1_PASS``; or ``api_server.password`` from ``SYGNIF_FT_BTC_0_1_CONFIG`` (paper-market JSON).
+
+Freqtrade **token/login** expects **HTTP Basic** auth (not JSON body).
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -27,6 +31,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
 _PA = _REPO / "prediction_agent"
+_DEFAULT_BTC01_CFG = _REPO / "user_data/config_btc_strategy_0_1_paper_market.json"
 sys.path.insert(0, str(_PA))
 
 from btc_analysis_order_signal import (  # noqa: E402
@@ -45,27 +50,42 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
+def _password_from_ft_config(path: Path) -> str:
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    return str((cfg.get("api_server") or {}).get("password") or "")
+
+
 def _ft_credentials() -> tuple[str, str]:
     user = (
         os.environ.get("FT_USER")
+        or os.environ.get("FT_BTC_0_1_USER")
         or os.environ.get("FREQTRADE_API_USERNAME")
         or os.environ.get("FT_FUTURES_USER")
         or "freqtrader"
     )
     pw = (
-        os.environ.get("FT_PASS")
+        os.environ.get("FT_BTC_0_1_PASS")
+        or os.environ.get("FT_PASS")
         or os.environ.get("FT_FUTURES_PASS")
         or os.environ.get("FREQTRADE_API_PASSWORD")
         or os.environ.get("API_PASSWORD")
         or ""
     )
+    if not pw:
+        cfg_path = Path(os.environ.get("SYGNIF_FT_BTC_0_1_CONFIG", str(_DEFAULT_BTC01_CFG)))
+        if cfg_path.is_file():
+            pw = _password_from_ft_config(cfg_path)
     return user, pw
 
 
 def ft_login(base: str, user: str, password: str) -> str:
     url = base.rstrip("/") + "/token/login"
-    body = json.dumps({"username": user, "password": password}).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, method="POST")
+    req.add_header(
+        "Authorization",
+        "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode(),
+    )
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     tok = data.get("access_token")

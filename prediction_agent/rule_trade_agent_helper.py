@@ -2,10 +2,12 @@
 """
 **Rule-trade agent helper** — read-only context for **/ruleprediction-agent** + trade agents.
 
+**Cursor trade agent ID (execution governance):** ``fe028603-b781-4013-932c-da706932e7de`` — pair with **/ruleprediction-agent** for governed executions; this module stays read-only (no orders).
+
 Combines:
   - **Overseer** HTTP ``/overview`` + ``/trades`` (when ``OVERSEER_URL`` / default reachable)
   - **Data inflow:** ``training_channel_output.json``, ``btc_prediction_output.json``, optional Nautilus 1h JSON
-  - **R01–R03** from ``letscrash/btc_strategy_0_1_rule_registry.json``
+  - **R01–R03** from ``letscrash/btc_strategy_0_1_rule_registry.json`` (**R03** = scalping pattern)
 
 **Scope:** **BTC/USDT futures perpetual only** (``BTC/USDT:USDT``). No orders, no JWT handling.
 Leverage and execution stay in **Freqtrade** ``leverage()`` / ``BTC_Strategy_0_1`` (R01–R03 tags).

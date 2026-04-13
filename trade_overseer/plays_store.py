@@ -8,6 +8,76 @@ from config import PLAYS_FILE
 
 logger = logging.getLogger("overseer.plays")
 
+# Set ``SYGNIF_PLAYS_BTC_USDT_ONLY=1`` to keep only BTC/USDT play sections + BTC lines in
+# ``market_context``, and to match open trades to plays only for ``BTC/...`` pairs.
+def _btc_usdt_only_enabled() -> bool:
+    return os.environ.get("SYGNIF_PLAYS_BTC_USDT_ONLY", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+_PLAY_CHUNK_START = re.compile(r"(?=\*\*Play\s*#\d+\s*:)", re.IGNORECASE)
+
+
+def _play_title_from_chunk(chunk: str) -> str:
+    m = re.match(r"\*\*Play\s*#\d+\s*:\s*([^*\n]+)", chunk.strip(), re.IGNORECASE)
+    if not m:
+        return ""
+    return re.sub(r"\*+$", "", m.group(1)).strip()
+
+
+def _play_chunk_is_btc_usdt(title: str, chunk: str) -> bool:
+    t = title.upper()
+    if t == "BTC" or t.startswith("BTC ") or t.startswith("BTC/"):
+        return True
+    if "BTC/USDT" in chunk.upper():
+        return True
+    return False
+
+
+def filter_raw_text_btc_usdt_only(raw_text: str) -> str:
+    """Keep preamble with BTC context and only **Play #* sections whose title is BTC/USDT."""
+    if not raw_text.strip():
+        return raw_text
+    chunks = _PLAY_CHUNK_START.split(raw_text)
+    out: list[str] = []
+    pre = (chunks[0] or "").strip()
+    if pre and re.search(r"\bBTC\b|BTC/USDT|bitcoin", pre, re.I):
+        out.append(pre)
+    btc_play_blocks = 0
+    for ch in chunks[1:]:
+        ch = ch.strip()
+        if not ch:
+            continue
+        title = _play_title_from_chunk(ch)
+        if _play_chunk_is_btc_usdt(title, ch):
+            out.append(ch)
+            btc_play_blocks += 1
+    if not out:
+        note = "\n\n_(SYGNIF: SYGNIF_PLAYS_BTC_USDT_ONLY — no BTC/USDT play block in this batch.)_"
+        return (pre + note).strip() if pre else note.strip()
+    if pre and btc_play_blocks == 0:
+        out.append(
+            "\n\n_(SYGNIF: no **Play #…: BTC** in this batch — alt-only plays were filtered out.)_"
+        )
+    return "\n\n".join(out)
+
+
+def filter_market_context_btc_usdt_only(market_context: str) -> str:
+    """Keep scanner lines that mention BTC (volume / TA lines)."""
+    if not market_context.strip():
+        return market_context
+    lines = [
+        ln
+        for ln in market_context.splitlines()
+        if re.search(r"\bBTC\b|BTC/USDT", ln, re.I)
+    ]
+    return "\n".join(lines) if lines else market_context
+
+
 # Common crypto symbols for extraction
 KNOWN_SYMBOLS = {
     "BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "LINK", "AVAX", "DOT", "MATIC",
@@ -31,6 +101,16 @@ def load_plays() -> dict | None:
             if age > 86400:
                 logger.info("Plays are >24h old, marking stale")
                 data["stale"] = True
+        if _btc_usdt_only_enabled():
+            data = dict(data)
+            data["raw_text"] = filter_raw_text_btc_usdt_only(data.get("raw_text") or "")
+            data["market_context"] = filter_market_context_btc_usdt_only(
+                data.get("market_context") or ""
+            )
+            data["symbols"] = [s for s in extract_symbols(data["raw_text"]) if s == "BTC"]
+            data["levels"] = extract_price_levels(data["raw_text"])
+            data["btc_usdt_only"] = True
+            logger.info("Plays filtered to BTC/USDT only (%d symbols)", len(data["symbols"]))
         return data
     except Exception as e:
         logger.error(f"Failed to load plays: {e}")
@@ -119,8 +199,12 @@ def match_trades_to_plays(trades: list[dict], plays: dict | None) -> list[dict]:
     matches = []
 
     for trade in trades:
+        pair = trade.get("pair") or ""
+        if _btc_usdt_only_enabled():
+            if not (pair.startswith("BTC/") or pair.startswith("BTC:")):
+                continue
         # Extract base symbol from pair (e.g., "LINK/USDT" -> "LINK")
-        base = trade["pair"].split("/")[0] if "/" in trade["pair"] else trade["pair"].replace("USDT", "")
+        base = pair.split("/")[0] if "/" in pair else pair.replace("USDT", "")
 
         if base in levels:
             lvl = levels[base]

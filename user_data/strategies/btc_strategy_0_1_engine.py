@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 
 TAG_R01 = "BTC-0.1-R01"
 TAG_R02 = "BTC-0.1-R02"
-TAG_R03 = "BTC-0.1-R03"
+TAG_R03 = "BTC-0.1-R03"  # R03 = **scalping** sleeve (PAC pullback proxy + scalp TP/RSI exits)
 RULE_TAGS = (TAG_R01, TAG_R02, TAG_R03)
 
 # --- L3 / ruleprediction first-trade risk box (see letscrash/BTC_Strategy_0.1.md §7.1) ---
+# R03 scalping box: tight TP / RSI exit / SL floor vs parent
 R03_SCALP_TP_PROFIT_PCT = 0.012  # × max(1, leverage) → exit_btc01_r03_scalp_take
 R03_SCALP_RSI_OVERBOUGHT = 62.0  # → exit_btc01_r03_scalp_overbought
 R01_R03_STACK_GUARD_LOSS_PCT = 0.008  # × max(1, leverage) → exit_btc01_r01_stack_guard
@@ -83,7 +84,8 @@ def r01_training_runner_bearish() -> bool:
 
 def r03_pullback_long(df: pd.DataFrame) -> bool:
     """
-    R03 sleeve proxy: shallow RSI rebound + compressed trend (PAC-ish), last row only.
+    **R03 = scalping pattern** (tagged sleeve): shallow RSI rebound + compressed trend (PAC-ish),
+    last bar only — not full Pine replay.
 
     Research siblings (Pine, not wired): ``justunclel_scalping_pullback_tool_r1_1_v4.pine``,
     ``bullbyte_pro_scalper_ai_mpl2.pine`` (composite oscillator + latching — MPL 2.0).

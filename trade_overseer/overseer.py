@@ -19,8 +19,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
+import ensure_entry
 import ft_client
 import llm_client
+import orderbook_snapshot
 import plays_store
 from event_log import EventLog
 
@@ -442,7 +444,15 @@ class OverseerHandler(BaseHTTPRequestHandler):
         pass  # Silence access logs
 
     def do_GET(self):
-        if self.path == "/overview":
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path == "/orderbook":
+            body = json.dumps(orderbook_snapshot.build_orderbook_overview(), indent=2)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
+        if path == "/overview":
             body = json.dumps({
                 "last_commentary": last_commentary,
                 "last_eval_time": last_eval_time,
@@ -451,12 +461,14 @@ class OverseerHandler(BaseHTTPRequestHandler):
                 "ft_instances": [i["name"] for i in config.FT_INSTANCES],
                 "data_dir": config.DATA_DIR,
                 "http_port": config.HTTP_PORT,
+                "orderbook_endpoint": "/orderbook",
+                "ensure_entry_endpoint": "/ensure_entry (POST + X-Overseer-Ensure-Token)",
             })
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode())
-        elif self.path == "/trades":
+        elif path == "/trades":
             trades = ft_client.get_all_trades()
             profits = ft_client.get_all_profits()
             body = json.dumps({"trades": trades, "profits": profits})
@@ -464,7 +476,7 @@ class OverseerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode())
-        elif self.path == "/health":
+        elif path == "/health":
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
@@ -473,7 +485,41 @@ class OverseerHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if self.path == "/evaluate":
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path == "/ensure_entry":
+            if not config.ENSURE_TOKEN:
+                err = json.dumps({"ok": False, "error": "Set OVERSEER_ENSURE_TOKEN in env"})
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(err.encode())
+                return
+            got = self.headers.get("X-Overseer-Ensure-Token", "")
+            if got != config.ENSURE_TOKEN:
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"bad token"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(length).decode() if length else "{}")
+            except json.JSONDecodeError:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            res = ensure_entry.run_ensure_entry(
+                instance_name=str(data.get("instance", "spot")),
+                pair=str(data.get("pair", "BTC/USDT")),
+                ignore_signal=bool(data.get("ignore_signal", False)),
+            )
+            body = json.dumps(res, default=str)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode())
+            return
+        if path == "/evaluate":
             try:
                 result = run_evaluation(force=True)
             except Exception as e:
@@ -489,7 +535,7 @@ class OverseerHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body.encode())
-        elif self.path == "/plays":
+        elif path == "/plays":
             # Receive plays from finance_agent
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length)) if length else {}

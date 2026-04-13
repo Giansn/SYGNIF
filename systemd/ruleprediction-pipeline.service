@@ -1,0 +1,14 @@
+[Unit]
+Description=Sygnif ruleprediction pipeline (channel + ML + proof + horizon check)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/ruleprediction_pipeline.sh
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/ruleprediction_pipeline.sh
+StandardOutput=journal
+StandardError=journal

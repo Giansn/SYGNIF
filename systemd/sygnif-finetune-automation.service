@@ -1,0 +1,14 @@
+[Unit]
+Description=SYGNIF weekly ML finetune (btc_predict_runner + channel_training, single-flight lock)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/sygnif_finetune_automation.sh
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/sygnif_finetune_automation.sh
+StandardOutput=journal
+StandardError=journal

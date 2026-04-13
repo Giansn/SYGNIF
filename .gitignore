@@ -23,6 +23,9 @@ movers_pairlist.json
 NostalgiaForInfinity/
 files.zip
 user_data/config.json
+# Futures API secrets + JWT (use *.example.json)
+user_data/config_futures.json
+user_data/bybit_ws_monitor_state.json
 # Dedicated BTC spot bot (secrets + JWT; copy from *.example.json)
 user_data/config_btc_spot_dedicated.json
 user_data/tradesv3-btc-spot.sqlite*
@@ -47,6 +50,20 @@ scripts/linear_workflow.env
 finance_agent/.env
 finance_agent/__pycache__/
 finance_agent/nfi_update.log
+# BTC specialist OHLCV / bundles — refreshed by Nautilus and scripts (machine-local)
+finance_agent/btc_specialist/data/*.json
+finance_agent/btc_specialist/data/*.md
+
+# prediction_agent runtime outputs
+prediction_agent/btc_prediction_output.json
+prediction_agent/training_channel_output.json
+prediction_agent/btc_macro_train_output.json
+prediction_agent/rule_tag_journal.csv
+
+# Large local clone / experiments (not the git submodule path `network/`)
+network/
+ann_text_project/
+backups/
 
 # Skill bundles
 dist/

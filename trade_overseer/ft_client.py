@@ -39,6 +39,45 @@ def _get(instance: dict, endpoint: str) -> dict | list:
     return resp.json()
 
 
+def _post(instance: dict, endpoint: str, payload: dict) -> dict | list:
+    name = instance["name"]
+    if name not in _tokens:
+        _tokens[name] = _login(instance)
+
+    url = f"{instance['url']}/{endpoint}"
+    headers = {"Authorization": f"Bearer {_tokens[name]}"}
+
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    if resp.status_code == 401:
+        _tokens[name] = _login(instance)
+        headers["Authorization"] = f"Bearer {_tokens[name]}"
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_show_config(instance: dict) -> dict:
+    """Freqtrade running config (includes dry_run)."""
+    r = _get(instance, "show_config")
+    return r if isinstance(r, dict) else {}
+
+
+def forceenter(
+    instance: dict,
+    *,
+    pair: str,
+    side: str = "long",
+    stake_amount: float | str = 50,
+    enter_tag: str = "overseer_ensure_entry",
+) -> dict | list:
+    # Freqtrade API schema: stakeamount, entry_tag (see api_schemas.ForceEnterPayload)
+    body: dict = {"pair": pair, "side": side, "entry_tag": enter_tag}
+    if stake_amount is not None:
+        body["stakeamount"] = stake_amount
+    return _post(instance, "forceenter", body)
+
+
 def get_open_trades(instance: dict) -> list[dict]:
     """Get open trades with normalized fields."""
     try:

@@ -72,6 +72,8 @@ Edit both configs and set:
 4. Start futures: `docker compose --profile main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without main stack: `docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1` → uses **`user_data/config_btc_strategy_0_1_paper_market.json`** (`dry_run: true`).
 5. **Never commit** a `config_futures.json` that contains real Telegram tokens or exchange secrets — use examples + `.env` only.
 
+6. **Optional — open order from BTC analysis:** `python3 scripts/btc_analysis_forceenter.py` (dry-run) posts a plan from `prediction_agent/btc_prediction_output.json` + training channel; `--execute` calls Freqtrade **`/forceenter`** (needs `force_entry_enable` + `FT_API_URL` / `FT_PASS` in env). See **`letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md`** §7.
+
 **Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
 
 ## 5. Build and Start Containers

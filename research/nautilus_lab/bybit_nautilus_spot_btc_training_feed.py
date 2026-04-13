@@ -209,12 +209,12 @@ def main() -> int:
     ap.add_argument(
         "--loop",
         action="store_true",
-        help="repeat every NAUTILUS_BYBIT_POLL_SEC (default 3600s)",
+        help="repeat every NAUTILUS_BYBIT_POLL_SEC (default 300s)",
     )
     args = ap.parse_args()
 
     out_dir = Path(os.environ.get("NAUTILUS_BTC_OHLCV_DIR", "/lab/btc_specialist_data"))
-    interval = int(os.environ.get("NAUTILUS_BYBIT_POLL_SEC", "3600"))
+    interval = int(os.environ.get("NAUTILUS_BYBIT_POLL_SEC", "300"))
 
     def once() -> int:
         t0 = time.perf_counter()

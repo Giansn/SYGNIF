@@ -52,13 +52,34 @@ flowchart TD
 | **In** | `SYGNIF_SENTIMENT_HTTP_URL` | `finance-agent:8091/sygnif/sentiment` — MLP / HTTP sentiment for strategy |
 | **In** | Mounted `user_data/` | `SygnifStrategy`, `strategy_adaptation.json`, configs, feather data |
 | **In** | Exchange REST/WS | Bybit spot **BTC/USDT** (Freqtrade **CCXT**) |
-| **In** | `nautilus-research` + **`bybit_nautilus_spot_btc_training_feed.py`** | **Nautilus `BybitHttpClient`** (not CCXT), **spot BTC/USDT only** — writes `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `btc_1h_ohlcv_nautilus_bybit.json`, `nautilus_spot_btc_market_bundle.json` → **training channel** + `btc_predict_runner` + regime; compose: `docker-compose.btc-nautilus-research.yml` |
+| **In** | `nautilus-research` + **`bybit_nautilus_spot_btc_training_feed.py`** | **Nautilus `BybitHttpClient`** (not CCXT), **spot BTC/USDT only** — writes `btc_1h_ohlcv.json`, `btc_daily_90d.json`, `btc_1h_ohlcv_nautilus_bybit.json`, `nautilus_spot_btc_market_bundle.json` → **training channel** + `btc_predict_runner` + regime; compose: **`docker-compose.yml` profile `btc-nautilus`** (deprecated stub `docker-compose.btc-nautilus-research.yml`) |
 | **In** | (optional future) | Read-only mount or HTTP for **prediction** / **yfinance** sidecars — document before enable |
 | **Out** | Webhooks | `notification-handler:8089` — trades, fills (align `trading_mode` / `bot_name`) |
 | **Out** | Freqtrade REST | Host-mapped port (e.g. **8282** → container **8080**) |
 | **Out** | Logs | `user_data/logs/freqtrade-btc-spot.log` |
 
 **No second :8091** inside the trader image — **ruleprediction-agent** port contract.
+
+### Futures `freqtrade-btc-0-1` — automatic leverage, entries, exits
+
+| Layer | Mechanism | Notes |
+|-------|-----------|-------|
+| **Leverage** | `SygnifStrategy.leverage()` (inherited by `BTC_Strategy_0_1`) | Major pair tier (e.g. BTC), **shorts capped at 2x**, **ATR%** scales max lev down; Freqtrade applies at order time. |
+| **Entries** | `populate_entry_trend` → `confirm_trade_entry` | **R01 / R02 / R03** tags, registry **bucket** + **slot** gates, **R01** training-runner governance. |
+| **Exits** | `custom_exit` / `custom_stoploss` + parent exits | **R03** scalp TP/RSI; **R02** regime break; **R01** stack guard; normal Sygnif / ROI / exchange SL paths. |
+| **Operator RPC** | `POST /api/v1/forceenter` | **Optional** — does not replace the automatic paths above. |
+
+### Nautilus research = in-network **data processing** (predict + develop)
+
+Docker service **`nautilus-research`** (compose profile **`btc-nautilus`**, network **`sygnif_backend`**) runs the lab scripts (e.g. `run_nautilus_bundled.sh`) and **writes/refreshes** JSON under **`finance_agent/btc_specialist/data/`** (OHLCV, `nautilus_spot_btc_market_bundle.json`, sidecar signal). That feed is the **upstream processor** for:
+
+- **`training_pipeline` / `channel_training.py`** → `training_channel_output.json`
+- **`btc_predict_runner.py`** → `btc_prediction_output.json`
+- **R01 live governance** and **`/ruleprediction-agent`** evidence loop (bounded; RAM rules in `.cursor/rules/ruleprediction-agent.mdc`)
+
+Traders **read** the same mount (read-only where configured) for **Nautilus nudge** / context; **heavy transforms stay in `nautilus-research`**, not duplicated inside `freqtrade-btc-0-1`.
+
+**Schedule alignment (default):** `nautilus-research` **`NAUTILUS_BYBIT_POLL_SEC=300`** (5‑minute Bybit OHLCV/bundle refresh) + host **`systemd/ruleprediction-pipeline.timer`** at **`*-*-* *:07:00`** → `channel_training` runs a few minutes after the hour so the closed 1h bar is available while sink data stays fresher between hours; **only one** heavy training job runs at a time (`.cursor/rules/ruleprediction-agent.mdc` RAM). Set e.g. **3600** in `.env` to reduce API poll frequency.
 
 ### Training pipeline (`sygnif-training-pipeline`)
 

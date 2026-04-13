@@ -6,7 +6,7 @@
 #
 # Requires existing bridge `sygnif_backend` (from a prior `docker compose up`).
 #
-# BTC spot Freqtrade + Nautilus in one merge: use **`docker-compose.btc-nautilus-research.yml`**
+# BTC spot Freqtrade + Nautilus: use **`docker-compose.yml`** profile **`btc-nautilus`**
 # (see `letscrash/BTC_TRADER_DOCKER.md` §3b) instead of this file alone if you want both services.
 # -----------------------------------------------------------------------------
 
@@ -33,6 +33,7 @@ services:
       - "./user_data:/lab/user_data:ro"
       - "./prediction_agent:/lab/prediction_agent:ro"
     env_file:
+      - ${SYGNIF_SECRETS_ENV_FILE:-/home/ubuntu/xrp_claude_bot/.env}
       - .env
     environment:
       # Same network DNS as freqtrade — finance-agent briefing + sentiment
@@ -40,10 +41,10 @@ services:
       # Align with spot dry_run_wallet default in user_data/config.json (paper sizing)
       SYGNIF_SPOT_NOTIONAL_USDT: "${SYGNIF_SPOT_NOTIONAL_USDT:-100}"
       NAUTILUS_BTC_OHLCV_DIR: "/lab/btc_specialist_data"
-      NAUTILUS_BYBIT_POLL_SEC: "${NAUTILUS_BYBIT_POLL_SEC:-3600}"
+      NAUTILUS_BYBIT_POLL_SEC: "${NAUTILUS_BYBIT_POLL_SEC:-300}"
       NAUTILUS_BTC_BAR_LIMIT: "${NAUTILUS_BTC_BAR_LIMIT:-900}"
       NAUTILUS_BYBIT_DEMO: "${NAUTILUS_BYBIT_DEMO:-false}"
       NAUTILUS_BYBIT_TESTNET: "${NAUTILUS_BYBIT_TESTNET:-false}"
     # Default: idle. For Nautilus→Bybit inflow: `command: ["/bin/sh", "/lab/workspace/run_bybit_sink_loop.sh"]`
-    # or merge `docker-compose.btc-nautilus-research.yml` which sets the loop by default.
+    # or use `docker-compose.yml` profile `btc-nautilus` (`run_nautilus_bundled.sh`).
     command: ["sleep", "infinity"]
