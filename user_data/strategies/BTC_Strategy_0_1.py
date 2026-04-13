@@ -40,7 +40,6 @@ except ImportError:
 class BTC_Strategy_0_1(_SygnifStrategyBase):
     """Sygnif stack + BTC 0.1 rule tags, bucket cap, R01/R02/R03 exits; leverage from parent."""
 
-    max_slots_btc_0_1_r03 = 3
     # --- Position adjustment (scale-in on same pair; NOT exchange hedge long+short) ---
     # Freqtrade sets Bybit **one-way** mode at startup; ``adjust_trade_position`` adds stake
     # to the **existing** trade (multiple fills / DCA), not a separate opposite leg.
@@ -48,6 +47,7 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         {b01.TAG_R01, b01.TAG_R02, b01.TAG_R03}
     )
     DCA_MAX_ENTRIES = 3
+    DCA_DRAWDOWN_STEP = -0.03
     # Futures: allow opens when whitelist is BTC-only (``_active_volume_pairs`` < 3).
     # ``btc_analysis_consensus`` = RPC from ``scripts/btc_analysis_forceenter.py`` (prediction JSON + R01 gate).
     _tags_bypass_volume_regime = frozenset(
@@ -82,6 +82,14 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                 "freqtrade-futures" if self.config.get("trading_mode", "") == "futures" else "freqtrade"
             )
             self._event_log = EventLog(instance=instance)
+
+        dca_t = (b01.tuning_config().get("dca") or {})
+        me = dca_t.get("max_entries")
+        if me is not None:
+            self.DCA_MAX_ENTRIES = max(1, int(me))
+        dd = dca_t.get("drawdown_step")
+        if dd is not None:
+            self.DCA_DRAWDOWN_STEP = float(dd)
 
     def _refresh_movers(self) -> None:
         """No-op: do not load ``movers_pairlist.json`` (parent would pollute informative pairs)."""
@@ -209,22 +217,24 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                 return False
 
         if tag == b01.TAG_R02:
+            cap_r2 = b01.slot_cap_r02()
             n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R02)
-            if n >= int(getattr(self, "max_slots_btc_trend", 2)):
-                logger.info("BTC-0.1-R02 slot cap %s/%s", n, getattr(self, "max_slots_btc_trend", 2))
+            if n >= cap_r2:
+                logger.info("BTC-0.1-R02 slot cap %s/%s", n, cap_r2)
                 return False
 
         if tag == b01.TAG_R03:
+            cap_r3 = b01.slot_cap_r03()
             n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R03)
-            if n >= int(getattr(self, "max_slots_btc_0_1_r03", 3)):
-                logger.info("BTC-0.1-R03 slot cap %s/%s", n, getattr(self, "max_slots_btc_0_1_r03", 3))
+            if n >= cap_r3:
+                logger.info("BTC-0.1-R03 slot cap %s/%s", n, cap_r3)
                 return False
 
         if tag == b01.TAG_R01:
+            cap_r1 = b01.slot_cap_r01()
             n = sum(1 for t in open_trades if (t.enter_tag or "") == b01.TAG_R01)
-            cap_slots = int(getattr(self, "max_slots_strong", 6))
-            if n >= cap_slots:
-                logger.info("BTC-0.1-R01 slot cap %s/%s (same band as strong_ta)", n, cap_slots)
+            if n >= cap_r1:
+                logger.info("BTC-0.1-R01 slot cap %s/%s (same band as strong_ta)", n, cap_r1)
                 return False
 
         # RPC / operator forceenter (e.g. manual_demo_open): bypass Sygnif volume/premium gates
@@ -328,12 +338,12 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                     return "exit_btc01_r02_regime_break"
                 if tag == b01.TAG_R03:
                     rsi14 = float(last.get("RSI_14", 50) or 50)
-                    if rsi14 > b01.R03_SCALP_RSI_OVERBOUGHT:
+                    if rsi14 > b01.r03_scalp_rsi_overbought():
                         return "exit_btc01_r03_scalp_overbought"
-                    if current_profit >= b01.R03_SCALP_TP_PROFIT_PCT * max(1.0, lev):
+                    if current_profit >= b01.r03_scalp_tp_profit_pct() * max(1.0, lev):
                         return "exit_btc01_r03_scalp_take"
                 if tag in (b01.TAG_R02, b01.TAG_R03) and b01.r01_training_runner_bearish():
-                    if current_profit < b01.R01_R03_STACK_GUARD_LOSS_PCT * max(1.0, lev):
+                    if current_profit < b01.r01_r03_stack_guard_loss_pct() * max(1.0, lev):
                         return "exit_btc01_r01_stack_guard"
 
         return super().custom_exit(

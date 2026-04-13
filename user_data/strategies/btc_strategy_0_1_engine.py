@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -53,12 +52,63 @@ def tuning_config() -> dict[str, Any]:
     return _registry_raw().get("tuning") or {}
 
 
+def slot_cap_r01() -> int:
+    t = (tuning_config().get("slot_caps") or {})
+    try:
+        return max(1, int(t.get("r01", 6)))
+    except (TypeError, ValueError):
+        return 6
+
+
+def slot_cap_r02() -> int:
+    t = (tuning_config().get("slot_caps") or {})
+    try:
+        return max(1, int(t.get("r02", 2)))
+    except (TypeError, ValueError):
+        return 2
+
+
+def slot_cap_r03() -> int:
+    t = (tuning_config().get("slot_caps") or {})
+    try:
+        return max(1, int(t.get("r03", 3)))
+    except (TypeError, ValueError):
+        return 3
+
+
+def r03_scalp_tp_profit_pct() -> float:
+    t = (tuning_config().get("r03_scalp") or {})
+    try:
+        v = float(t.get("tp_profit_pct", R03_SCALP_TP_PROFIT_PCT))
+        return max(0.0005, min(v, 0.05))
+    except (TypeError, ValueError):
+        return R03_SCALP_TP_PROFIT_PCT
+
+
+def r03_scalp_rsi_overbought() -> float:
+    t = (tuning_config().get("r03_scalp") or {})
+    try:
+        v = float(t.get("rsi_overbought", R03_SCALP_RSI_OVERBOUGHT))
+        return max(50.0, min(v, 90.0))
+    except (TypeError, ValueError):
+        return R03_SCALP_RSI_OVERBOUGHT
+
+
+def r01_r03_stack_guard_loss_pct() -> float:
+    t = (tuning_config().get("r03_scalp") or {})
+    try:
+        v = float(t.get("stack_guard_loss_pct", R01_R03_STACK_GUARD_LOSS_PCT))
+        return max(0.001, min(v, 0.05))
+    except (TypeError, ValueError):
+        return R01_R03_STACK_GUARD_LOSS_PCT
+
+
 def training_channel_path() -> Path:
     return _repo_root() / "prediction_agent" / "training_channel_output.json"
 
 
-@lru_cache(maxsize=1)
 def load_notional_cap_usdt() -> float:
+    """No LRU cache — cap follows registry edits on Freqtrade /reload_config or restart."""
     try:
         raw = _registry_raw()
         cap = float((raw.get("rule_proof_bucket") or {}).get("notional_cap_usdt") or 3333.33)
@@ -85,8 +135,11 @@ def r01_training_runner_bearish() -> bool:
     (see RULE_GENERATION §5). Used to block aggressive long *timing* on BTC.
 
     Thresholds come from registry ``tuning.r01_governance`` (defaults preserve legacy 90 / BEARISH).
+    Set ``enabled``: false to disable governance (demo / sampling only).
     """
     g = (tuning_config().get("r01_governance") or {})
+    if g.get("enabled") is False:
+        return False
     try:
         p_min = float(g.get("p_down_min_pct", 90.0))
     except (TypeError, ValueError):
@@ -140,11 +193,27 @@ def r03_pullback_long(df: pd.DataFrame) -> bool:
     **R03 = scalping pattern** (tagged sleeve): shallow RSI rebound + compressed trend (PAC-ish),
     last bar only — not full Pine replay.
 
+    Thresholds: ``tuning.r03_pullback`` in registry (defaults match legacy §7).
+
     Research siblings (Pine, not wired): ``justunclel_scalping_pullback_tool_r1_1_v4.pine``,
     ``bullbyte_pro_scalper_ai_mpl2.pine`` (composite oscillator + latching — MPL 2.0).
     """
     if len(df) < 6 or "RSI_14" not in df.columns:
         return False
+    t = (tuning_config().get("r03_pullback") or {})
+    try:
+        rsi_prior_max = float(t.get("rsi_prior_3bars_max", 38.0))
+    except (TypeError, ValueError):
+        rsi_prior_max = 38.0
+    try:
+        rsi_now_min = float(t.get("rsi_now_min", 42.0))
+    except (TypeError, ValueError):
+        rsi_now_min = 42.0
+    try:
+        adx_max = float(t.get("adx_max", 34.0))
+    except (TypeError, ValueError):
+        adx_max = 34.0
+
     rsi = df["RSI_14"].astype(float)
     adx = df.get("ADX_14", pd.Series(20.0, index=df.index)).astype(float).fillna(20.0)
     close = df["close"].astype(float)
@@ -152,11 +221,11 @@ def r03_pullback_long(df: pd.DataFrame) -> bool:
     rsi_now = float(rsi.iloc[i])
     rsi_prev = float(rsi.iloc[i - 1])
     rsi_3 = float(rsi.iloc[i - 3])
-    if rsi_3 >= 38.0:
+    if rsi_3 >= rsi_prior_max:
         return False
-    if not (rsi_now > 42.0 and rsi_now > rsi_prev):
+    if not (rsi_now > rsi_now_min and rsi_now > rsi_prev):
         return False
-    if float(adx.iloc[i]) >= 34.0:
+    if float(adx.iloc[i]) >= adx_max:
         return False
     if float(close.iloc[i]) <= float(close.iloc[i - 1]):
         return False
