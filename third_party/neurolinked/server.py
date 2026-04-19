@@ -863,30 +863,25 @@ def _local_network_hive_reply(user_text: str, trading_context: str) -> str | Non
     """
     Deterministic \"network\" reply from Truthcoin Hivemind + Swarm file — **no** Anthropic API.
 
-    Used when ``SYGNIF_NEUROLINKED_CHAT_HIVEMIND_FIRST`` is on (default) to cut Haiku spend.
-    Long free-form prompts without data keywords fall through to Haiku (unless disabled).
+    Used when ``SYGNIF_NEUROLINKED_CHAT_HIVEMIND_FIRST`` is on (default) to cut Haiku spend **only**
+    when the operator clearly asks for this digest (swarm / hivemind / truthcoin / liquidation /
+    explicit ``network report``). General questions (thesis, trades, ``check btc_future``, …) fall
+    through to Haiku or ``BrainTextDecoder``.
     """
     if not _hivemind_chat_first_enabled():
         return None
     q = user_text.strip().lower()
+    # Narrow on purpose: old list included ``btc``, ``vote``, ``status``, … and *all* messages
+    # under 120 chars hit this path — ``sygnif chat`` looked \"stuck\" on one template.
     triggers = (
         "swarm",
-        "hive",
         "hivemind",
+        "hive mind",
         "truthcoin",
         "liquidat",
-        "liq",
-        "vote",
-        "mean",
-        "signal",
-        "context",
-        "status",
-        "network",
-        "report",
-        "bybit",
-        "btc",
+        "network report",
     )
-    if len(user_text) > 120 and not any(t in q for t in triggers):
+    if not any(t in q for t in triggers):
         return None
     lines: list[str] = []
     lines.append("**SYGNIF Network Report — Hivemind / Swarm synthesis (local, no cloud LLM)**")

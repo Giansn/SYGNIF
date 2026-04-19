@@ -1061,7 +1061,9 @@ def view_chat():
         "[bold cyan]SYGNIF Network Chat[/]\n"
         "[dim]Autonomous third-party network interface. Swarm channel, NeuroLinked brain, WS snapshot, "
         "prediction JSON, Bee — operator and network are both external observers.\n"
-        "Commands: /swarm  /brain  /market  /trades  /status  /quit[/]",
+        "Commands: /swarm  /brain  /market  /trades  /status  /quit[/]\n"
+        "[dim]Free text → NeuroLinked /api/chat: answers from Haiku unless you ask for the local "
+        "Hivemind digest (say e.g. [cyan]swarm[/], [cyan]hivemind[/], [cyan]network report[/]).[/]",
         border_style="cyan"
     ))
 
