@@ -1,0 +1,5 @@
+# TradeSmart / Noren REST OAuth stack (see scripts/tradesmart_iterative_loop.py).
+# Install into the project venv: pip install -r finance_agent/requirements-tradesmart.txt
+NorenRestApiOAuth>=1.0
+PyYAML>=6.0.1
+websocket-client>=1.8.0

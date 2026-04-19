@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEUROLINKED - Live Neural Activity</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading">
+        <div class="loading-title">NEUROLINKED</div>
+        <div class="loading-bar">
+            <div class="loading-fill" id="loading-fill"></div>
+        </div>
+        <div class="loading-status" id="loading-status">INITIALIZING NEURAL SUBSTRATE...</div>
+    </div>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Top-Left: Stats Panel -->
+    <div id="stats-panel" class="glass-panel">
+        <div class="stats-title">
+            OSCEN NEURAL ACTIVITY
+            <div class="live-indicator">
+                <div class="live-dot"></div>
+                LIVE
+            </div>
+        </div>
+
+        <div class="stat-row">
+            <span class="stat-label">Neurons:</span>
+            <span class="stat-value" id="neurons-val">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Synapses:</span>
+            <span class="stat-value" id="synapses-val">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Step:</span>
+            <span class="stat-value" id="step-val">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Rate:</span>
+            <span class="stat-value live" id="rate-val">--</span>
+        </div>
+
+        <div id="stage-badge" class="stage-badge stage-EMBRYONIC">EMBRYONIC</div>
+
+        <!-- Neuromodulator Bars -->
+        <div id="neuro-bars">
+            <div class="neuro-bar-row">
+                <span class="neuro-bar-label">DA</span>
+                <div class="neuro-bar-track">
+                    <div class="neuro-bar-fill da" id="bar-da" style="width: 50%"></div>
+                </div>
+            </div>
+            <div class="neuro-bar-row">
+                <span class="neuro-bar-label">ACh</span>
+                <div class="neuro-bar-track">
+                    <div class="neuro-bar-fill ach" id="bar-ach" style="width: 50%"></div>
+                </div>
+            </div>
+            <div class="neuro-bar-row">
+                <span class="neuro-bar-label">NE</span>
+                <div class="neuro-bar-track">
+                    <div class="neuro-bar-fill ne" id="bar-ne" style="width: 30%"></div>
+                </div>
+            </div>
+            <div class="neuro-bar-row">
+                <span class="neuro-bar-label">5HT</span>
+                <div class="neuro-bar-track">
+                    <div class="neuro-bar-fill sht" id="bar-5ht" style="width: 50%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Side: Region Activity -->
+    <div id="regions-panel" class="glass-panel">
+        <div class="stats-title">BRAIN REGIONS</div>
+        <div id="region-list"></div>
+    </div>
+
+    <!-- Region Info (shown on click) -->
+    <div id="region-info" class="glass-panel">
+        <div class="info-title" id="info-title">--</div>
+        <div class="info-body" id="info-body">--</div>
+    </div>
+
+    <!-- Bottom-Left: Safety Panel -->
+    <div id="safety-panel" class="glass-panel">
+        <div class="stats-title">SAFETY KERNEL</div>
+        <div id="safety-status">
+            <div class="safety-status">
+                <span class="safety-icon safety-ok">&#10003;</span>
+                <span class="safety-ok">INITIALIZING...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sygnif / agent integration panel -->
+    <div id="claude-panel" class="glass-panel">
+        <div class="stats-title">
+            SYGNIF BRIDGE
+            <div class="live-indicator" id="claude-indicator">
+                <div class="live-dot" id="claude-dot"></div>
+                <span id="claude-conn-text">LINKED</span>
+            </div>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Interactions:</span>
+            <span class="stat-value" id="claude-interactions">0</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Screen:</span>
+            <span class="stat-value" id="claude-screen">OFF</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Motion:</span>
+            <span class="stat-value" id="claude-motion">--</span>
+        </div>
+        <div style="margin-top: 8px; display: flex; gap: 6px;">
+            <button class="control-btn" id="btn-video" title="Record screen to .mp4 (saved in brain_state/recordings)" style="width: auto; padding: 0 10px; font-size: 10px; letter-spacing: 1px;">
+                REC
+            </button>
+            <button class="control-btn" id="btn-save" title="Save brain state" style="width: auto; padding: 0 10px; font-size: 10px; letter-spacing: 1px;">
+                SAVE
+            </button>
+            <button class="control-btn" id="btn-load" title="Load brain state" style="width: auto; padding: 0 10px; font-size: 10px; letter-spacing: 1px;">
+                LOAD
+            </button>
+        </div>
+    </div>
+
+    <!-- Chat Panel (above input bar) -->
+    <div id="chat-panel" class="glass-panel">
+        <div id="chat-messages"></div>
+    </div>
+
+    <!-- Bottom: Input Bar -->
+    <div id="input-panel" class="glass-panel">
+        <input type="text" id="text-input" placeholder="Feed the brain... type something"
+               autocomplete="off" spellcheck="false">
+        <button class="control-btn" id="btn-vision" title="Toggle webcam">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/>
+            </svg>
+        </button>
+        <button class="control-btn" id="btn-audio" title="Toggle microphone">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0014 0v-1M12 19v4M8 23h8"/>
+            </svg>
+        </button>
+    </div>
+
+    <!-- Main Script -->
+    <script type="module">
+        import { Brain3D } from '/js/brain3d.js';
+        import { NeuralDust } from '/js/particles.js';
+        import { Dashboard } from '/js/dashboard.js';
+        import { BrainWebSocket } from '/js/websocket.js';
+
+        // --- State ---
+        let brain3d, dust, dashboard, ws;
+        let lastState = null;
+        let visionActive = false;
+        let audioActive = false;
+
+        // Expose for debugging
+        window._debug = {};
+
+        // --- Loading ---
+        const loadingFill = document.getElementById('loading-fill');
+        const loadingStatus = document.getElementById('loading-status');
+        const loadingScreen = document.getElementById('loading');
+
+        function setLoading(pct, msg) {
+            if (loadingFill) loadingFill.style.width = `${pct}%`;
+            if (loadingStatus) loadingStatus.textContent = msg;
+        }
+
+        // --- Init ---
+        async function init() {
+            setLoading(10, 'CREATING 3D SCENE...');
+
+            const container = document.getElementById('canvas-container');
+            brain3d = new Brain3D(container);
+
+            setLoading(30, 'SPAWNING NEURAL DUST...');
+            dust = new NeuralDust(brain3d.scene, 2000);
+
+            setLoading(40, 'INITIALIZING DASHBOARD...');
+            dashboard = new Dashboard();
+
+            setLoading(50, 'CONNECTING TO BRAIN...');
+
+            // WebSocket connection
+            const wsUrl = `ws://${window.location.host}/ws`;
+            ws = new BrainWebSocket(wsUrl);
+
+            ws.onInit = (positions) => {
+                console.log('[INIT] Got positions:', Object.keys(positions));
+                setLoading(80, 'LOADING NEURON POSITIONS...');
+                try {
+                    brain3d.initNeurons(positions);
+                    console.log('[INIT] Neurons initialized, scene children:', brain3d.scene.children.length);
+                } catch(e) {
+                    console.error('[INIT] initNeurons error:', e);
+                }
+                setLoading(100, 'BRAIN ONLINE');
+                window._debug.brain3d = brain3d;
+                window._debug.dust = dust;
+                setTimeout(() => loadingScreen.classList.add('hidden'), 500);
+            };
+
+            ws.onState = (state) => {
+                lastState = state;
+                dashboard.updateState(state);
+                brain3d.updateState(state);
+            };
+
+            ws.onDisconnect = () => {
+                // Show reconnecting indicator
+            };
+
+            ws.connect();
+
+            // --- Chat helpers ---
+            const chatMessages = document.getElementById('chat-messages');
+
+            function addChatMsg(text, role, meta) {
+                const msg = document.createElement('div');
+                msg.className = `chat-msg ${role}`;
+                msg.textContent = text;
+                if (meta) {
+                    const m = document.createElement('div');
+                    m.className = 'chat-meta';
+                    m.textContent = meta;
+                    msg.appendChild(m);
+                }
+                chatMessages.appendChild(msg);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            async function sendChat(text) {
+                addChatMsg(text, 'user');
+                try {
+                    const res = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text }),
+                    });
+                    const data = await res.json();
+                    const s = data.state || {};
+                    const meta = s.top_region
+                        ? `${s.top_region.replace(/_/g,' ')} · v${(s.valence||0).toFixed(2)} a${(s.arousal||0).toFixed(2)}`
+                        : null;
+                    addChatMsg(data.response || '—', 'brain', meta);
+                } catch (err) {
+                    addChatMsg('signal lost.', 'brain');
+                }
+            }
+
+            // --- Input handlers ---
+            const textInput = document.getElementById('text-input');
+            textInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && textInput.value.trim()) {
+                    const val = textInput.value.trim();
+                    ws.sendTextInput(val);
+                    sendChat(val);
+                    textInput.value = '';
+                }
+                e.stopPropagation(); // Prevent Three.js from capturing keys
+            });
+
+            // Vision toggle
+            document.getElementById('btn-vision').addEventListener('click', () => {
+                visionActive = !visionActive;
+                document.getElementById('btn-vision').classList.toggle('active', visionActive);
+                ws.sendCommand(visionActive ? 'start_vision' : 'stop_vision');
+            });
+
+            // Audio toggle
+            document.getElementById('btn-audio').addEventListener('click', () => {
+                audioActive = !audioActive;
+                document.getElementById('btn-audio').classList.toggle('active', audioActive);
+                ws.sendCommand(audioActive ? 'start_audio' : 'stop_audio');
+            });
+
+            // Video recording toggle — also fires screen observation so OCR
+            // and motion still feed the brain while recording.
+            let videoActive = false;
+            document.getElementById('btn-video').addEventListener('click', () => {
+                videoActive = !videoActive;
+                const btn = document.getElementById('btn-video');
+                btn.classList.toggle('active', videoActive);
+                btn.textContent = videoActive ? 'REC ●' : 'REC';
+                btn.style.color = videoActive ? '#ff4081' : '';
+                if (videoActive) {
+                    ws.sendCommand('start_screen');
+                    ws.sendCommand('start_video');
+                } else {
+                    ws.sendCommand('stop_video');
+                    ws.sendCommand('stop_screen');
+                }
+            });
+
+            // Save/Load buttons
+            document.getElementById('btn-save').addEventListener('click', () => {
+                ws.sendCommand('save');
+                const btn = document.getElementById('btn-save');
+                btn.textContent = 'SAVED';
+                btn.classList.add('active');
+                setTimeout(() => { btn.textContent = 'SAVE'; btn.classList.remove('active'); }, 2000);
+            });
+            document.getElementById('btn-load').addEventListener('click', () => {
+                ws.sendCommand('load');
+                const btn = document.getElementById('btn-load');
+                btn.textContent = 'LOADED';
+                btn.classList.add('active');
+                setTimeout(() => { btn.textContent = 'LOAD'; btn.classList.remove('active'); }, 2000);
+            });
+
+            // Region click handler
+            window.addEventListener('regionClick', (e) => {
+                const info = e.detail;
+                const infoPanel = document.getElementById('region-info');
+                const infoTitle = document.getElementById('info-title');
+                const infoBody = document.getElementById('info-body');
+
+                if (infoPanel && infoTitle && infoBody) {
+                    infoTitle.textContent = info.name?.toUpperCase().replace(/_/g, ' ') || '';
+                    infoTitle.style.color = `#${info.color || 'ffffff'}`;
+
+                    let body = info.description || '';
+                    if (info.count) {
+                        body += `<br><br><strong>${info.count.toLocaleString()} neurons</strong>`;
+                    }
+                    if (lastState?.regions?.[info.name]) {
+                        const rs = lastState.regions[info.name];
+                        body += `<br>Firing: ${(rs.firing_rate * 100).toFixed(1)}%`;
+                        body += `<br>Mean potential: ${rs.mean_potential.toFixed(1)} mV`;
+                    }
+                    infoBody.innerHTML = body;
+                    infoPanel.classList.add('visible');
+
+                    // Auto-hide after 5s
+                    clearTimeout(infoPanel._hideTimeout);
+                    infoPanel._hideTimeout = setTimeout(() => {
+                        infoPanel.classList.remove('visible');
+                    }, 5000);
+                }
+            });
+
+            // --- Animation loop ---
+            let lastTime = performance.now();
+
+            function animateLoop() {
+                requestAnimationFrame(animateLoop);
+                const now = performance.now();
+                const dt = Math.min((now - lastTime) / 1000, 0.1); // seconds, capped
+                lastTime = now;
+
+                const globalActivity = lastState
+                    ? Object.values(lastState.region_firing || {}).reduce((a, b) => a + b, 0) / 1100
+                    : 0.1;
+                dust.update(brain3d.time, globalActivity);
+                brain3d.animate(dt);
+            }
+
+            console.log('[INIT] Starting animation loop');
+            animateLoop();
+        }
+
+        init().catch(console.error);
+    </script>
+</body>
+</html>

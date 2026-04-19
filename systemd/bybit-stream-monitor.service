@@ -1,5 +1,5 @@
 [Unit]
-Description=Bybit WebSocket monitor (public orderbook/trades + demo private execution stream)
+Description=Sygnif Bybit WS tape (public + demo private) — single instance flock for Swarm snapshot hook
 Documentation=file:///home/ubuntu/SYGNIF/scripts/bybit_stream_monitor.py
 After=network-online.target
 Wants=network-online.target
@@ -11,7 +11,9 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/SYGNIF
 EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
 EnvironmentFile=-/home/ubuntu/SYGNIF/.env
-ExecStart=/home/ubuntu/SYGNIF/.venv/bin/python3 /home/ubuntu/SYGNIF/scripts/bybit_stream_monitor.py
+EnvironmentFile=-/home/ubuntu/SYGNIF/swarm_operator.env
+# Flock wrapper: avoids duplicate tape writers to ``user_data/bybit_ws_monitor_state.json``.
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/bybit_stream_monitor_locked.sh
 Restart=always
 RestartSec=5
 StandardOutput=journal

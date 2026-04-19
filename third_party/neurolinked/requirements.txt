@@ -1,0 +1,16 @@
+numpy>=1.24.0
+scipy>=1.10.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+websockets>=11.0
+opencv-python-headless>=4.8.0
+sounddevice>=0.4.6
+Pillow>=10.0.0
+
+# Screen watching (optional but strongly recommended)
+# - mss: 10x faster screen capture
+# - pytesseract: OCR text reading (ALSO requires Tesseract binary - see install notes)
+# - pygetwindow: active window detection
+mss>=9.0.0
+pytesseract>=0.3.10
+pygetwindow>=0.0.9

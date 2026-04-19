@@ -39,9 +39,27 @@ def test_r01_legacy_flat_consensus_on_snapshot():
     assert sig.r01_bearish_from_training(doc) is True
 
 
-def test_decide_none_when_mixed_consensus():
+def test_decide_mixed_uses_direction_logistic_when_confident():
     train = {"recognition": {"last_bar_probability_down_pct": 10.0, "btc_predict_runner_snapshot": {}}}
-    pred = {"predictions": {"consensus": "MIXED"}}
+    pred = {
+        "predictions": {
+            "consensus": "MIXED",
+            "direction_logistic": {"label": "UP", "confidence": 97.0},
+        }
+    }
+    got = sig.decide_forceenter_intent(train, pred)
+    assert got is not None
+    assert got["side"] == "long"
+
+
+def test_decide_mixed_no_fallback_when_dir_conf_low():
+    train = {"recognition": {"last_bar_probability_down_pct": 10.0, "btc_predict_runner_snapshot": {}}}
+    pred = {
+        "predictions": {
+            "consensus": "MIXED",
+            "direction_logistic": {"label": "UP", "confidence": 40.0},
+        }
+    }
     assert sig.decide_forceenter_intent(train, pred) is None
 
 

@@ -1,0 +1,13 @@
+{
+  "step_count": 17197906,
+  "total_neurons": 3000,
+  "development_stage": "MATURE",
+  "neuromodulators": {
+    "dopamine": 0.5494746444925467,
+    "acetylcholine": 0.403126892018512,
+    "norepinephrine": 0.1,
+    "serotonin": 0.9720614782195358
+  },
+  "saved_at": 1776633596.2446074,
+  "uptime": 0.12958383560180664
+}

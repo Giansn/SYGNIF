@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Fusion launcher: repo-agnostic path; all swarm ops go through cli.py
+set -euo pipefail
+exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cli.py" "$@"

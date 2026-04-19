@@ -1,0 +1,3 @@
+ed678ac718fda7400dfe37cb72c37358c60fc93772a653200baa473c4f5c79a7  /home/ubuntu/SYGNIF/archive/freqtrade-main-traders-2026-04-13/tradesv3-futures-btc01-demo.sqlite
+02db35c3360be185e0aabda9b504eab0b75a4b8f5b20859eb6895f0bae468668  /home/ubuntu/SYGNIF/archive/freqtrade-main-traders-2026-04-13/tradesv3-futures.sqlite
+e5c020af618fa6aad7b3813baf679a13908d18a894c4eb8aa51780f418985a9c  /home/ubuntu/SYGNIF/archive/freqtrade-main-traders-2026-04-13/tradesv3.sqlite

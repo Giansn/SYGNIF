@@ -16,7 +16,7 @@
 # *** THIS IS A TEST STRATEGY WITH NO ALPHA ADVANTAGE WHATSOEVER. ***
 # *** IT IS NOT INTENDED TO BE USED TO TRADE LIVE WITH REAL MONEY. ***
 #
-# Vendored in SYGNIF under research/nautilus_lab/ for import from the nautilus-research
+# Vendored in SYGNIF under research/nautilus_lab/ for import from the Nautilus lab (host venv or custom image).
 # image (/lab/workspace). Upstream lives with other example strategies:
 # https://github.com/nautechsystems/nautilus_trader/tree/develop/nautilus_trader/examples/strategies
 """
@@ -26,6 +26,10 @@ Subscribes to quotes for a single instrument and maintains a symmetric grid of l
 orders around the mid-price. Orders are only replaced when the mid-price moves beyond a
 configurable threshold. The grid shifts by a skew proportional to the net position to
 discourage inventory buildup (Avellaneda-Stoikov inspired).
+
+Optional **1h OHLCV JSON** (``sr_ohlcv_path``): Sygnif-style **48-bar support/resistance**
++ **ATR** widen steps on volatile tape; **breakout / high ATR** switches to a wider ladder;
+center blends toward the S/R **mid** inside the band; optional extra **sells under resistance**.
 
 """
 
@@ -53,6 +57,13 @@ from nautilus_trader.model.objects import Quantity
 from nautilus_trader.model.tick_scheme.base import round_down
 from nautilus_trader.model.tick_scheme.base import round_up
 from nautilus_trader.trading.strategy import Strategy
+
+from grid_sr_adaptive import GridSrContext
+from grid_sr_adaptive import adaptive_step_bps
+from grid_sr_adaptive import bonus_sell_prices_near_resistance
+from grid_sr_adaptive import grid_center_with_sr
+from grid_sr_adaptive import load_grid_sr_context
+from grid_sr_adaptive import wide_mode_breakout
 
 
 class GridMarketMakerConfig(StrategyConfig, frozen=True):
@@ -94,6 +105,27 @@ class GridMarketMakerConfig(StrategyConfig, frozen=True):
     on_cancel_resubmit : bool, default False
         If ``True``, reset the requote anchor on unexpected cancel events so the
         next quote tick triggers a full grid resubmission.
+    sr_ohlcv_path : str, default ""
+        Path to ``btc_1h_ohlcv.json`` (Bybit list candles). Empty disables S/R + ATR adapt.
+    sr_lookback_bars : PositiveInt, default 48
+        Rolling window for SF-style support/resistance (matches Sygnif 48-bar S/R).
+    sr_refresh_interval_secs : NonNegativeFloat, default 120
+        How often to re-read the OHLCV file.
+    sr_anchor_blend : NonNegativeFloat, default 0.35
+        Inside [support, resistance], blend this fraction toward (S+R)/2 for grid center.
+    adaptive_atr_k : NonNegativeFloat, default 18
+        Scale extra grid-step bps from ATR%% (higher → wider rungs in volatile tape).
+    adaptive_step_floor_bps / adaptive_step_cap_bps : PositiveInt
+        Clamp dynamic step from ATR.
+    wide_breakout_bps : PositiveInt, default 120
+        Mid beyond S/R by this many bps triggers ``grid_step_bps_wide`` / ``num_levels_wide``.
+    wide_atr_pct_min : NonNegativeFloat, default 0.85
+        Also trigger wide mode when ATR%% >= this (fast tape).
+    grid_step_bps_wide : PositiveInt
+    num_levels_wide : PositiveInt
+    resistance_extra_sell_bps : PositiveInt, default 10
+        Place up to two extra post-only sells this many bps inside resistance.
+    resistance_extra_sells_enabled : bool, default True
 
     """
 
@@ -109,6 +141,19 @@ class GridMarketMakerConfig(StrategyConfig, frozen=True):
     clear_mid_anchor_on_reject: bool = False
     expire_time_secs: PositiveInt | None = None
     on_cancel_resubmit: bool = False
+    sr_ohlcv_path: str = ""
+    sr_lookback_bars: PositiveInt = 48
+    sr_refresh_interval_secs: NonNegativeFloat = 120.0
+    sr_anchor_blend: NonNegativeFloat = 0.35
+    adaptive_atr_k: NonNegativeFloat = 18.0
+    adaptive_step_floor_bps: PositiveInt = 10
+    adaptive_step_cap_bps: PositiveInt = 60
+    wide_breakout_bps: PositiveInt = 120
+    wide_atr_pct_min: NonNegativeFloat = 0.85
+    grid_step_bps_wide: PositiveInt = 38
+    num_levels_wide: PositiveInt = 12
+    resistance_extra_sell_bps: PositiveInt = 10
+    resistance_extra_sells_enabled: bool = True
 
 
 class GridMarketMaker(Strategy):
@@ -135,6 +180,8 @@ class GridMarketMaker(Strategy):
         self._last_quoted_mid: Price | None = None
         self._last_requote_submit_ns: int | None = None
         self._pending_self_cancels: set[ClientOrderId] = set()
+        self._sr_ctx: GridSrContext | None = None
+        self._sr_last_load_ns: int | None = None
 
     def on_start(self) -> None:
         """
@@ -155,6 +202,32 @@ class GridMarketMaker(Strategy):
             self._trade_size = min_qty if min_qty is not None else Quantity(1.0, size_precision)
 
         self.subscribe_quote_ticks(instrument_id)
+        self._maybe_refresh_sr(force=True)
+
+    def _maybe_refresh_sr(self, *, force: bool = False) -> None:
+        path = (self.config.sr_ohlcv_path or "").strip()
+        if not path:
+            self._sr_ctx = None
+            return
+        now_ns = time.time_ns()
+        interval_ns = int(float(self.config.sr_refresh_interval_secs) * 1e9)
+        if (
+            not force
+            and self._sr_last_load_ns is not None
+            and (now_ns - self._sr_last_load_ns) < interval_ns
+            and self._sr_ctx is not None
+        ):
+            return
+        ctx = load_grid_sr_context(path, lookback=int(self.config.sr_lookback_bars))
+        self._sr_ctx = ctx
+        self._sr_last_load_ns = now_ns
+        if ctx and ctx.support and ctx.resistance:
+            self.log.info(
+                f"Grid SR: support={ctx.support:.2f} resistance={ctx.resistance:.2f} "
+                f"atr_pct={ctx.atr_pct:.3f} bars={ctx.n_bars}",
+            )
+        elif ctx is None:
+            self.log.warning(f"Grid SR: could not load OHLCV from {path}")
 
     def on_stop(self) -> None:
         """
@@ -175,6 +248,7 @@ class GridMarketMaker(Strategy):
         mid = Price(mid_f64, self._price_precision)
 
         instrument_id = self.config.instrument_id
+        self._maybe_refresh_sr(force=False)
 
         # Always requote when the grid is empty, even if mid is within threshold
         has_resting = bool(
@@ -215,7 +289,16 @@ class GridMarketMaker(Strategy):
         # and pending orders may still fill before the ack arrives
         net_position, worst_long, worst_short = self._compute_exposure(instrument_id)
 
-        grid = self._grid_orders(mid, net_position, worst_long, worst_short)
+        step_bps, n_levels, center_f64 = self._resolve_adaptive_grid(mid_f64)
+        grid = self._grid_orders(
+            mid,
+            net_position,
+            worst_long,
+            worst_short,
+            grid_center_f64=center_f64,
+            grid_step_bps=step_bps,
+            num_levels=n_levels,
+        )
 
         # Don't advance the requote anchor when no orders are placed,
         # otherwise the strategy can stall with zero resting orders
@@ -292,6 +375,8 @@ class GridMarketMaker(Strategy):
         self._last_quoted_mid = None
         self._last_requote_submit_ns = None
         self._pending_self_cancels.clear()
+        self._sr_ctx = None
+        self._sr_last_load_ns = None
 
     def _should_requote(self, mid: Price) -> bool:
         if self._last_quoted_mid is None:
@@ -312,6 +397,37 @@ class GridMarketMaker(Strategy):
         mult = max(1.0, float(self.config.emergency_requote_multiplier or 1.0))
         threshold = (self.config.requote_threshold_bps * mult) / 10_000.0
         return abs(float(mid) - last_f64) / last_f64 >= threshold
+
+    def _resolve_adaptive_grid(self, mid_f64: float) -> tuple[int, int, float]:
+        """Return (grid_step_bps, num_levels, geometric_center_price)."""
+        base_step = int(self.config.grid_step_bps)
+        base_levels = int(self.config.num_levels)
+        path = (self.config.sr_ohlcv_path or "").strip()
+        if not path:
+            return base_step, base_levels, mid_f64
+        ctx = self._sr_ctx
+        step = adaptive_step_bps(
+            base_step,
+            ctx,
+            atr_k=float(self.config.adaptive_atr_k),
+            cap_bps=int(self.config.adaptive_step_cap_bps),
+            floor_bps=int(self.config.adaptive_step_floor_bps),
+        )
+        levels = base_levels
+        if wide_mode_breakout(
+            mid_f64,
+            ctx,
+            breakout_bps=float(self.config.wide_breakout_bps),
+            min_atr_pct=float(self.config.wide_atr_pct_min),
+        ):
+            step = max(step, int(self.config.grid_step_bps_wide))
+            levels = max(levels, int(self.config.num_levels_wide))
+        center = grid_center_with_sr(
+            mid_f64,
+            ctx,
+            anchor_blend=float(self.config.sr_anchor_blend),
+        )
+        return step, levels, center
 
     def _compute_exposure(
         self,
@@ -350,22 +466,28 @@ class GridMarketMaker(Strategy):
         net_position: float,
         worst_long: Decimal,
         worst_short: Decimal,
+        *,
+        grid_center_f64: float,
+        grid_step_bps: int,
+        num_levels: int,
     ) -> list[tuple[OrderSide, Price]]:
         if self._instrument is None:
             return []
         mid_f64 = float(mid)
         skew_f64 = self.config.skew_factor * net_position
-        pct = self.config.grid_step_bps / 10_000.0
+        pct = max(1, int(grid_step_bps)) / 10_000.0
         trade_size = Decimal(str(self._trade_size))
         max_pos = Decimal(str(self.config.max_position))
         projected_long = worst_long
         projected_short = worst_short
         orders = []
         price_inc = float(self._instrument.price_increment)
+        center_f64 = float(grid_center_f64) if grid_center_f64 > 0 else mid_f64
 
-        for level in range(1, self.config.num_levels + 1):
-            buy_f64 = mid_f64 * (1.0 - pct) ** level - skew_f64
-            sell_f64 = mid_f64 * (1.0 + pct) ** level - skew_f64
+        n_lv = max(1, int(num_levels))
+        for level in range(1, n_lv + 1):
+            buy_f64 = center_f64 * (1.0 - pct) ** level - skew_f64
+            sell_f64 = center_f64 * (1.0 + pct) ** level - skew_f64
             # next_bid_price floors to the nearest valid bid tick (<=buy_f64),
             # next_ask_price ceils to the nearest valid ask tick (>=sell_f64),
             # preventing self-cross on coarse-tick instruments.
@@ -395,5 +517,39 @@ class GridMarketMaker(Strategy):
             if sell_price is not None and projected_short - trade_size >= -max_pos:
                 orders.append((OrderSide.SELL, sell_price))
                 projected_short -= trade_size
+
+        if (
+            self.config.resistance_extra_sells_enabled
+            and self._sr_ctx
+            and self._sr_ctx.resistance
+            and self._sr_ctx.resistance > mid_f64
+        ):
+            for raw_px in bonus_sell_prices_near_resistance(
+                mid_f64,
+                float(self._sr_ctx.resistance),
+                extra_bps=int(self.config.resistance_extra_sell_bps),
+                max_extra=2,
+            ):
+                sell_price: Price | None
+                if self._instrument.tick_scheme_name is not None:
+                    sell_price = self._instrument.next_ask_price(raw_px)
+                else:
+                    sell_price = Price(round_up(raw_px, price_inc), self._price_precision)
+                    max_px = self._instrument.max_price
+                    if max_px is not None and sell_price > max_px:
+                        sell_price = None
+                if sell_price is None:
+                    continue
+                if float(sell_price.as_double()) <= mid_f64 * 1.00001:
+                    continue
+                dup = any(
+                    o[0] == OrderSide.SELL and abs(float(o[1].as_double()) - float(sell_price.as_double())) < price_inc * 2
+                    for o in orders
+                )
+                if dup:
+                    continue
+                if projected_short - trade_size >= -max_pos:
+                    orders.append((OrderSide.SELL, sell_price))
+                    projected_short -= trade_size
 
         return orders

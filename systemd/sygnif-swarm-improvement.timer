@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly SYGNIF Swarm improvement telemetry
+
+[Timer]
+Unit=sygnif-swarm-improvement.service
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

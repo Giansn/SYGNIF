@@ -10,6 +10,9 @@ Env (optional): ``SYGNIF_BTC_IFACE_CLOSED_MAX`` (default 2000) — closed P/L ro
 closes than this, samples are spaced **evenly in time** (flat segments between trades) so the line
 stays easy to read in clock time (~5m-ish density on 1D at defaults).
 
+Open / close **tags** on positions and closed P/L rows come from ``prediction_agent/btc_iface_trade_tags.py``
+(journal + position cache) when ``scripts/btc_predict_protocol_loop.py`` runs with ``--execute``; see that module for paths and ``SYGNIF_BTC_IFACE_TRADE_TAGS*`` env vars.
+
 **Primary URL:** same port as BTC Terminal (default **8888**) — ``/interface``, ``/api/btciface/snapshot.json``.
 Run this file standalone only for debugging: ``SYGNIF_DASHBOARD_BTC_INTERFACE_PORT`` (default **8894**).
 """
@@ -259,6 +262,21 @@ def _fetch_closed_pnl_rows(symbol: str, key: str, secret: str, max_rows: int | N
     return rows
 
 
+def _iface_trade_tag_maps() -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Journal-derived close-order tags + open-position tag cache (predict loop sidecar)."""
+    pa = DIR / "prediction_agent"
+    s = str(pa)
+    if s not in sys.path:
+        sys.path.insert(0, s)
+    try:
+        from btc_iface_trade_tags import load_close_order_index
+        from btc_iface_trade_tags import load_position_meta
+
+        return load_close_order_index(), load_position_meta()
+    except Exception:
+        return {}, {}
+
+
 def _parse_closed_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     parsed: list[dict[str, Any]] = []
     for row in raw:
@@ -272,11 +290,55 @@ def _parse_closed_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "qty": _num(row.get("closedSize") or row.get("qty")),
                 "avg_entry": _num(row.get("avgEntryPrice")),
                 "avg_exit": _num(row.get("avgExitPrice")),
-                "order_id": row.get("orderId"),
+                "order_id": str(row.get("orderId") or "").strip(),
             }
         )
     parsed.sort(key=lambda x: x["created_ms"])
     return parsed
+
+
+def _iface_display_tag(raw: str, wallet_tag: str) -> str:
+    """Map journal / internal strings to dashboard label **GRID** or **PREDICT**; else wallet default."""
+    s = (raw or "").strip().lower()
+    if "grid" in s:
+        return "GRID"
+    if any(x in s for x in ("predict", "syg", "bar", "nautilus")):
+        return "PREDICT"
+    w = (wallet_tag or "PREDICT").strip().upper()
+    return w if w in ("GRID", "PREDICT") else "PREDICT"
+
+
+def _enrich_iface_trade_tags(
+    positions: list[dict[str, Any]],
+    parsed_closes: list[dict[str, Any]],
+    symbol: str,
+    wallet_tag: str,
+) -> None:
+    close_idx, pos_meta_all = _iface_trade_tag_maps()
+    sym_key = (symbol or "").replace("/", "").upper().strip()
+    raw_meta = pos_meta_all.get(sym_key) if isinstance(pos_meta_all, dict) else None
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    otag = str(meta.get("open_tag") or "")
+    odetail = str(meta.get("open_detail") or "")
+    for p in positions:
+        p["open_tag"] = otag
+        p["open_tag_detail"] = odetail
+        p["source_tag"] = _iface_display_tag(otag, wallet_tag)
+    for r in parsed_closes:
+        cid = str(r.get("order_id") or "").strip()
+        m = close_idx.get(cid) if cid else None
+        if m:
+            o_raw = str(m.get("open_tag") or "")
+            c_raw = str(m.get("close_tag") or "")
+            r["open_tag"] = o_raw
+            r["close_tag"] = c_raw
+            r["open_source_tag"] = _iface_display_tag(o_raw, wallet_tag)
+            r["close_source_tag"] = _iface_display_tag(c_raw, wallet_tag)
+        else:
+            r["open_tag"] = ""
+            r["close_tag"] = ""
+            r["open_source_tag"] = wallet_tag if wallet_tag in ("GRID", "PREDICT") else "PREDICT"
+            r["close_source_tag"] = r["open_source_tag"]
 
 
 def _zurich_now() -> datetime:
@@ -447,7 +509,6 @@ def build_snapshot() -> dict[str, Any]:
     parsed_closes = _parse_closed_rows(closed_raw)
     wallet = _parse_wallet_usdt(w_raw)
     positions = _parse_positions(p_raw, sym)
-    orders = _parse_orders(o_raw)
     gk = os.environ.get("BYBIT_DEMO_GRID_API_KEY", "").strip()
     gs = os.environ.get("BYBIT_DEMO_GRID_API_SECRET", "").strip()
     use_grid = os.environ.get("SYGNIF_BTC_IFACE_USE_GRID_KEYS", "").strip().lower() in (
@@ -457,6 +518,9 @@ def build_snapshot() -> dict[str, Any]:
         "on",
     )
     iface_grid_keys = bool(use_grid and gk and gs and key == gk and secret == gs)
+    iface_wallet_tag = "GRID" if iface_grid_keys else "PREDICT"
+    _enrich_iface_trade_tags(positions, parsed_closes, sym, iface_wallet_tag)
+    orders = _parse_orders(o_raw)
     _annotate_order_sources(orders, iface_grid_keys=iface_grid_keys)
 
     wins = sum(1 for r in parsed_closes if r["closed_pnl"] > 1e-9)
@@ -484,6 +548,7 @@ def build_snapshot() -> dict[str, Any]:
         "symbol": sym,
         "generated_ms": ts,
         "iface_key_profile": "grid" if iface_grid_keys else "predict",
+        "iface_wallet_tag": iface_wallet_tag,
         "order_source_note": (
             "Heuristic: Sell = grid MM; Buy = predict bar node when no sells are open, "
             "else grid bid. Ambiguous if both bots share this key."

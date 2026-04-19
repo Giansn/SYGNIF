@@ -9,9 +9,15 @@ Adds **tag-specific** entry/exit paths for **BTC-0.1-R01–R03**: each path is s
 
 **Futures (USDT linear):** **leverage** is **not** set manually — inherited ``SygnifStrategy.leverage()`` (major tier, short cap, ATR vol scaling). **Entries / exits** run on **strategy math** (this class + parent); RPC ``forceenter`` is optional operator override only. With ``position_adjustment_enable`` in config, **scale-in** (multiple fills on the **same** trade) is allowed for R01–R03 and ``manual_*`` tags — not venue **hedge mode** long+short on one symbol under Freqtrade’s Bybit one-way default.
 
-**Research data path:** **Nautilus** container (compose profile ``btc-nautilus``) processes Bybit/BTC feeds into ``finance_agent/btc_specialist/data/`` for training + **ruleprediction** — see ``letscrash/RULE_AND_DATA_FLOW_LOOP.md`` §3.
+**Research data path:** refresh ``finance_agent/btc_specialist/data/`` via host/cron (**``pull_btc_context.py``**, **``research/nautilus_lab/``** scripts, or other jobs) for training + **ruleprediction** — see ``letscrash/RULE_AND_DATA_FLOW_LOOP.md`` §3.
 
 **TP / SL (registry):** ``tuning.tp_sl`` + ``tuning.entry_prediction`` in ``btc_strategy_0_1_rule_registry.json`` — tighter SL via ``custom_stoploss``, TP via ``custom_exit``; futures keep ``stoploss_on_exchange`` from config.
+
+**Trailing TP/SL (optional, inherited):** ``SYGNIF_TRAILING_TPSL=1`` — combined trail + entry SL + post-TP lock in parent ``custom_stoploss``; trailing take-profit (callback from peak) in ``custom_exit`` (see ``.cursor/rules/trailing-tpsl.mdc``). This class still applies registry ``tag_sl_return_cap`` and the R03 stop floor **after** ``super().custom_stoploss``. In ``custom_exit``, trailing TP is evaluated **after** R01 stack guard + R02 regime break and **before** fixed registry TP / R03 scalp targets.
+
+**Swarm + win:** When Swarm reads **against** the long (``swarm_adverse_to_long`` on the last bar) and the trade is **already in profit**, a **tighter** trailing take-profit (``exit_swarm_trailing_win``) runs **before** the generic trailing TP — smaller pullback from ``trade.max_rate`` (``SYGNIF_TS_SWARM_CALLBACK_PCT`` / ``tuning.swarm_trail_tp``).
+
+**Swarm:** ``btc_strategy_0_1_engine`` loads ``swarm_knowledge_output.json`` (path via ``SYGNIF_PREDICTION_AGENT_DIR`` in Docker). Columns ``swarm_mean`` / ``swarm_label`` / ``swarm_conflict``; optional long veto when ``SYGNIF_BTC01_SWARM_ROOT=1`` (bearish / conflict rules — no new orders from Swarm, signal-only).
 """
 
 from __future__ import annotations
@@ -66,6 +72,10 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         # Never use shared movers / new_pairs files (BTC-only bot).
         self._movers_pairs = []
         self._new_pairs = []
+        # Isolated doom file: spot + futures both mount ``user_data/``; sharing
+        # ``doom_cooldown.json`` lets one bot overwrite the other's cooldown map and
+        # leaves BTC/USDT:USDT stuck in 4h doom in-memory while JSON has no :USDT key.
+        self._doom_cooldown_path = "user_data/doom_cooldown_futures_btc01.json"
         self._load_doom_cooldown()
         self._refresh_strategy_adaptation(force=True)
         self._risk_manager = None
@@ -135,6 +145,14 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         pair = metadata.get("pair", "")
 
         df = super().populate_entry_trend(df, metadata)
+        b01.attach_swarm_columns(df)
+
+        # Swarm root gate: optional veto of long entries from ``swarm_knowledge_output.json``
+        if btc_trend_regime.is_btc_pair(pair) and len(df) > 0 and b01.swarm_root_blocks_long():
+            last_i = len(df) - 1
+            if int(df.iloc[last_i].get("enter_long", 0) or 0) == 1:
+                df.iloc[last_i, df.columns.get_loc("enter_long")] = 0
+                df.iloc[last_i, df.columns.get_loc("enter_tag")] = ""
 
         # ``btc_trend`` profile: map parent ``btc_trend_long`` → **R02** tag, but do **not**
         # return early — R01 governance / ``strong_ta``→R01 / R03 sleeve must still run so
@@ -311,7 +329,7 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         after_fill: bool,
         **kwargs,
     ) -> float:
-        """R03 sleeve: cap doom vs Sygnif parent to the ruleprediction first-trade SL box (§7.1)."""
+        """Registry SL cap + R03 floor on top of parent (parent includes optional trailing TPSL when env set)."""
         tag = trade.enter_tag or ""
         parent_sl = super().custom_stoploss(
             pair, trade, current_time, current_rate, current_profit, after_fill, **kwargs
@@ -323,6 +341,35 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
         if tag == b01.TAG_R03 and not trade.is_short:
             return max(parent_sl, b01.R03_STOPLOSS_FLOOR_VS_PARENT)
         return parent_sl
+
+    def _btc01_swarm_trailing_take_win(
+        self,
+        trade: Trade,
+        current_rate: float,
+        current_profit: float,
+        leverage: float,
+        last,
+    ) -> Optional[str]:
+        """Tight trailing TP when Swarm disagrees with the long — bank profit on a small dip."""
+        if not self._sygnif_trailing_tpsl_enabled():
+            return None
+        if getattr(trade, "is_short", False) or current_profit <= 0:
+            return None
+        if not b01.swarm_adverse_to_long(last):
+            return None
+        lev_m = max(1.0, float(leverage))
+        if current_profit < b01.swarm_trail_min_profit_gate(lev_m):
+            return None
+        entry = float(trade.open_rate)
+        if entry <= 0 or current_rate <= 0:
+            return None
+        xr = getattr(trade, "max_rate", None)
+        peak = float(xr) if xr is not None and float(xr) > 0 else current_rate
+        peak = max(peak, current_rate, entry)
+        cb = b01.swarm_trail_callback_pct()
+        if current_rate <= peak * (1.0 - cb):
+            return "exit_swarm_trailing_win"
+        return None
 
     def custom_exit(
         self,
@@ -344,6 +391,13 @@ class BTC_Strategy_0_1(_SygnifStrategyBase):
                     return "exit_btc01_r01_stack_guard"
                 if tag == b01.TAG_R02 and not b01.btc01_r02_trend_long_row(last):
                     return "exit_btc01_r02_regime_break"
+                swx = self._btc01_swarm_trailing_take_win(trade, current_rate, current_profit, lev, last)
+                if swx:
+                    return swx
+                # Same trailing take-profit path as SygnifStrategy (SYGNIF_TRAILING_TPSL=1), before fixed tag TPs.
+                tpx = self._sygnif_exit_trailing_take_profit(trade, current_rate)
+                if tpx:
+                    return tpx
                 tp_pct = b01.tag_takeprofit_profit_pct(tag)
                 if tp_pct is not None and tag in (b01.TAG_R01, b01.TAG_R02):
                     if current_profit >= tp_pct * max(1.0, lev):

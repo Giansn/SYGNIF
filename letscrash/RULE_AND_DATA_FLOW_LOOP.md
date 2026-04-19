@@ -1,5 +1,7 @@
 # Continuous rule loop, agent consultation, and **btc_Trader_Docker** data flows
 
+**Compose note (2026-04):** dedicated BTC Docker services (`nautilus-research`, `freqtrade-btc-*`, grid) were **removed** from `docker-compose.yml`. Treat mentions of those service names below as **host `research/nautilus_lab/`** or **`archive/freqtrade-btc-dock-2026-04-13/`** unless you restore the old stack.
+
 **Under `/ruleprediction-agent`:** treat this file as the **long-form** companion to `.cursor/rules/ruleprediction-agent.mdc` — rules and wiring **evolve**; this document describes the **information → training → rule change → proof → test → apply/remove → compare** loop and concrete **data sources** (TradingView, exchanges, on-chain bundles).
 
 **Rule setting never stops:** each cycle produces evidence; **false** hypotheses → delete or narrow rules/docs; **true** under defined tests → apply (code, `strategy_adaptation.json`, compose, or `.mdc` globs). Re-compare against **live feeds** next cycle.

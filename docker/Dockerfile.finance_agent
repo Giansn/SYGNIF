@@ -1,4 +1,5 @@
-# Finance Agent HTTP: /briefing, POST /sygnif/sentiment, POST /overseer/commentary, /health, /training
+# Finance Agent HTTP: /briefing, POST /sygnif/sentiment, POST /overseer/commentary, /health, /training,
+# GET|POST /sygnif/swarm (token: SYGNIF_SWARM_WEBHOOK_TOKEN)
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -11,6 +12,8 @@ COPY user_data/strategies/live_market_snapshot.py /app/live_market_snapshot.py
 COPY finance_agent/ /app/finance_agent/
 # BTC ML runner + upstream study trees (paths relative to /app/prediction_agent)
 COPY prediction_agent/ /app/prediction_agent/
+# Signed Bybit reads for Swarm closed-PnL (``compute_swarm`` → ``bybit_linear_hedge``)
+COPY trade_overseer/ /app/trade_overseer/
 
 ENV PYTHONPATH=/app
 EXPOSE 8091

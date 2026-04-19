@@ -1,8 +1,10 @@
 """Tests for optional NewHedge client (no live API key required)."""
 
+from tests.env_utils import delenv_strict
+
 
 def test_format_telegram_skips_without_key(monkeypatch):
-    monkeypatch.delenv("NEWHEDGE_API_KEY", raising=False)
+    delenv_strict(monkeypatch, "NEWHEDGE_API_KEY")
     from finance_agent.newhedge_client import format_telegram_altcoins_correlation_block
 
     assert format_telegram_altcoins_correlation_block() == ""

@@ -44,23 +44,9 @@ docker compose --profile archived-main-traders up -d
 
 Both traders mount `./user_data` and share strategy files. The compact `/status` patch is applied when those images are built with `Dockerfile.custom`.
 
-### BTC Nautilus dock (profile `btc-nautilus`)
+### BTC Nautilus / grid (host; not in Compose)
 
-| Service                   | Role |
-| ------------------------- | ---- |
-| `nautilus-research`       | Bybit OHLCV sink + `nautilus_sidecar_strategy` → `btc_specialist/data/` |
-| `nautilus-sygnif-btc-node` | `SygnifBtcBarNodeStrategy` on **5m** linear bars: optional post-only demo buys, sidecar + ML gates |
-| `nautilus-grid-btc01`     | (profile `btc-grid-mm`) Grid MM on BTC linear **demo** (default **8** levels → up to **16** resting limits) |
-
-```bash
-docker compose --profile btc-nautilus up -d --build
-# optional grid on same demo wallet (or use BYBIT_DEMO_GRID_* to isolate)
-docker compose --profile btc-grid-mm up -d nautilus-grid-btc01
-```
-
-The bar node can run **in-process live retrain** (`prediction_agent/btc_predict_live.py`, env `NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=1`) on rolling 5m OHLCV and mirror `btc_prediction_output.json`. See `.env.example` and `docker-compose.yml` header for `NAUTILUS_SYGNIF_NODE_*` knobs.
-
-**Testnet bar node:** profile `btc-testnet`, service `nautilus-btc-testnet` — `scripts/start_nautilus_btc_testnet.sh`.
+Dedicated **Compose** services for the BTC Nautilus dock (`nautilus-research`, bar node, grid MM, `freqtrade-btc-*`) were **removed** from `docker-compose.yml`. Run sinks / bar strategy / grid MM from **`research/nautilus_lab/`** with a local venv (`requirements-bybit-demo-live.txt`), or restore **`archive/freqtrade-btc-dock-2026-04-13/`** if you need the old stack. **`scripts/start_bybit_demo_grid_mm.sh`** runs the grid runner on the host when `nautilus_trader` is installed.
 
 ### Trade Overseer (agent endpoint first)
 
@@ -70,7 +56,7 @@ The bar node can run **in-process live retrain** (`prediction_agent/btc_predict_
 - Fallback: if no endpoint, it can still use `ANTHROPIC_API_KEY` (legacy path).
 - Final fallback: rules-only summary if no model backend is reachable.
 
-With the archived traders profile, compose wires `trade-overseer` with `FT_SPOT_URL` / `FT_FUTURES_URL` pointing at the `freqtrade` / `freqtrade-futures` service names (not `127.0.0.1`), `OVERSEER_HTTP_HOST=0.0.0.0`, and `FINANCE_AGENT_BRIEFING_URL` defaulting to `host.docker.internal` when the finance agent runs on the host.
+With the **archived-main-traders** profile, compose wires `trade-overseer` with `FT_SPOT_URL` / `FT_FUTURES_URL` defaulting to `http://freqtrade:8080/api/v1` and `http://freqtrade-futures:8081/api/v1`, `OVERSEER_HTTP_HOST=0.0.0.0`, and `FINANCE_AGENT_BRIEFING_URL` defaulting to the `finance-agent` container on the compose network.
 
 Overseer Telegram token priority:
 
@@ -275,9 +261,6 @@ docker compose up -d
 
 # Optional: archived spot + futures Freqtrade + overseer
 # docker compose --profile archived-main-traders up -d --build
-
-# Optional: Nautilus BTC research + bar node (+ grid profile separately)
-# docker compose --profile btc-nautilus up -d --build
 
 # Dashboards
 python3 dashboard_server.py &

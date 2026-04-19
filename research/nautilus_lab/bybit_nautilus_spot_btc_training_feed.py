@@ -13,6 +13,10 @@ Writes (default dir ``NAUTILUS_BTC_OHLCV_DIR`` = ``/lab/btc_specialist_data``):
 Endpoints used (HTTP adapter): ``request_instruments``, ``request_bars`` (1h + 1d),
 ``request_tickers``, ``request_trades``, ``request_orderbook_snapshot``,
 ``request_instrument_statuses``; optional ``request_fee_rates`` if API keys exist in env.
+
+**Swarm hook:** ``NAUTILUS_SWARM_HOOK=1`` or legacy ``NAUTILUS_FUSION_SIDECAR_SYNC=1`` → after each
+successful sink pass, ``prediction_agent/nautilus_swarm_hook.py`` (fusion; optional
+``NAUTILUS_SWARM_HOOK_KNOWLEDGE=1`` for ``swarm_knowledge_output.json``).
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +52,31 @@ def _bar_to_ohlcv_row(b: object) -> dict[str, float | int]:
         "c": float(b.close),
         "v": float(b.volume),
     }
+
+
+def _maybe_nautilus_swarm_hook_after_feed() -> None:
+    sw = os.environ.get("NAUTILUS_SWARM_HOOK", "").strip().lower() in ("1", "true", "yes", "on")
+    fu = os.environ.get("NAUTILUS_FUSION_SIDECAR_SYNC", "").strip().lower() in ("1", "true", "yes", "on")
+    ex = os.environ.get("SYGNIF_BYBIT_DEMO_PREDICTED_MOVE_EXPORT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not (sw or fu or ex):
+        return
+    try:
+        root = Path(__file__).resolve().parents[2]
+        pa = root / "prediction_agent"
+        if not pa.is_dir():
+            return
+        if str(pa) not in sys.path:
+            sys.path.insert(0, str(pa))
+        from nautilus_swarm_hook import run_nautilus_swarm_hook  # noqa: PLC0415
+
+        run_nautilus_swarm_hook(phase="training_feed", repo_root=root)
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"nautilus_swarm_hook_feed_error": str(exc)}), flush=True)
 
 
 def _atomic_write_json(path: Path, obj: Any) -> None:
@@ -221,6 +251,7 @@ def main() -> int:
         try:
             meta = run_once(out_dir)
             meta["seconds"] = round(time.perf_counter() - t0, 3)
+            _maybe_nautilus_swarm_hook_after_feed()
             print(json.dumps(meta), flush=True)
             return 0
         except Exception as e:

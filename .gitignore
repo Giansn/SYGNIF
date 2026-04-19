@@ -1,6 +1,10 @@
 .env
 .env.local
 .env.secrets
+# Swarm operator ACK + demo keys (copy from swarm_operator.env.example)
+swarm_operator.env
+# NeuroLinked systemd overrides (copy from neurolinked.service.env.example)
+neurolinked.service.env
 user_data/data/
 user_data/logs/
 user_data/tradesv3.sqlite*
@@ -17,6 +21,9 @@ user_data/strategy_adaptation_weekly.json
 user_data/market_strategy_3_metrics.json
 user_data/advisor_state.json
 user_data/advisor_pending.json
+user_data/system_snapshot.json
+user_data/system_snapshot_shot*.png
+prediction_agent/swarm_knowledge_sealed.json
 __pycache__/
 *.pyc
 movers_pairlist.json
@@ -60,6 +67,14 @@ prediction_agent/btc_24h_movement_prediction.json
 prediction_agent/training_channel_output.json
 prediction_agent/btc_macro_train_output.json
 prediction_agent/rule_tag_journal.csv
+prediction_agent/btc_iface_trade_tags.jsonl
+prediction_agent/swarm_predict_protocol_dataset.jsonl
+prediction_agent/btc_iface_position_tags.json
+prediction_agent/swarm_nautilus_protocol_sidecar.json
+prediction_agent/bybitapidemo_btc_predicted_move_signal.json
+prediction_agent/swarm_analyze_btc_state.json
+prediction_agent/swarm_btc_vector.json
+prediction_agent/swarm_btc_synth.json
 
 # Large local clone / experiments (not the git submodule path `network/`)
 network/
@@ -96,6 +111,7 @@ Network
 
 # Local Python venv (repo root)
 .venv/
+research/nautilus_lab/.venv/
 
 # Cursor local debug logs
 .cursor/debug*.log
@@ -103,3 +119,33 @@ Network
 AGENT.md
 CLAUDE.md
 .agent-mem/
+
+# Local runtime / smoke (never commit)
+logs/
+snapshot.collection
+snapshot.html
+sygnif.egg-info/
+user_data/doom_cooldown_futures_btc01.json
+user_data/system_snapshot.html
+research/nautilus_lab/*.log
+research/nautilus_lab/*.pid
+archive/**/*.sqlite
+trade_overseer/data/futures/
+prediction_agent/btc_eval_forecasts_pending.jsonl
+prediction_agent/btc_nauti_prediction_journal.jsonl
+prediction_agent/btc_nauti_accuracy_report.json
+prediction_agent/btc_nauti_tune_result.json
+prediction_agent/btc_nauti_walkforward_result.json
+prediction_agent/btc_longhistory_swarm_regime_report.json
+prediction_agent/neurolinked_swarm_channel.json
+prediction_agent/swarm_auto_improvement_history.jsonl
+prediction_agent/swarm_auto_improvement_state.json
+prediction_agent/swarm_btc_future_tpsl_last.json
+prediction_agent/swarm_bybit_ft_state.json
+prediction_agent/swarm_demo_runtime_hints.json
+prediction_agent/swarm_knowledge_output.json
+prediction_agent/swarm_weak_points_latest.json
+prediction_agent/tradesmart_iter_state.json
+prediction_agent/ops_docker_learnings.json
+# Nested clone — use submodule or omit
+third_party/obsidian-clipper/

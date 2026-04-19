@@ -2,6 +2,11 @@
 """
 Place (or **dry-plan**) a Freqtrade **forceenter** from **BTC analysis** JSON.
 
+**Not the Sygnif BTC demo canonical order path.** For Bybit demo + ML stack, orders are intended to
+flow through **Nautilus** (`research/nautilus_lab/run_sygnif_btc_trading_node.py`, see
+`scripts/start_nautilus_btc_predict_protocol.sh` and `research/nautilus_lab/README.md`). Use this
+script only when a **Freqtrade** futures API is up and you explicitly want `/forceenter`.
+
 Reads:
   ``prediction_agent/btc_prediction_output.json``
   ``prediction_agent/training_channel_output.json`` (for R01 governance)

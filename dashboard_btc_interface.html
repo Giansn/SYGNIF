@@ -171,6 +171,14 @@ tr:hover td { background: #ffffff04; }
 .tag.source-predict {
   background: #5ae0b514; color: var(--ac2); border: 1px solid #5ae0b530;
 }
+.tag-cell {
+  white-space: normal;
+  max-width: 160px;
+  font-size: 11px;
+  color: var(--t2);
+  line-height: 1.35;
+  word-break: break-word;
+}
 .source-hint {
   font-size: 11px; color: var(--t3); line-height: 1.4; margin-top: 8px; max-width: 720px;
 }
@@ -355,9 +363,9 @@ tr:hover td { background: #ffffff04; }
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Lev</th><th>Unreal P/L</th><th>Notional (USDT)</th><th>Liq</th>
+          <th>Side</th><th>Entry tag</th><th>Size</th><th>Entry</th><th>Mark</th><th>Lev</th><th>Unreal P/L</th><th>Notional (USDT)</th><th>Liq</th>
         </tr></thead>
-        <tbody id="pos-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
+        <tbody id="pos-body"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <div class="trade-cards" id="pos-cards"></div>
@@ -382,9 +390,9 @@ tr:hover td { background: #ffffff04; }
     <div class="card desktop-table" style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th>Time</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Closed P/L</th>
+          <th>Time</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Open tag</th><th>Close tag</th><th>Closed P/L</th>
         </tr></thead>
-        <tbody id="closed-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+        <tbody id="closed-body"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <div class="trade-cards" id="closed-cards"></div>
@@ -399,6 +407,8 @@ tr:hover td { background: #ffffff04; }
 <script>
 const API = window.location.origin + '/api/btciface/snapshot.json';
 const DASH_LOC = 'de-CH';
+/** Snapshot poll interval (Bybit demo interface). */
+const IFACE_POLL_MS = 3000;
 let chartTF = '1';
 let snapCache = null;
 let closedShowAll = false;
@@ -408,6 +418,29 @@ const pc = v => v > 0 ? 'up' : v < 0 ? 'dn' : 'nt';
 const fmt4 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(4);
 const fmt2 = v => (v >= 0 ? '+' : '') + Number(v).toFixed(2);
 const prec = v => v < 0.01 ? 6 : v < 1 ? 4 : v < 100 ? 2 : 2;
+
+function escAttr(s) {
+  if (s == null || s === '') return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function ifaceTagBadgeHtml(label) {
+  if (!label) return '<span style="color:var(--t3)">—</span>';
+  const cls = label === 'GRID' ? 'source-grid' : 'source-predict';
+  return `<span class="tag ${cls}">${label}</span>`;
+}
+
+/** Server-computed ``source_tag`` / ``open_source_tag`` (GRID|PREDICT); fallback to ``iface_wallet_tag``. */
+function ifaceBadgeServer(tag) {
+  const u = String(tag == null ? '' : tag).toUpperCase();
+  if (u === 'GRID' || u === 'PREDICT') return ifaceTagBadgeHtml(u);
+  const w = (snapCache && snapCache.iface_wallet_tag) ? String(snapCache.iface_wallet_tag).toUpperCase() : 'PREDICT';
+  return ifaceTagBadgeHtml(w === 'GRID' ? 'GRID' : 'PREDICT');
+}
 
 function dashClockStr() {
   return new Date().toLocaleTimeString(DASH_LOC, { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -635,7 +668,7 @@ function renderClosed() {
     : `${Math.min(15, closedList.length)} of ${closedList.length}`;
 
   if (!closedList.length) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty">No closed P/L rows</td></tr>';
+    tb.innerHTML = '<tr><td colspan="8" class="empty">No closed P/L rows</td></tr>';
     cc.innerHTML = '<div class="card"><div class="empty">No closed P/L rows</div></div>';
     if (act) act.style.display = 'none';
     return;
@@ -652,6 +685,8 @@ function renderClosed() {
       <td>${Number(r.qty || 0).toFixed(4)}</td>
       <td>${Number(r.avg_entry || 0).toFixed(prec(r.avg_entry))}</td>
       <td>${Number(r.avg_exit || 0).toFixed(prec(r.avg_exit))}</td>
+      <td class="tag-cell">${ifaceBadgeServer(r.open_source_tag)}</td>
+      <td class="tag-cell">${ifaceBadgeServer(r.close_source_tag)}</td>
       <td class="${pc(r.closed_pnl)}">${fmt4(r.closed_pnl)}</td>
     </tr>`;
   }).join('');
@@ -670,6 +705,8 @@ function renderClosed() {
         <div class="tc-item"><div class="tc-item-lbl">Qty</div><div class="tc-item-val">${Number(r.qty || 0).toFixed(4)}</div></div>
         <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val">${Number(r.avg_entry || 0).toFixed(prec(r.avg_entry))}</div></div>
         <div class="tc-item"><div class="tc-item-lbl">Exit</div><div class="tc-item-val">${Number(r.avg_exit || 0).toFixed(prec(r.avg_exit))}</div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Open tag</div><div class="tc-item-val">${ifaceBadgeServer(r.open_source_tag)}</div></div>
+        <div class="tc-item"><div class="tc-item-lbl">Close tag</div><div class="tc-item-val">${ifaceBadgeServer(r.close_source_tag)}</div></div>
       </div>
     </div>`;
   }).join('');
@@ -763,13 +800,15 @@ async function refresh() {
     const pb = document.getElementById('pos-body');
     const pcards = document.getElementById('pos-cards');
     if (!pos.length) {
-      pb.innerHTML = '<tr><td colspan="8" class="empty">Flat</td></tr>';
+      pb.innerHTML = '<tr><td colspan="9" class="empty">Flat</td></tr>';
       pcards.innerHTML = '<div class="card"><div class="empty">No open positions</div></div>';
     } else {
       pb.innerHTML = pos.map(p => {
         const buy = (p.side || '').toLowerCase() === 'buy';
+        const otd = escAttr((p.open_tag_detail || '') + '');
         return `<tr>
           <td><span class="tag ${buy ? 'side-long' : 'side-short'}">${buy ? 'LONG' : 'SHORT'}</span></td>
+          <td class="tag-cell" title="${otd}">${ifaceBadgeServer(p.source_tag)}</td>
           <td>${Number(p.size).toFixed(4)}</td>
           <td>${p.avg_price.toFixed(prec(p.avg_price))}</td>
           <td>${p.mark_price.toFixed(prec(p.mark_price))}</td>
@@ -787,6 +826,7 @@ async function refresh() {
             <div class="${pc(p.unrealised_pnl)}" style="font-family:var(--mono);font-weight:800">${fmt4(p.unrealised_pnl)}</div>
           </div>
           <div class="tc-grid">
+            <div class="tc-item"><div class="tc-item-lbl">Entry tag</div><div class="tc-item-val">${ifaceBadgeServer(p.source_tag)}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Entry</div><div class="tc-item-val">${p.avg_price.toFixed(prec(p.avg_price))}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Mark</div><div class="tc-item-val">${p.mark_price.toFixed(prec(p.mark_price))}</div></div>
             <div class="tc-item"><div class="tc-item-lbl">Lev</div><div class="tc-item-val">${Number(p.leverage || 0).toFixed(0)}×</div></div>
@@ -882,10 +922,11 @@ async function tick() {
   try { await refresh(); } finally { _busy = false; }
 }
 tick();
-setInterval(tick, 5 * 60 * 1000);
+setInterval(tick, IFACE_POLL_MS);
 
 const _port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
-document.getElementById('foot-port').textContent = 'Sygnif BTC Interface · port ' + _port;
+document.getElementById('foot-port').textContent =
+  'Sygnif BTC Interface · port ' + _port + ' · refresh ' + (IFACE_POLL_MS / 1000) + 's';
 const _ph = document.getElementById('iface-port-hint');
 if (_ph) _ph.textContent = _port;
 </script>

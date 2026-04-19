@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "artifact_root_env": "SWARM_ARTIFACT_ROOT",
+  "default_artifact_subdir": ".local/share/sygnif-swarm",
+  "_governance": "Only argv listed here may run. Operator entry: ./scripts/swarm/swarm (cli.py).",
+  "slots": [
+    {
+      "id": "1",
+      "name": "btc_predict_1h",
+      "description": "Nautilus-fed OHLCV ML runner → btc_prediction_output.json",
+      "argv": ["python3", "prediction_agent/btc_predict_runner.py", "--timeframe", "1h"],
+      "slot_subdir": "slot_1",
+      "allow_extra_argv": false,
+      "env": {
+        "PYTHONPATH": "prediction_agent"
+      }
+    },
+    {
+      "id": "2",
+      "name": "channel_training",
+      "description": "Channel LogReg + training_channel_output.json (may subprocess runner unless SKIP_PREDICT_RUNNER=1)",
+      "argv": ["python3", "training_pipeline/channel_training.py"],
+      "slot_subdir": "slot_2",
+      "allow_extra_argv": false,
+      "env": {
+        "PYTHONPATH": "prediction_agent"
+      }
+    },
+    {
+      "id": "3",
+      "name": "swarm_knowledge",
+      "description": "Finance-agent swarm knowledge sidecar JSON",
+      "argv": ["python3", "finance_agent/swarm_knowledge.py", "--print-json"],
+      "slot_subdir": "slot_3",
+      "allow_extra_argv": false,
+      "env": {}
+    },
+    {
+      "id": "4",
+      "name": "ann_phased_optimize_train",
+      "description": "ann-text-project phased train (requires clone + .venv + agentic_ann). Set SWARM_REPO_ROOT to that repo.",
+      "argv": ["python3", "-m", "agentic_ann.workflow.phased_optimize_train"],
+      "slot_subdir": "slot_4",
+      "allow_extra_argv": true,
+      "require_env": ["ANN_ARTIFACT_ROOT"],
+      "env": {}
+    },
+    {
+      "id": "5",
+      "name": "nautilus_spot_btc_feed_once",
+      "description": "Nautilus Bybit HTTP sink one-shot → btc_specialist/data (lab .venv)",
+      "argv": ["bash", "scripts/swarm/run_nautilus_feed_once.sh"],
+      "slot_subdir": "slot_5",
+      "allow_extra_argv": false,
+      "env": {}
+    },
+    {
+      "id": "6",
+      "name": "nautilus_protocol_fusion_sync",
+      "description": "Merge nautilus_strategy_signal + btc_prediction_output (+ preserved protocol tick) → swarm_nautilus_protocol_sidecar.json",
+      "argv": ["python3", "prediction_agent/nautilus_protocol_fusion.py", "sync"],
+      "slot_subdir": "slot_6",
+      "allow_extra_argv": false,
+      "env": {}
+    }
+  ]
+}

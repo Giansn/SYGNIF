@@ -1,9 +1,22 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "sygnif"
 version = "0.0.0"
 description = "Freqtrade Sygnif strategy, services, and tests"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
+dependencies = [
+    "rich>=13.9.0",
+]
+
+[project.scripts]
+sygnif = "sygnif_cli:main"
+
+[tool.setuptools]
+py-modules = ["sygnif_cli"]
 
 [tool.ruff]
 target-version = "py312"
@@ -48,6 +61,9 @@ per-file-ignores = { "tests/conftest.py" = ["E402"] }
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+markers = [
+    "integration: slow or network; run with pytest -m integration",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]

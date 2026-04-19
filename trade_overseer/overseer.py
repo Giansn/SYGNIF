@@ -25,6 +25,7 @@ import ft_client
 import llm_client
 import orderbook_snapshot
 import plays_store
+import swarm_snapshot
 from event_log import EventLog
 
 logging.basicConfig(
@@ -209,6 +210,10 @@ def build_prompt(trades: list[dict], events: list[dict]) -> str:
     briefing = _fetch_briefing(symbols)
 
     lines = []
+    swarm_blk = swarm_snapshot.swarm_prompt_block()
+    if swarm_blk:
+        lines.append(swarm_blk)
+        lines.append("")
     if briefing:
         lines.append(briefing)
         lines.append("")
@@ -260,6 +265,9 @@ def build_prompt(trades: list[dict], events: list[dict]) -> str:
 def build_rules_summary(trades: list[dict], events: list[dict]) -> str:
     """Generate a simple rules-based summary without LLM."""
     lines = [f"*Overseer* | {datetime.now(timezone.utc).strftime('%H:%M UTC')}"]
+    swarm_blk = swarm_snapshot.swarm_prompt_block()
+    if swarm_blk:
+        lines.append(swarm_blk)
 
     if not trades:
         lines.append("No open trades.")

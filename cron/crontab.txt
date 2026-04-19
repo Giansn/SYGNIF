@@ -21,3 +21,12 @@
 
 # Finance-agent BTC context (existing)
 15 3 * * * /home/ubuntu/SYGNIF/scripts/cron_finance_agent_btc_context.sh
+
+# NeuroLinked persistent brain: optional POST /api/brain/save + tar brain_state + BTC ML JSON (15m UTC)
+*/15 * * * * /home/ubuntu/SYGNIF/scripts/cron_wrap_tg.sh "NL brain+BTC ML backup" /home/ubuntu/.local/share/sygnif-agent/brain_backup.log /bin/bash /home/ubuntu/SYGNIF/scripts/sygnif_neurolinked_brain_backup.sh
+
+# BTC prediction learning: pull_btc_context → btc_predict_runner → horizon check (hourly :12; flock with btc-predict-runner.timer)
+12 * * * * /home/ubuntu/SYGNIF/scripts/cron_wrap_tg.sh "BTC ML learn" /home/ubuntu/.local/share/sygnif-agent/btc_ml_cron.log /bin/bash /home/ubuntu/SYGNIF/scripts/cron_btc_prediction_learning.sh
+
+# Horizon discipline snapshot — daily 05:18 UTC (run ``check`` after snapshots exist)
+18 5 * * * /home/ubuntu/SYGNIF/scripts/cron_wrap_tg.sh "prediction horizon save" /home/ubuntu/.local/share/sygnif-agent/prediction_horizon.log /usr/bin/python3 /home/ubuntu/SYGNIF/scripts/prediction_horizon_check.py save --symbol BTC

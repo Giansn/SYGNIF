@@ -12,6 +12,10 @@ Der **Sygnif Agent** läuft über **Cursor Cloud Agent** + den **Worker** auf di
 Health Worker: `http://127.0.0.1:8093/healthz`  
 Logs: `~/.local/share/cursor-agent/worker.log`
 
+**Hivemind / Truthcoin (Worker-Umgebung):** `cursor-agent-worker.service` lädt nach `.env` zusätzlich **`swarm_operator.env`** — dieselben Variablen wie Swarm-Predict-Loop (`SYGNIF_SWARM_TRUTHCOIN_DC`, `SYGNIF_TRUTHCOIN_DC_*`, …), damit Cloud-Agent-Aufgaben im Repo dieselbe Operator-Konfiguration sehen.
+
+**MCP (Cursor IDE / Agent mit Repo):** Projekt **`/.cursor/mcp.json`** enthält u. a. **`neurolinked`** → `third_party/neurolinked/mcp_server.py` mit `NEUROLINKED_BRAIN_URL=http://127.0.0.1:8889` (passt zu `sygnif-neurolinked`). Nach Änderung MCP in Cursor neu laden. Remote-SSH: Brain muss auf der Instanz laufen (`systemctl status sygnif-neurolinked`).
+
 ## Dauer-Feintuning (Datenpfad vs. Code)
 
 - **Host-Timer** `sygnif-btc01-finetune.timer` (siehe `INSTANCE_SETUP.md`): schreibt regelmäßig Report + Monitor-Ergebnisse und optional Journal-Zeilen — **ohne** Cursor-API-Kosten, rein read-only auf Trades/JSON.

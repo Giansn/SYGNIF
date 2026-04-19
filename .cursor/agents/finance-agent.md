@@ -132,6 +132,7 @@ Sygnif’s **only** Telegram surface is **`finance_agent/bot.py`** (finance-agen
 | Full TA + strategy signals | `/ta <TICKER>` | Aligns with Sygnif TA stack |
 | BTC-only TA (deterministic) | `/btc` | Same as `/ta BTC` + manifest hint + optional **NewHedge** + **Crypto Market Data** daily block (`crypto_market_data.py`, CC BY 4.0); evidence log `docs/correlation_research_evidence.md` |
 | Pipe briefing (HTTP parity) | `/finance-agent briefing` | HTTP body = `GET /briefing` on `:8091` (includes **`CRYPTO_MD`…** lines); **Telegram** adds optional NewHedge + readable **Crypto Market Data** block + snapshot hint; see `docs/correlation_research_evidence.md` for correlation proof refs |
+| Swarm **btc_future** (optional) | `SYGNIF_BRIEFING_INCLUDE_SWARM=1` + `SYGNIF_SWARM_BTC_FUTURE=1` | Adds swarm vote **`bf`**: **Bybit API-key scope** (demo `BYBIT_DEMO_*`): signed **`position/list`** via `trade_overseer/bybit_linear_hedge.py`. `finance_agent/swarm_knowledge.compute_swarm()` fuses reads only (no `POST /v5/order/*`). **Venue writes:** predict loops use `bybit_linear_hedge` / `swarm_btc_future_tpsl_apply` with `SYGNIF_PREDICT_PROTOCOL_LOOP_ACK`; **optional** direct market `POST /v5/order/create` from **`swarm_knowledge.post_linear_market_order`** / CLI `--market-order` with **`SYGNIF_SWARM_KNOWLEDGE_ORDER_ACK=YES`** (never auto-called from `compute_swarm`). Same **`bf`** vote is summed into **`prediction_agent/nautilus_protocol_fusion.py`** → `swarm_nautilus_protocol_sidecar.json` when fusion sync runs (`NAUTILUS_SWARM_HOOK` / `nautilus_protocol_fusion sync`); briefing **`NAU_FUSE|…|bf=…`** when `SYGNIF_BRIEFING_INCLUDE_NAUTILUS_FUSION=1`. |
 | README daily on-chain dump | `/finance-agent crypto-daily` | `crypto_market_data_daily_analysis.md` (all README JSONs summarized); refresh `run_crypto_market_data_daily.py` or `pull_btc_context.py` |
 | Active entry signals | `/signals` | Scans top universe |
 | Signals + news + ranking | `/scan` | Heavier |
@@ -141,6 +142,7 @@ Sygnif’s **only** Telegram surface is **`finance_agent/bot.py`** (finance-agen
 | Headlines | `/news` | RSS |
 | Open trades + context | `/overview` | Needs Trade Overseer |
 | Open + closed aggregates | `/finance-agent trades` or `check` | Overseer `/trades` (open list + `/profit` totals; not full closed log) |
+| Swarm weak-points (ops) | `/sygnif swarm-weak` or `/finance-agent swarm-weak` | **`swarm_weak_points_solution.build_swarm_weak_points_bundle`**: live `compute_swarm()` + optional `swarm_knowledge_output.json` + Bybit demo `build_bybit_closed_pnl_report()` + tail of `swarm_predict_protocol_dataset.jsonl` + `swarm_bybit_ft_state.json`; CLI `scripts/swarm_weak_points_report.py`. Same bundle is merged hourly into **`swarm_auto_improvement_state.json`** / history when **`SYGNIF_SWARM_IMPROVEMENT_WEAK_POINTS=1`** (default). Optional **`swarm_improvement_runtime`** hints file for the predict launcher. Read-only diagnosis + env knob hints. |
 | Network submodule | `/finance-agent network` | [Giansn/Network](https://github.com/Giansn/Network) paths + `network docs` |
 | HOLD/TRAIL/CUT | `/evaluate` | Needs overseer + AI |
 

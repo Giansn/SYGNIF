@@ -54,6 +54,7 @@ from cursor_cloud_completion import cursor_cloud_completion
 from sentiment_constants import (
     FINANCE_AGENT_SENTIMENT_INSTRUCTIONS,
     sentiment_tag_score_abs,
+    tag_bypasses_premium_reserve,
 )
 import btc_trend_regime
 
@@ -645,6 +646,7 @@ class _SygnifStrategyDefault(IStrategy):
     # Premium tag reservation: non-premium entries are capped at
     # premium_nonreserved_max open trades. Remaining slots (max_open_trades -
     # premium_nonreserved_max) are reserved for tags in PREMIUM_TAGS only.
+    # Also see ``tag_bypasses_premium_reserve`` (ORB, sygnif_swing, |sentiment|>=4).
     PREMIUM_TAGS = frozenset(
         {"sygnif_s-5", "sygnif_swing_short", "claude_s-5", "claude_swing_short"}
     )
@@ -1455,6 +1457,123 @@ class _SygnifStrategyDefault(IStrategy):
         return min(tier_lev, max_leverage)
 
     # -------------------------------------------------------------------------
+    # Optional trailing TP/SL (Pine-style trail + fixed entry SL + post-TP lock;
+    # trailing take-profit via pullback from extreme — Toobit-style callback).
+    # Enable: SYGNIF_TRAILING_TPSL=1 — see .cursor/rules/trailing-tpsl.mdc
+    # -------------------------------------------------------------------------
+    def _sygnif_trailing_tpsl_enabled(self) -> bool:
+        v = os.environ.get("SYGNIF_TRAILING_TPSL", "").strip().lower()
+        return v in ("1", "true", "yes", "on")
+
+    def _sygnif_trailing_tpsl_float(self, key: str, default: float) -> float:
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+    def _sygnif_trailing_tpsl_params(self) -> dict:
+        return {
+            "trail_pct": max(1e-9, self._sygnif_trailing_tpsl_float("SYGNIF_TS_TRAIL_PCT", 0.07)),
+            "fixed_sl_pct": max(1e-9, self._sygnif_trailing_tpsl_float("SYGNIF_TS_FIXED_SL_PCT", 0.02)),
+            "tp_hit_pct": max(1e-9, self._sygnif_trailing_tpsl_float("SYGNIF_TS_TP_HIT_PCT", 0.02)),
+            "post_tp_lock_pct": max(0.0, self._sygnif_trailing_tpsl_float("SYGNIF_TS_POST_TP_LOCK_PCT", 0.01)),
+            "tp_callback_pct": max(1e-9, self._sygnif_trailing_tpsl_float("SYGNIF_TS_TP_CALLBACK_PCT", 0.01)),
+        }
+
+    def _stoploss_trailing_tpsl_combined(
+        self,
+        trade: Trade,
+        current_rate: float,
+        is_futures: bool,
+        leverage: float,
+    ) -> Optional[tuple[float, str]]:
+        """Return (stoploss, tier) for combined trail + fixed SL (+ post-TP lock), or None."""
+        if not self._sygnif_trailing_tpsl_enabled():
+            return None
+        enter_tag = trade.enter_tag or ""
+        if enter_tag in self._swing_tags:
+            return None
+
+        entry = float(trade.open_rate)
+        if entry <= 0 or current_rate <= 0:
+            return None
+
+        p = self._sygnif_trailing_tpsl_params()
+        sl_doom = self.stop_threshold_doom_futures if is_futures else self.stop_threshold_doom_spot
+        doom_long = -(sl_doom / leverage) if is_futures else -sl_doom
+        doom_short = (sl_doom / leverage) if is_futures else sl_doom
+
+        is_short = bool(getattr(trade, "is_short", False))
+        if is_short:
+            mr = getattr(trade, "min_rate", None)
+            trough = float(mr) if mr is not None and float(mr) > 0 else current_rate
+            trough = min(trough, current_rate)
+            post_tp = trough <= entry * (1.0 - p["tp_hit_pct"])
+            sl_trail = trough * (1.0 + p["trail_pct"])
+            sl_fixed = entry * (1.0 + p["fixed_sl_pct"])
+            if post_tp:
+                sl_lock = entry * (1.0 - p["post_tp_lock_pct"])
+                effective_sl = min(sl_trail, sl_fixed, sl_lock)
+            else:
+                effective_sl = min(sl_trail, sl_fixed)
+            r = (effective_sl / current_rate) - 1.0
+            if r <= 0:
+                r = 1e-8
+            r = min(r, doom_short)
+            return (r, "tsl_combined_short")
+
+        # long
+        xr = getattr(trade, "max_rate", None)
+        peak = float(xr) if xr is not None and float(xr) > 0 else entry
+        peak = max(peak, current_rate, entry)
+        post_tp = peak >= entry * (1.0 + p["tp_hit_pct"])
+        sl_trail = peak * (1.0 - p["trail_pct"])
+        sl_fixed = entry * (1.0 - p["fixed_sl_pct"])
+        if post_tp:
+            sl_lock = entry * (1.0 + p["post_tp_lock_pct"])
+            effective_sl = max(sl_trail, sl_fixed, sl_lock)
+        else:
+            effective_sl = max(sl_trail, sl_fixed)
+        r = (effective_sl / current_rate) - 1.0
+        if r >= 0:
+            r = -1e-8
+        r = max(r, doom_long)
+        return (r, "tsl_combined_long")
+
+    def _sygnif_exit_trailing_take_profit(self, trade: Trade, current_rate: float) -> Optional[str]:
+        """Exit when price pulls back tp_callback_pct from extreme after tp_hit_pct move (long/short)."""
+        if not self._sygnif_trailing_tpsl_enabled():
+            return None
+        if (trade.enter_tag or "") in self._swing_tags:
+            return None
+        entry = float(trade.open_rate)
+        if entry <= 0 or current_rate <= 0:
+            return None
+        p = self._sygnif_trailing_tpsl_params()
+        cb = p["tp_callback_pct"]
+        hit = p["tp_hit_pct"]
+        if bool(getattr(trade, "is_short", False)):
+            mr = getattr(trade, "min_rate", None)
+            trough = float(mr) if mr is not None and float(mr) > 0 else current_rate
+            trough = min(trough, current_rate)
+            if trough > entry * (1.0 - hit):
+                return None
+            if current_rate >= trough * (1.0 + cb):
+                return "exit_trailing_take_profit"
+            return None
+        peak = getattr(trade, "max_rate", None)
+        peak_f = float(peak) if peak is not None and float(peak) > 0 else current_rate
+        peak_f = max(peak_f, current_rate)
+        if peak_f < entry * (1.0 + hit):
+            return None
+        if current_rate <= peak_f * (1.0 - cb):
+            return "exit_trailing_take_profit"
+        return None
+
+    # -------------------------------------------------------------------------
     # Custom stoploss — leverage-aware, placed on exchange
     # -------------------------------------------------------------------------
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
@@ -1482,6 +1601,12 @@ class _SygnifStrategyDefault(IStrategy):
                 pass
             self._emit_sl_tier(trade, pair, "sf_fallback", -0.03, current_profit)
             return -0.03
+
+        tsl = self._stoploss_trailing_tpsl_combined(trade, current_rate, is_futures, leverage)
+        if tsl is not None:
+            sl_val, tier = tsl
+            self._emit_sl_tier(trade, pair, tier, sl_val, current_profit)
+            return sl_val
 
         # --- Ratcheting trail: tighten SL as profit grows ---
         # +1% and +2% tiers removed (NT Lesson 1): they clipped winners at +0.70% avg
@@ -1979,7 +2104,7 @@ class _SygnifStrategyDefault(IStrategy):
         # Non-premium tags are hard-capped at `premium_nonreserved_max` open trades,
         # leaving the top slots available only for high-edge tags (e.g. sygnif_s-5).
         # Premium tags bypass this cap and may fill up to max_open_trades.
-        if tag not in self.PREMIUM_TAGS:
+        if not tag_bypasses_premium_reserve(tag, self.PREMIUM_TAGS):
             total_open = len(open_trades)
             if total_open >= self.premium_nonreserved_max:
                 logger.info(
@@ -1990,7 +2115,7 @@ class _SygnifStrategyDefault(IStrategy):
 
         # NT Lesson 5: global volume regime gate (premium tags bypass)
         if (self.config.get("trading_mode", "") == "futures"
-                and tag not in self.PREMIUM_TAGS
+                and not tag_bypasses_premium_reserve(tag, self.PREMIUM_TAGS)
                 and tag not in getattr(self, "_tags_bypass_volume_regime", frozenset())
                 and self._active_volume_pairs < self.MIN_ACTIVE_VOLUME_PAIRS):
             logger.info(
@@ -2114,6 +2239,10 @@ class _SygnifStrategyDefault(IStrategy):
             ):
                 return "exit_btc_risk_off"
 
+        tpx = self._sygnif_exit_trailing_take_profit(trade, current_rate)
+        if tpx:
+            return tpx
+
         # ==================================================================
         # FAILURE SWING EXITS (tag-based routing)
         # ==================================================================
@@ -2199,6 +2328,10 @@ class _SygnifStrategyDefault(IStrategy):
     # -------------------------------------------------------------------------
     def _custom_exit_short(self, last, prev, current_profit, current_rate,
                            trade, filled_entries, leverage):
+        tpx = self._sygnif_exit_trailing_take_profit(trade, current_rate)
+        if tpx:
+            return tpx
+
         enter_tag = trade.enter_tag or ""
 
         # --- Failure Swing short exits ---

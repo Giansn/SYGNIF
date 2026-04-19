@@ -1,0 +1,4 @@
+# Optional: Fernet sealing for swarm artifacts (SYGNIF_SWARM_FERNET_KEY)
+cryptography>=42.0.0
+# Optional: vectorized swarm fusion (SYGNIF_SWARM_PYTORCH=1) — CPU wheel ok
+# torch>=2.0

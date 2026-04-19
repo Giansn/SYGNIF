@@ -1,15 +1,17 @@
 {
   "version": 1,
-  "updated": "2026-04-10T23:31:03Z",
-  "source": "cursor_sygnif_agent",
-  "reason": "Enable session ORB entries live (BTC/ETH 5m): orb_entry_enabled=1; max_slots_orb=2, orb_range_minutes=30 at defaults within BOUNDS. Prior week-1 TA/sentiment overrides retained.",
+  "updated": "2026-04-14T12:00:00Z",
+  "source": "strat_dev_protocol",
+  "reason": "Bounded finetune: slightly stricter strong_ta gate (67→68), softer SL ratios 0.60→0.58 spot/futures to trim tail losses; ORB + sentiment band unchanged. Aligns with reward_risk swarm TPSL profile — hot-reload, no strategy code edit.",
   "overrides": {
     "claude_long_score_low": 42,
     "claude_long_score_high": 60,
-    "strong_ta_min_score": 67,
+    "strong_ta_min_score": 68,
     "sentiment_threshold_buy": 56.0,
     "vol_strong_mult": 1.25,
     "claude_short_score_low": 32,
+    "soft_sl_ratio_spot": 0.58,
+    "soft_sl_ratio_futures": 0.58,
     "orb_entry_enabled": 1,
     "max_slots_orb": 2,
     "orb_range_minutes": 30

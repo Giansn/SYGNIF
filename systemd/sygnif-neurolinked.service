@@ -1,0 +1,28 @@
+[Unit]
+Description=NeuroLinked neuromorphic brain dashboard (Sygnif third_party)
+Documentation=file:///home/ubuntu/SYGNIF/INSTANCE_SETUP.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF/third_party/neurolinked
+# Secrets first, then repo .env (same pattern as other Sygnif host services).
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/neurolinked.service.env
+# Signed Bybit reads in NeuroLinked: mainnet data stream when ``BYBIT_API_*`` set (see neurolinked.service.env.example).
+Environment=SYGNIF_NEUROLINKED_BYBIT_SIGNED_READ=mainnet
+# Port 8889 — same as default futures dashboard; do not run sygnif-dashboard-futures concurrently.
+# Override neuron count: sudo systemctl edit sygnif-neurolinked
+#   [Service] ExecStart= ... run.py --host 127.0.0.1 --port 8889 --neurons 50000
+ExecStart=/home/ubuntu/SYGNIF/.venv/bin/python3 /home/ubuntu/SYGNIF/third_party/neurolinked/run.py --host 0.0.0.0 --port 8889
+Restart=on-failure
+RestartSec=5
+# Uvicorn can otherwise sit on "Waiting for background tasks" for a long time on WS dashboards.
+TimeoutStopSec=25
+
+[Install]
+WantedBy=multi-user.target

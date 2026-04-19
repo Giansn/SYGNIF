@@ -65,6 +65,13 @@
         "-y",
         "@nic0xflamel/defillama-mcp-server"
       ]
+    },
+    "neurolinked": {
+      "command": "python3",
+      "args": ["third_party/neurolinked/mcp_server.py"],
+      "env": {
+        "NEUROLINKED_BRAIN_URL": "http://127.0.0.1:8889"
+      }
     }
   }
 }

@@ -1,0 +1,22 @@
+Archived bundle: Freqtrade BTC spot + BTC 0.1 + trade-overseer (former profile freqtrade-btc-dock).
+
+Restore full dock:
+  cd ~/SYGNIF
+  docker compose --profile archived-freqtrade-btc-dock up -d --build
+
+Services started: freqtrade-btc-spot, freqtrade-btc-0-1, trade-overseer
+(requires finance-agent + notification-handler healthy; same as before.)
+
+BTC 0.1 only (without full dock profile):
+  docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1
+
+Overseer with legacy main traders instead:
+  docker compose --profile archived-main-traders up -d trade-overseer
+  Set FT_SPOT_URL / FT_FUTURES_URL to http://freqtrade:8080/api/v1 and http://freqtrade-futures:8081/api/v1
+
+If your .env still has:
+  COMPOSE_PROFILES=...,freqtrade-btc-dock,...
+change to:
+  COMPOSE_PROFILES=...,archived-freqtrade-btc-dock,...
+
+See EXTRACT.md in this folder for file pointers.

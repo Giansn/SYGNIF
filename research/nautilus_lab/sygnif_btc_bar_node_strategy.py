@@ -1,6 +1,11 @@
 """
 Sygnif **live bar** template for Nautilus ``TradingNode`` (Bybit demo).
 
+**Order path:** entries go through Nautilus only — ``submit_order`` on this strategy →
+``BybitLiveExecClient`` (demo/testnet). Sygnif BTC demo **does not** use Freqtrade
+``/forceenter`` for this stack; see ``scripts/btc_analysis_forceenter.py`` for an optional
+separate Freqtrade-only helper.
+
 Subscribes to exchange OHLCV bars and logs OHLCV. Optional **demo execution**: with ``enable_exec``, subscribes to quotes and places up to
 ``max_entry_orders`` **post-only** limit **buy** orders priced ``limit_offset_bps``
 below the last mid. Size is either fixed ``order_qty_str`` or **adaptive** from free
@@ -66,6 +71,8 @@ class SygnifBtcBarNodeConfig(StrategyConfig, frozen=True):
     """Optional floor on base qty (string for ``Quantity.from_str``)."""
     adaptive_max_qty_str: str | None = None
     """Optional cap on base qty (string for ``Quantity.from_str``)."""
+    adaptive_max_notional_usdt: float | None = None
+    """If set (>0), clamp adaptive quote notional to this USDT cap per order (before qty rounding)."""
     limit_offset_bps: int = 100
     """Buy limit = mid * (1 - bps/10000), post-only away from touch."""
     max_entry_orders: int = 1
@@ -127,8 +134,14 @@ class SygnifBtcBarNodeStrategy(Strategy):
         raw = os.environ.get("NAUTILUS_PREDICTION_AGENT_PATH", "").strip()
         if raw and os.path.isdir(raw) and raw not in sys.path:
             sys.path.insert(0, raw)
-        elif os.path.isdir("/lab/prediction_agent") and "/lab/prediction_agent" not in sys.path:
+            return
+        if os.path.isdir("/lab/prediction_agent") and "/lab/prediction_agent" not in sys.path:
             sys.path.insert(0, "/lab/prediction_agent")
+            return
+        here = Path(__file__).resolve().parent
+        repo_pa = (here.parent.parent / "prediction_agent").resolve()
+        if repo_pa.is_dir() and str(repo_pa) not in sys.path:
+            sys.path.insert(0, str(repo_pa))
 
     @staticmethod
     def _bar_px(x) -> float:
@@ -141,7 +154,7 @@ class SygnifBtcBarNodeStrategy(Strategy):
         ins_id = self._bar_type.instrument_id
         self._instrument = self.cache.instrument(ins_id)
         if self._instrument is None:
-            self.log.error("No instrument in cache for %s", ins_id)
+            self.log.error(f"No instrument in cache for {ins_id}")
             self.stop()
             return
         self._price_precision = self._instrument.price_precision
@@ -153,7 +166,7 @@ class SygnifBtcBarNodeStrategy(Strategy):
             try:
                 import btc_predict_live as bpl  # type: ignore[import-not-found]
             except ImportError as exc:
-                self.log.error("Live predict: cannot import btc_predict_live (%s)", exc)
+                self.log.error(f"Live predict: cannot import btc_predict_live ({exc!s})")
             else:
                 self._live_executor = ThreadPoolExecutor(
                     max_workers=1,
@@ -172,16 +185,15 @@ class SygnifBtcBarNodeStrategy(Strategy):
                         xgb_estimators=self.config.live_predict_xgb_n_estimators,
                         dir_C=self.config.live_predict_dir_C,
                         write_json_path=self.config.live_predict_output_json,
+                        linear_symbol=self.config.live_predict_symbol,
                     )
                     self._live_out = out
                     self.log.info(
-                        "Live predict primed rows=%s allow_buy=%s enhanced=%s",
-                        len(self._live_pd_df),
-                        allow,
-                        enhanced,
+                        f"Live predict primed rows={len(self._live_pd_df)} "
+                        f"allow_buy={allow} enhanced={enhanced}"
                     )
                 except Exception as exc:
-                    self.log.error("Live predict seed/train failed: %s", exc)
+                    self.log.error(f"Live predict seed/train failed: {exc!s}")
                     self._live_out = None
 
     def on_stop(self) -> None:
@@ -215,33 +227,21 @@ class SygnifBtcBarNodeStrategy(Strategy):
             parts.append(f"position_id={position_id}")
         print(" ".join(parts), flush=True)
         self.log.info(
-            "Order filled client_order_id=%s side=%s last_qty=%s last_px=%s trade_id=%s position_id=%s",
-            event.client_order_id,
-            event.order_side,
-            event.last_qty,
-            event.last_px,
-            trade_id,
-            position_id,
+            f"Order filled client_order_id={event.client_order_id} side={event.order_side} "
+            f"last_qty={event.last_qty} last_px={event.last_px} trade_id={trade_id} "
+            f"position_id={position_id}"
         )
 
     def on_order_rejected(self, event: OrderRejected) -> None:
         self.log.warning(
-            "Order rejected client_order_id=%s reason=%s",
-            event.client_order_id,
-            event.reason,
+            f"Order rejected client_order_id={event.client_order_id} reason={event.reason}"
         )
 
     def on_bar(self, bar: Bar) -> None:
         self._seen += 1
         self.log.info(
-            "Bar #%s ts=%s O=%s H=%s L=%s C=%s V=%s",
-            self._seen,
-            bar.ts_event,
-            bar.open,
-            bar.high,
-            bar.low,
-            bar.close,
-            bar.volume,
+            f"Bar #{self._seen} ts={bar.ts_event} O={bar.open} H={bar.high} L={bar.low} "
+            f"C={bar.close} V={bar.volume}"
         )
         # Order: trade on model state from **previous** bar; then append this bar and retrain async.
         self._maybe_submit_demo_entry()
@@ -296,10 +296,11 @@ class SygnifBtcBarNodeStrategy(Strategy):
                     xgb_estimators=xgb_n,
                     dir_C=dir_c,
                     write_json_path=out_path,
+                    linear_symbol=self.config.live_predict_symbol,
                 )
                 self._live_out = out
             except Exception as exc:
-                self.log.error("Live predict retrain failed: %s", exc)
+                self.log.error(f"Live predict retrain failed: {exc!s}")
 
         self._live_executor.submit(_job)
 
@@ -328,7 +329,7 @@ class SygnifBtcBarNodeStrategy(Strategy):
             try:
                 qty = Quantity.from_str(qty_s)
             except ValueError:
-                self.log.error("Invalid order_qty_str %r", qty_s)
+                self.log.error(f"Invalid order_qty_str {qty_s!r}")
                 return
         mid_f = float(self._last_mid)
         bps = self.config.limit_offset_bps
@@ -345,12 +346,8 @@ class SygnifBtcBarNodeStrategy(Strategy):
         self.submit_order(order)
         self._entry_submits += 1
         self.log.info(
-            "Submitted post-only BUY #%s qty=%s price=%s (mid≈%s, offset %s bps)",
-            self._entry_submits,
-            qty,
-            price,
-            self._last_mid,
-            bps,
+            f"Submitted post-only BUY #{self._entry_submits} qty={qty} price={price} "
+            f"(mid≈{self._last_mid}, offset {bps} bps)"
         )
 
     def _sidecar_bias_and_stake_mult(self) -> tuple[str | None, float]:
@@ -382,12 +379,12 @@ class SygnifBtcBarNodeStrategy(Strategy):
             return True
         path = Path(self.config.prediction_json_path)
         if not path.is_file():
-            self.log.warning("Prediction gate: missing %s — skip BUY", path)
+            self.log.warning(f"Prediction gate: missing {path} — skip BUY")
             return False
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            self.log.warning("Prediction gate: bad JSON (%s) — skip BUY", exc)
+            self.log.warning(f"Prediction gate: bad JSON ({exc!s}) — skip BUY")
             return False
         if not isinstance(raw, dict):
             return False
@@ -402,9 +399,7 @@ class SygnifBtcBarNodeStrategy(Strategy):
                 age_m = (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
                 if age_m > float(max_age):
                     self.log.warning(
-                        "Prediction gate: stale output (%.0f min > %s) — skip BUY",
-                        age_m,
-                        max_age,
+                        f"Prediction gate: stale output ({age_m:.0f} min > {max_age}) — skip BUY"
                     )
                     return False
             except (TypeError, ValueError):
@@ -429,6 +424,24 @@ class SygnifBtcBarNodeStrategy(Strategy):
             return False
         return self._predictions_dict_allows_buy(preds, prefix="Live predict")
 
+    def _logreg_up_allows_buy(
+        self,
+        preds: dict,
+        *,
+        min_c: float,
+        prefix: str = "Prediction gate",
+    ) -> bool:
+        block = preds.get("direction_logistic")
+        if not isinstance(block, dict):
+            self.log.warning(f"{prefix}: no direction_logistic — skip BUY")
+            return False
+        label = str(block.get("label", "")).upper()
+        conf = float(block.get("confidence") or 0.0)
+        ok = label == "UP" and conf >= min_c
+        if not ok:
+            self.log.info(f"{prefix}: LogReg {label} conf={conf:.1f} (min {min_c:.1f}) — skip BUY")
+        return ok
+
     def _predictions_dict_allows_buy(
         self,
         preds: dict,
@@ -437,36 +450,30 @@ class SygnifBtcBarNodeStrategy(Strategy):
     ) -> bool:
         sig = (self.config.prediction_signal or "consensus_nautilus_enhanced").strip().lower()
         if sig == "direction_logistic":
-            block = preds.get("direction_logistic")
-            if not isinstance(block, dict):
-                self.log.warning("%s: no direction_logistic — skip BUY", prefix)
-                return False
-            label = str(block.get("label", "")).upper()
-            conf = float(block.get("confidence") or 0.0)
             min_c = float(self.config.prediction_min_logreg_confidence)
-            ok = label == "UP" and conf >= min_c
-            if not ok:
-                self.log.info(
-                    "%s: LogReg %s conf=%.1f (min %.1f) — skip BUY",
-                    prefix,
-                    label,
-                    conf,
-                    min_c,
-                )
-            return ok
+            return self._logreg_up_allows_buy(preds, min_c=min_c, prefix=prefix)
 
         key = "consensus_nautilus_enhanced" if sig == "consensus_nautilus_enhanced" else "consensus"
         val = preds.get(key)
         if val is None and key == "consensus_nautilus_enhanced":
             val = preds.get("consensus")
         if not isinstance(val, str):
-            self.log.warning("%s: missing %r — skip BUY", prefix, key)
+            self.log.warning(f"{prefix}: missing {key!r} — skip BUY")
             return False
         v = val.upper().strip()
         if v in ("BULLISH", "STRONG_BULLISH"):
-            self.log.info("%s: %s=%s — allow BUY", prefix, key, v)
+            self.log.info(f"{prefix}: {key}={v} — allow BUY")
             return True
-        self.log.info("%s: %s=%s — skip BUY", prefix, key, v)
+        if v == "MIXED":
+            # Align with ``btc_analysis_order_signal.decide_forceenter_intent``: MIXED + confident UP.
+            floor = float(self.config.prediction_min_logreg_confidence)
+            if floor <= 0.0:
+                floor = 65.0
+            if self._logreg_up_allows_buy(preds, min_c=floor, prefix=f"{prefix} (MIXED→LogReg)"):
+                self.log.info(f"{prefix}: {key}=MIXED, LogReg UP ≥ {floor:.1f} — allow BUY")
+                return True
+            return False
+        self.log.info(f"{prefix}: {key}={v} — skip BUY")
         return False
 
     def _adaptive_entry_qty(self, *, stake_mult: float = 1.0) -> Quantity | None:
@@ -482,13 +489,16 @@ class SygnifBtcBarNodeStrategy(Strategy):
         quote = self._instrument.quote_currency
         free_m = acc.balance_free(quote)
         if free_m is None:
-            self.log.warning("No free %s balance yet; skip adaptive qty", quote)
+            self.log.warning(f"No free {quote} balance yet; skip adaptive qty")
             return None
         free_f = float(free_m)
         if free_f <= 0.0:
-            self.log.warning("Free %s is zero; skip adaptive qty", quote)
+            self.log.warning(f"Free {quote} is zero; skip adaptive qty")
             return None
         notional = free_f * min(frac, 1.0)
+        cap_n = self.config.adaptive_max_notional_usdt
+        if cap_n is not None and float(cap_n) > 0.0:
+            notional = min(notional, float(cap_n))
         mid = float(self._last_mid)
         if mid <= 0.0:
             return None
@@ -504,14 +514,14 @@ class SygnifBtcBarNodeStrategy(Strategy):
             try:
                 min_q = max(min_q, float(Quantity.from_str(cfg_min)))
             except ValueError:
-                self.log.error("Invalid adaptive_min_qty_str %r", cfg_min)
+                self.log.error(f"Invalid adaptive_min_qty_str {cfg_min!r}")
                 return None
         cfg_max = (self.config.adaptive_max_qty_str or "").strip()
         if cfg_max:
             try:
                 max_q = min(max_q, float(Quantity.from_str(cfg_max)))
             except ValueError:
-                self.log.error("Invalid adaptive_max_qty_str %r", cfg_max)
+                self.log.error(f"Invalid adaptive_max_qty_str {cfg_max!r}")
                 return None
         raw_qty = max(min_q, min(raw_qty, max_q))
         step = float(self._instrument.size_increment)
@@ -519,21 +529,17 @@ class SygnifBtcBarNodeStrategy(Strategy):
             raw_qty = math.floor(raw_qty / step) * step
         if raw_qty < min_q - 1e-12:
             self.log.warning(
-                "Adaptive qty below min after rounding (raw=%s min=%s step=%s)",
-                raw_qty,
-                min_q,
-                step,
+                f"Adaptive qty below min after rounding (raw={raw_qty} min={min_q} step={step})"
             )
             return None
         if self._instrument.min_notional is not None:
             if raw_qty * mid < float(self._instrument.min_notional):
                 self.log.warning(
-                    "Order notional below instrument min_notional (%s); skip",
-                    self._instrument.min_notional,
+                    f"Order notional below instrument min_notional ({self._instrument.min_notional}); skip"
                 )
                 return None
         try:
             return Quantity(raw_qty, self._instrument.size_precision)
         except ValueError as e:
-            self.log.error("Adaptive Quantity build failed: %s", e)
+            self.log.error(f"Adaptive Quantity build failed: {e!s}")
             return None

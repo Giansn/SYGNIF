@@ -77,8 +77,9 @@ def decide_forceenter_intent(
     Return a **long** or **short** intent, or ``None`` if no trade should be opened from analysis alone.
 
     Rules (conservative):
-    - **Long:** prediction consensus **BULLISH** (or direction UP with confidence), and **not** R01 bearish stack.
-    - **Short:** only if ``allow_short`` and consensus **BEARISH** (or direction DOWN with confidence).
+    - **Long:** prediction consensus **BULLISH**, or **MIXED** with ``direction_logistic`` UP ≥ ``direction_min_confidence``,
+      and **not** R01 bearish stack.
+    - **Short:** only if ``allow_short`` and consensus **BEARISH**, or **MIXED** with confident DOWN from ``direction_logistic``.
     - If consensus missing, fall back to ``direction_logistic`` when confidence ≥ ``direction_min_confidence``.
     """
     if not isinstance(btc_prediction, dict):
@@ -91,23 +92,39 @@ def decide_forceenter_intent(
         cons = _direction_fallback(btc_prediction, direction_min_confidence) or ""
     cons = _normalize_consensus_label(cons)
 
+    resolved_mixed_via_dir = False
     if cons == "MIXED":
-        return None
+        fb = _direction_fallback(btc_prediction, direction_min_confidence)
+        if fb:
+            cons = fb
+            resolved_mixed_via_dir = True
+        else:
+            return None
 
     if cons == "BULLISH":
         if bear:
             return None
+        reason = (
+            "MIXED RF/XGB vs bars; direction_logistic long ≥ min confidence; R01 not active"
+            if resolved_mixed_via_dir
+            else "prediction consensus BULLISH; R01 bearish stack not active"
+        )
         return {
             "side": "long",
             "enter_tag": "btc_analysis_consensus",
-            "reason": "prediction consensus BULLISH; R01 bearish stack not active",
+            "reason": reason,
         }
     if cons == "BEARISH":
         if not allow_short:
             return None
+        reason = (
+            "MIXED RF/XGB vs bars; direction_logistic short ≥ min confidence (--allow-short)"
+            if resolved_mixed_via_dir
+            else "prediction consensus BEARISH (short; use --allow-short)"
+        )
         return {
             "side": "short",
             "enter_tag": "btc_analysis_consensus",
-            "reason": "prediction consensus BEARISH (short; use --allow-short)",
+            "reason": reason,
         }
     return None

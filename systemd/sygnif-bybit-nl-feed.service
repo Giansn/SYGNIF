@@ -1,0 +1,22 @@
+[Unit]
+Description=Bybit market data → NeuroLinked feed (funding, OI, L/S ratio, volume)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/swarm_operator.env
+# Mainnet public tickers + Swarm/Hivemind text layers for NeuroLinked (see scripts/bybit_nl_market_feed.py)
+Environment=SYGNIF_SWARM_BYBIT_MAINNET=1
+Environment=BYBIT_NL_INCLUDE_SWARM=1
+ExecStart=/home/ubuntu/SYGNIF/.venv/bin/python3 /home/ubuntu/SYGNIF/scripts/bybit_nl_market_feed.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+Archived: legacy Sygnif main-trader stack (spot freqtrade + freqtrade-futures).
+Restore: docker compose --profile archived-main-traders up -d freqtrade freqtrade-futures
+and set FT_SPOT_URL/FT_FUTURES_URL to http://freqtrade:8080/api/v1 and http://freqtrade-futures:8081/api/v1
+Copy *.sqlite back to user_data/ only if you need historical continuity on a new bot.

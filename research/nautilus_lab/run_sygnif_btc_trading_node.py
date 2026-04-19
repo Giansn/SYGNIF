@@ -28,6 +28,9 @@ Env:
 - ``NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL`` — ``consensus_nautilus_enhanced`` (default), ``consensus``, or ``direction_logistic``
 - ``NAUTILUS_SYGNIF_NODE_PREDICTION_MIN_LOGREG_CONF`` — min LogReg confidence 0–100 when signal is ``direction_logistic``
 - ``NAUTILUS_SYGNIF_NODE_PREDICTION_MAX_AGE_MIN`` — skip if ``generated_utc`` older than N minutes; ``0`` = off
+- ``NAUTILUS_SYGNIF_NODE_INITIAL_LEVERAGE`` / ``--initial-leverage`` — optional **pre-flight** Bybit v5
+  ``set-leverage`` (linear only) via ``trade_overseer/bybit_linear_hedge.py`` before the ``TradingNode`` runs;
+  **orders still go through Nautilus** (this only sizes margin on the venue).
 - **Live train + predict** (``btc_predict_live`` in-process): ``NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=1`` refits light
   RF/XGB/LogReg on rolling **5m** OHLCV after each bar (background thread); gates BUY from live consensus (sidecar
   still from JSON). Optional: ``NAUTILUS_SYGNIF_NODE_LIVE_DATA_DIR``, ``_LIVE_WINDOW``, ``_LIVE_MIN_OHLCV_ROWS``,
@@ -37,7 +40,7 @@ Env:
   Escape hatch: ``NAUTILUS_SYGNIF_NODE_RISK_BYPASS=1`` or ``--risk-bypass``.
   Optional: ``NAUTILUS_SYGNIF_NODE_RISK_MAX_SUBMIT_RATE`` (default ``30/00:00:01``),
   ``NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE`` (default ``100/00:00:01``),
-  ``NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT`` (per-order cap for ``--instrument``; NT may skip this on margin accounts until upstream implements it).
+  ``NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT`` (per-order cap for ``--instrument`` in ``LiveRiskEngine`` **and** adaptive sizing clamp in ``SygnifBtcBarNodeStrategy``; NT risk layer may still be incomplete on some margin accounts — sizing clamp is always applied when set).
 - Optional: ``NAUTILUS_DEMO_SMOKE_AUTO_EXIT_SEC`` — SIGALRM → clean shutdown (Linux)
 
 Examples (inside ``nautilus-research`` image, cwd ``/lab/workspace``)::
@@ -60,8 +63,40 @@ from decimal import InvalidOperation
 from pathlib import Path
 
 _LAB = Path(__file__).resolve().parent
+_REPO_ROOT = _LAB.parent.parent
 if str(_LAB) not in sys.path:
     sys.path.insert(0, str(_LAB))
+
+
+def _under_lab_layout() -> bool:
+    """True in legacy Docker layout with ``/lab`` mounts."""
+    return Path("/lab").is_dir()
+
+
+def _default_sidecar_json_path() -> str:
+    if _under_lab_layout():
+        return "/lab/btc_specialist_data/nautilus_strategy_signal.json"
+    return str(_REPO_ROOT / "finance_agent" / "btc_specialist" / "data" / "nautilus_strategy_signal.json")
+
+
+def _default_prediction_json_path() -> str:
+    if _under_lab_layout():
+        return "/lab/prediction_agent/btc_prediction_output.json"
+    return str(_REPO_ROOT / "prediction_agent" / "btc_prediction_output.json")
+
+
+def _default_live_data_dir() -> str:
+    if _under_lab_layout():
+        return "/lab/btc_specialist_data"
+    return str(_REPO_ROOT / "finance_agent" / "btc_specialist" / "data")
+
+
+def _ensure_prediction_agent_import_path() -> None:
+    if _under_lab_layout():
+        return
+    pa = _REPO_ROOT / "prediction_agent"
+    if pa.is_dir():
+        os.environ.setdefault("NAUTILUS_PREDICTION_AGENT_PATH", str(pa))
 
 
 def _auto_exit_alarm() -> None:
@@ -147,6 +182,7 @@ def _bybit_position_mode_for_symbol(instrument_id, product_types: tuple, *, hedg
 
 def main() -> int:
     _auto_exit_alarm()
+    _ensure_prediction_agent_import_path()
     ap = argparse.ArgumentParser(
         description="Sygnif Bybit demo or testnet TradingNode with bar-logging strategy (no orders by default).",
     )
@@ -255,6 +291,12 @@ def main() -> int:
         help="Max age of generated_utc in minutes; 0 disables (default env or 0)",
     )
     ap.add_argument(
+        "--initial-leverage",
+        default=None,
+        metavar="N",
+        help="Linear only: Bybit set-leverage before exec (or NAUTILUS_SYGNIF_NODE_INITIAL_LEVERAGE)",
+    )
+    ap.add_argument(
         "--live-predict",
         action="store_true",
         help="Retrain + predict in-process each bar (or NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=1)",
@@ -301,7 +343,7 @@ def main() -> int:
     sidecar_gate = _env_truthy("NAUTILUS_SYGNIF_NODE_SIDECAR_GATE")
     sidecar_path = os.environ.get("NAUTILUS_SYGNIF_NODE_SIDECAR_JSON", "").strip()
     if not sidecar_path:
-        sidecar_path = "/lab/btc_specialist_data/nautilus_strategy_signal.json"
+        sidecar_path = _default_sidecar_json_path()
     sn_raw = os.environ.get("NAUTILUS_SYGNIF_NODE_SIDECAR_NEUTRAL_MULT", "0.75").strip()
     try:
         sidecar_neutral_mult = float(sn_raw)
@@ -317,7 +359,7 @@ def main() -> int:
     if not pred_json:
         pred_json = os.environ.get("NAUTILUS_SYGNIF_NODE_PREDICTION_JSON", "").strip()
     if not pred_json:
-        pred_json = "/lab/prediction_agent/btc_prediction_output.json"
+        pred_json = _default_prediction_json_path()
     pred_signal = (args.prediction_signal or os.environ.get("NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL", "")).strip()
     if not pred_signal:
         pred_signal = "consensus_nautilus_enhanced"
@@ -354,7 +396,7 @@ def main() -> int:
     )
     live_data_dir = os.environ.get("NAUTILUS_SYGNIF_NODE_LIVE_DATA_DIR", "").strip()
     if not live_data_dir:
-        live_data_dir = "/lab/btc_specialist_data"
+        live_data_dir = _default_live_data_dir()
     try:
         live_window = max(3, int(os.environ.get("NAUTILUS_SYGNIF_NODE_LIVE_WINDOW", "5").strip() or "5"))
     except ValueError:
@@ -402,7 +444,7 @@ def main() -> int:
         raise SystemExit(2) from None
     lo_raw = os.environ.get(
         "NAUTILUS_SYGNIF_NODE_LIVE_PREDICT_JSON",
-        "/lab/prediction_agent/btc_prediction_output.json",
+        _default_prediction_json_path(),
     ).strip()
     if lo_raw.lower() in ("-", "none", "off", "0"):
         live_out_json = None
@@ -449,6 +491,27 @@ def main() -> int:
         product_types = product_map[args.product]
 
     is_spot = len(product_types) == 1 and product_types[0] == BybitProductType.SPOT
+
+    lev_raw = ""
+    if args.initial_leverage is not None:
+        lev_raw = str(args.initial_leverage).strip()
+    if not lev_raw:
+        lev_raw = os.environ.get("NAUTILUS_SYGNIF_NODE_INITIAL_LEVERAGE", "").strip()
+    if use_exec and lev_raw and not is_spot and not args.testnet:
+        to = _REPO_ROOT / "trade_overseer"
+        if str(to) not in sys.path:
+            sys.path.insert(0, str(to))
+        import bybit_linear_hedge as blh  # noqa: PLC0415
+
+        sym = str(instrument_id.symbol)
+        r = blh.set_linear_leverage(sym, lev_raw)
+        print(f"[sygnif-btc-node] set_linear_leverage({sym}, {lev_raw}): {r}", flush=True)
+        if r.get("retCode") != 0:
+            print(
+                "[sygnif-btc-node] WARNING: Bybit set-leverage failed; venue may keep prior leverage.",
+                file=sys.stderr,
+            )
+
     merged_single = bool(args.merged_single)
     if use_exec and not merged_single and not args.hedge and not _env_truthy("NAUTILUS_SYGNIF_NODE_EXEC_HEDGE"):
         merged_single = True
@@ -472,10 +535,13 @@ def main() -> int:
         os.environ.get("NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE", "").strip() or "100/00:00:01"
     )
     max_notional_per_order: dict[str, int] = {}
+    adaptive_max_notional_usdt: float | None = None
     raw_nom = os.environ.get("NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT", "").strip()
     if raw_nom:
         try:
-            max_notional_per_order[str(instrument_id)] = int(Decimal(raw_nom))
+            nom_i = int(Decimal(raw_nom))
+            max_notional_per_order[str(instrument_id)] = nom_i
+            adaptive_max_notional_usdt = float(nom_i)
         except (InvalidOperation, ValueError) as exc:
             print(
                 f"Invalid NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT={raw_nom!r}: {exc}",
@@ -558,6 +624,7 @@ def main() -> int:
             adaptive_stake_fraction=stake_frac,
             adaptive_min_qty_str=adaptive_min,
             adaptive_max_qty_str=adaptive_max,
+            adaptive_max_notional_usdt=adaptive_max_notional_usdt,
             limit_offset_bps=max(1, args.exec_offset_bps),
             max_entry_orders=max_orders,
             sidecar_gate=sidecar_gate,
@@ -601,6 +668,7 @@ def main() -> int:
         f"risk_engine_bypass={risk_bypass} | sidecar_gate={sidecar_gate} | "
         f"prediction_gate={prediction_gate} signal={pred_signal_l} | "
         f"live_predict_train={live_predict_train} | "
+        f"adaptive_max_notional_usdt={adaptive_max_notional_usdt or 'off'} | "
         f"venue={'testnet' if args.testnet else 'demo'} | "
         f"data_demo={data_demo} data_testnet={data_testnet}",
         flush=True,

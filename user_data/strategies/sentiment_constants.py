@@ -28,3 +28,21 @@ def sentiment_tag_score_abs(tag: Optional[str]) -> Optional[int]:
         return abs(int(m.group(2)))
     except ValueError:
         return None
+
+
+def tag_bypasses_premium_reserve(tag: Optional[str], premium_tags: frozenset) -> bool:
+    """
+    True when the tag may open even if ``len(open_trades) >= premium_nonreserved_max``.
+
+    Beyond ``premium_tags`` / ``PREMIUM_TAGS``: session ORB long, hybrid ``sygnif_swing``,
+    and sentiment-style tags with |suffix| >= 4 (e.g. sygnif_s-4) — aligns with live
+    winners that use RSI / Williams %R exits without crowding out the book.
+    """
+    if not tag:
+        return False
+    if tag in premium_tags:
+        return True
+    if tag in ("orb_long", "sygnif_swing"):
+        return True
+    tier_abs = sentiment_tag_score_abs(tag)
+    return tier_abs is not None and tier_abs >= 4

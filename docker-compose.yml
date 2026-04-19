@@ -7,27 +7,14 @@
 #
 # **Default stack (no profile):** `finance-agent` + `notification-handler` only.
 # **Legacy Sygnif multi-pair spot + futures (archived):** `docker compose --profile archived-main-traders up -d`
-#   Snapshot: `archive/freqtrade-main-traders-*` (SQLite). Set FT_SPOT_URL / FT_FUTURES_URL to
-#   `http://freqtrade:8080/api/v1` and `http://freqtrade-futures:8081/api/v1` when restoring that profile.
-# **BTC dock (pure Nautilus):** `docker compose --profile btc-nautilus up -d` — `nautilus-research`
-# (OHLCV sink + sidecar → `btc_specialist` + `nautilus_strategy_signal.json`) + **`nautilus-sygnif-btc-node`**
-# (`run_sygnif_btc_trading_node.py`). **Order flow (defaults):** in-container **live** retrain
-# (`btc_predict_live`, `NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=1`) on rolling 5m OHLCV + optional JSON mirror;
-# **`nautilus_sidecar_strategy`** JSON → **sidecar gate**; **post-only** adaptive BUY on 5m bar
-# (`NAUTILUS_SYGNIF_NODE_EXEC_*`). Host **`sygnif-finetune-automation`** remains a heavier offline pass.
-# Disable live ML: `NAUTILUS_SYGNIF_NODE_LIVE_PREDICT=0` (falls back to `btc_prediction_output.json` if `PREDICTION_GATE=1`).
-# Add **`btc-grid-mm`** for `nautilus-grid-btc01` (GridMarketMaker, demo). **Same `BYBIT_DEMO_*` wallet**
-# as `nautilus-sygnif-btc-node` unless you isolate grid with `BYBIT_DEMO_GRID_*` — P/L and balances are **fused**.
-# **Archived Freqtrade BTC dock (opt-in restore):** `docker compose --profile archived-freqtrade-btc-dock up -d`
-# for `freqtrade-btc-spot`, `freqtrade-btc-0-1`, and **`trade-overseer`**. Snapshot: `archive/freqtrade-btc-dock-2026-04-13/`.
-# **BTCUSDT linear grid (Nautilus):** `docker compose --profile btc-grid-mm up -d nautilus-grid-btc01`
-# (`NAUTILUS_GRID_MM_DEMO_ACK=YES`; prefer `BYBIT_DEMO_GRID_*` vs main `BYBIT_DEMO_*` if multiple bots).
-# **Sygnif BTC node only:** same container as above; profile **`btc-sygnif-node`** still works standalone.
-# **Bybit testnet (Nautilus BTC node):** `docker compose --profile btc-testnet up -d nautilus-btc-testnet` — needs
-# `BYBIT_TESTNET_API_KEY` / `BYBIT_TESTNET_API_SECRET` in secrets `.env` (see `.env.example`).
+#   Snapshot: `archive/freqtrade-main-traders-*` (SQLite). `trade-overseer` uses the same profile; default
+#   `FT_SPOT_URL` / `FT_FUTURES_URL` point at `freqtrade` / `freqtrade-futures` on this compose network.
+# **BTC-only Docker dock removed:** Nautilus research/grid/bar-node and dedicated `freqtrade-btc-*` services
+# are no longer defined here. Run Nautilus / grid MM from a **host venv** (`research/nautilus_lab/`, see README there)
+# or restore from `archive/freqtrade-btc-dock-2026-04-13/` if you need the old compose snapshot.
 #
-# **Health:** `healthcheck` on finance-agent, notification-handler, Freqtrade* (archived/dock profiles),
-# trade-overseer (when started), nautilus-research. Post-deploy sweep: `./scripts/deploy_health_check.sh`.
+# **Health:** `healthcheck` on finance-agent, notification-handler, Freqtrade* (archived profile),
+# trade-overseer (when started). Post-deploy sweep: `./scripts/deploy_health_check.sh`.
 #
 # To use a finance-agent already running on the EC2 host, set in .env e.g.
 #   SYGNIF_SENTIMENT_HTTP_URL=http://host.docker.internal:8091/sygnif/sentiment
@@ -77,6 +64,12 @@ services:
       # /ruleprediction-agent: append R01–R03 + fresh btc_prediction line to GET /briefing (see ruleprediction_briefing.py)
       SYGNIF_BRIEFING_INCLUDE_RULE_PREDICT: "1"
       SYGNIF_BRIEFING_INCLUDE_BTC_PREDICT: "1"
+      SYGNIF_BRIEFING_INCLUDE_SWARM: "1"
+      # Swarm ``bf`` (btc_future demo position vote) when ``BYBIT_DEMO_*`` / webhook populated
+      SYGNIF_SWARM_BTC_FUTURE: "${SYGNIF_SWARM_BTC_FUTURE:-1}"
+      # ``SYGNIF_SWARM_WEBHOOK_TOKEN`` — only from ``env_file`` (xrp + .env); do not ``${...}`` here or host-empty overrides the file.
+      # Swarm ``mn``: public Bybit mainnet tickers (no keys); cached ~45s
+      SYGNIF_SWARM_BYBIT_MAINNET: "1"
       # Jupyter on the EC2 host (nn-zero-to-hero); enables /training and /training/status probes from the container
       ORTHOGONAL_TRAINING_HOST: "host.docker.internal"
       ORTHOGONAL_TRAINING_PORT: "8890"
@@ -110,10 +103,14 @@ services:
       - "./trade_overseer:/freqtrade/trade_overseer"
       # Nautilus sink + sidecar JSON (read-only) for SygnifStrategy ``nautilus_*`` columns
       - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
+      # Fused swarm JSON for BTC_Strategy_0.1 ``swarm_*`` columns + optional root gate
+      - "./prediction_agent:/freqtrade/prediction_agent:ro"
     ports:
       # Spot Freqtrade API: host 8181 → container listen_port (config.json api_server 8080)
       - "0.0.0.0:8181:8080"
     environment:
+      SYGNIF_PREDICTION_AGENT_DIR: /freqtrade/prediction_agent
+      SYGNIF_SWARM_BTC_FUTURE: "${SYGNIF_SWARM_BTC_FUTURE:-1}"
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
     depends_on:
       finance-agent:
@@ -154,9 +151,12 @@ services:
       - "./user_data:/freqtrade/user_data"
       - "./trade_overseer:/freqtrade/trade_overseer"
       - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
+      - "./prediction_agent:/freqtrade/prediction_agent:ro"
     ports:
       - "0.0.0.0:8081:8081"
     environment:
+      SYGNIF_PREDICTION_AGENT_DIR: /freqtrade/prediction_agent
+      SYGNIF_SWARM_BTC_FUTURE: "${SYGNIF_SWARM_BTC_FUTURE:-1}"
       SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
       SYGNIF_PROFILE: btc_trend
     depends_on:
@@ -177,314 +177,6 @@ services:
     command:
       - "python3 /freqtrade/user_data/bybit_ccxt_demo_patch.py && exec /home/ftuser/.local/bin/freqtrade trade --strategy BTC_Strategy_0_1 --logfile /freqtrade/user_data/logs/freqtrade-futures.log --db-url sqlite:////freqtrade/user_data/tradesv3-futures-btc01-demo.sqlite --config /freqtrade/user_data/config_futures.json"
 
-  # BTC_Strategy_0_1 — Bybit **demo** USDT perp BTC (Freqtrade). Not part of pure-Nautilus `btc-nautilus`.
-  # Profiles: `btc-0-1` or `archived-freqtrade-btc-dock` (+ `trade-overseer` on archived dock).
-  # API: host 127.0.0.1:8185 → container :8085
-  freqtrade-btc-0-1:
-    <<: *sygnif-env-files
-    profiles: ["btc-0-1", "archived-freqtrade-btc-dock"]
-    build:
-      context: .
-      dockerfile: "./docker/Dockerfile.custom"
-    restart: unless-stopped
-    container_name: freqtrade-btc-0-1
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./user_data:/freqtrade/user_data"
-      - "./trade_overseer:/freqtrade/trade_overseer"
-      # Same Nautilus JSON feed as `freqtrade-btc-spot` (optional columns in strategy / parity with BTC dock).
-      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
-    ports:
-      - "127.0.0.1:8185:8085"
-    environment:
-      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
-      # btc_trend maps btc_trend_long→R02; full R01 governance + R03 sleeve still run (no early return).
-      SYGNIF_PROFILE: btc_trend
-      NAUTILUS_BTC_DATA_DIR: "/freqtrade/user_data/btc_specialist_data"
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-      notification-handler:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8085/api/v1/ping', timeout=8)\"",
-        ]
-      interval: 45s
-      timeout: 15s
-      retries: 5
-      start_period: 180s
-    entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_0_1_demo.sh"]
-    command: []
-
-  # Dedicated BTC/USDT spot SygnifStrategy (Freqtrade). Optional; pure BTC dock uses Nautilus only (`btc-nautilus`).
-  freqtrade-btc-spot:
-    <<: *sygnif-env-files
-    profiles: ["archived-freqtrade-btc-dock"]
-    build:
-      context: .
-      dockerfile: "./docker/Dockerfile.btc_trader"
-    image: sygnif-freqtrade-btc:latest
-    restart: unless-stopped
-    container_name: freqtrade-btc-spot
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./user_data:/freqtrade/user_data"
-      - "./trade_overseer:/freqtrade/trade_overseer"
-      - "./finance_agent/btc_specialist/data:/freqtrade/user_data/btc_specialist_data:ro"
-    ports:
-      - "127.0.0.1:8282:8080"
-    environment:
-      SYGNIF_SENTIMENT_HTTP_URL: ${SYGNIF_SENTIMENT_HTTP_URL:-http://finance-agent:8091/sygnif/sentiment}
-      NAUTILUS_BTC_DATA_DIR: "/freqtrade/user_data/btc_specialist_data"
-      # Bybit **demo** spot bridge: runtime config merges api-demo + BYBIT_DEMO_* from .env
-      SYGNIF_BTC_SPOT_USE_BYBIT_DEMO: "${SYGNIF_BTC_SPOT_USE_BYBIT_DEMO:-1}"
-      # Paper only: API/strategy runs; no exchange orders when serve-only.
-      SYGNIF_BTC_SPOT_SERVE_ONLY: "${SYGNIF_BTC_SPOT_SERVE_ONLY:-1}"
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-      notification-handler:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/ping', timeout=8)\"",
-        ]
-      interval: 45s
-      timeout: 15s
-      retries: 5
-      start_period: 180s
-    # Override freqtrade image ENTRYPOINT so we can run demo config merge first
-    entrypoint: ["/bin/sh", "/freqtrade/user_data/run_freqtrade_btc_spot_demo.sh"]
-    command: []
-
-  nautilus-research:
-    <<: *sygnif-env-files
-    # Also ``btc-sygnif-node`` so the bar TradingNode can depend on the training/sidecar sink alone.
-    profiles: ["btc-nautilus", "btc-sygnif-node"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nautilus_research
-    image: sygnif-nautilus-research:latest
-    restart: unless-stopped
-    container_name: nautilus-research
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./finance_agent:/lab/finance_agent:ro"
-      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
-      - "./research/nautilus_lab:/lab/workspace:rw"
-      - "./prediction_agent:/lab/prediction_agent:ro"
-    environment:
-      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
-      SYGNIF_SPOT_NOTIONAL_USDT: "${SYGNIF_SPOT_NOTIONAL_USDT:-100}"
-      NAUTILUS_BTC_OHLCV_DIR: "/lab/btc_specialist_data"
-      # Bybit sink interval (default 300s); host ruleprediction timer stays :07 for 1h bar close.
-      NAUTILUS_BYBIT_POLL_SEC: "${NAUTILUS_BYBIT_POLL_SEC:-300}"
-      NAUTILUS_BTC_BAR_LIMIT: "${NAUTILUS_BTC_BAR_LIMIT:-900}"
-      NAUTILUS_BYBIT_DEMO: "${NAUTILUS_BYBIT_DEMO:-true}"
-      NAUTILUS_BYBIT_TESTNET: "${NAUTILUS_BYBIT_TESTNET:-false}"
-      NAUTILUS_TRAINING_BAR_LIMIT_1H: "${NAUTILUS_TRAINING_BAR_LIMIT_1H:-1600}"
-      NAUTILUS_TRAINING_BAR_LIMIT_1D: "${NAUTILUS_TRAINING_BAR_LIMIT_1D:-120}"
-      NAUTILUS_TRAINING_TRADES_LIMIT: "${NAUTILUS_TRAINING_TRADES_LIMIT:-120}"
-      NAUTILUS_TRAINING_BOOK_LEVELS: "${NAUTILUS_TRAINING_BOOK_LEVELS:-50}"
-      NAUTILUS_TRAINING_BOOK_DELTA_CAP: "${NAUTILUS_TRAINING_BOOK_DELTA_CAP:-120}"
-      NAUTILUS_STRATEGY_POLL_SEC: "${NAUTILUS_STRATEGY_POLL_SEC:-300}"
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python3", "/lab/workspace/nautilus_smoke.py"]
-      interval: 60s
-      timeout: 25s
-      retries: 3
-      start_period: 120s
-    command: ["/bin/bash", "/lab/workspace/run_nautilus_bundled.sh"]
-
-  # Nautilus **GridMarketMaker** on Bybit **demo**, **BTCUSDT linear** (separate ``TradingNode``).
-  # **Isolation:** set ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (second Bybit demo API key)
-  # so grid MM does not share wallet/position with other demo linear bots. If unset, grid falls back to
-  # ``BYBIT_DEMO_*``. Requires
-  # ``NAUTILUS_GRID_MM_DEMO_ACK=YES`` in ``.env``. Survives crashes + host reboot when compose is brought up
-  # with profile ``btc-grid-mm`` (e.g. ``COMPOSE_PROFILES=btc-grid-mm`` in ``.env``). Cancel demo opens:
-  # ``PYTHONPATH=. python3 scripts/bybit_demo_cancel_open_orders.py`` (stop this container first if needed).
-  nautilus-grid-btc01:
-    <<: *sygnif-env-files
-    profiles: ["btc-grid-mm"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nautilus_research
-    image: sygnif-nautilus-research:latest
-    container_name: nautilus-grid-btc01
-    restart: unless-stopped
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./finance_agent:/lab/finance_agent:ro"
-      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
-      - "./research/nautilus_lab:/lab/workspace:rw"
-      - "./prediction_agent:/lab/prediction_agent:ro"
-    environment:
-      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
-      # Grid MM: ACK + demo keys (prefer ``BYBIT_DEMO_GRID_*`` for isolation from other demo bots).
-      NAUTILUS_GRID_MM_DEMO_ACK: "${NAUTILUS_GRID_MM_DEMO_ACK:-}"
-      BYBIT_DEMO_GRID_API_KEY: "${BYBIT_DEMO_GRID_API_KEY:-}"
-      BYBIT_DEMO_GRID_API_SECRET: "${BYBIT_DEMO_GRID_API_SECRET:-}"
-      NAUTILUS_BYBIT_DEMO: "true"
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-    command:
-      - python3
-      - /lab/workspace/run_bybit_demo_grid_market_maker.py
-      - --instrument
-      - BTCUSDT-LINEAR.BYBIT
-      - --trade-size
-      - "${NAUTILUS_GRID_BTC01_TRADE_SIZE:-0.001}"
-      - --max-position
-      - "${NAUTILUS_GRID_BTC01_MAX_POSITION:-0.05}"
-      - --num-levels
-      - "${NAUTILUS_GRID_BTC01_NUM_LEVELS:-8}"
-      - --grid-step-bps
-      - "${NAUTILUS_GRID_BTC01_GRID_STEP_BPS:-18}"
-      - --requote-threshold-bps
-      - "${NAUTILUS_GRID_BTC01_REQUOTE_BPS:-28}"
-      - --requote-min-interval-secs
-      - "${NAUTILUS_GRID_BTC01_REQUOTE_MIN_SEC:-4}"
-      - --emergency-requote-mult
-      - "${NAUTILUS_GRID_BTC01_REQUOTE_EMERGENCY_MULT:-4}"
-      # Bybit demo accounts are often one-way; hedge mode causes 10001 position idx / position mode mismatch.
-      - --merged-single
-
-  # Nautilus ``TradingNode`` (Bybit demo). **Default:** finetune/runner output + sidecar + **adaptive post-only BUY**
-  # (ACK-gated). Prediction: ``btc_prediction_output.json`` (``consensus_nautilus_enhanced`` BULLISH+, max age 180m).
-  # Sidecar: ``nautilus_strategy_signal.json`` (skip BUY on ``short``; scale stake on ``neutral``).
-  # **Max bar-entry submits** default 150 (lifetime cap per process; ``0`` = unlimited). Same demo wallet as
-  # ``nautilus-grid-btc01`` when both use ``BYBIT_DEMO_*`` — **fused P/L**.
-  # Observe-only: ``NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE=0`` in ``.env`` (no ACK needed).
-  nautilus-sygnif-btc-node:
-    <<: *sygnif-env-files
-    profiles: ["btc-nautilus", "btc-sygnif-node"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nautilus_research
-    image: sygnif-nautilus-research:latest
-    container_name: nautilus-sygnif-btc-node
-    restart: unless-stopped
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./finance_agent:/lab/finance_agent:ro"
-      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
-      - "./research/nautilus_lab:/lab/workspace:rw"
-      # rw: live bar node rewrites btc_prediction_output.json each retrain
-      - "./prediction_agent:/lab/prediction_agent:rw"
-    environment:
-      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
-      NAUTILUS_BYBIT_DEMO: "true"
-      NAUTILUS_BTC_OHLCV_DIR: "/lab/btc_specialist_data"
-      NAUTILUS_SYGNIF_NODE_LIVE_PREDICT: "${NAUTILUS_SYGNIF_NODE_LIVE_PREDICT:-1}"
-      NAUTILUS_SYGNIF_NODE_EXEC_ACK: ${NAUTILUS_SYGNIF_NODE_EXEC_ACK:-YES}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE:-1}
-      NAUTILUS_SYGNIF_NODE_EXEC_STAKE_FRAC: ${NAUTILUS_SYGNIF_NODE_EXEC_STAKE_FRAC:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_MAX_ORDERS: ${NAUTILUS_SYGNIF_NODE_EXEC_MAX_ORDERS:-150}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MIN_QTY: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MIN_QTY:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MAX_QTY: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MAX_QTY:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_HEDGE: ${NAUTILUS_SYGNIF_NODE_EXEC_HEDGE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_BYPASS: ${NAUTILUS_SYGNIF_NODE_RISK_BYPASS:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_SUBMIT_RATE: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_SUBMIT_RATE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT:-}
-      NAUTILUS_SYGNIF_NODE_SIDECAR_GATE: "${NAUTILUS_SYGNIF_NODE_SIDECAR_GATE:-1}"
-      NAUTILUS_SYGNIF_NODE_SIDECAR_JSON: ${NAUTILUS_SYGNIF_NODE_SIDECAR_JSON:-}
-      NAUTILUS_SYGNIF_NODE_SIDECAR_NEUTRAL_MULT: "${NAUTILUS_SYGNIF_NODE_SIDECAR_NEUTRAL_MULT:-0.75}"
-      NAUTILUS_SYGNIF_NODE_PREDICTION_GATE: ${NAUTILUS_SYGNIF_NODE_PREDICTION_GATE:-1}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_JSON: ${NAUTILUS_SYGNIF_NODE_PREDICTION_JSON:-}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL: ${NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL:-consensus_nautilus_enhanced}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_MIN_LOGREG_CONF: ${NAUTILUS_SYGNIF_NODE_PREDICTION_MIN_LOGREG_CONF:-0}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_MAX_AGE_MIN: ${NAUTILUS_SYGNIF_NODE_PREDICTION_MAX_AGE_MIN:-180}
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-    command:
-      - python3
-      - /lab/workspace/run_sygnif_btc_trading_node.py
-      - --merged-single
-      - --bar-minutes
-      - "${NAUTILUS_SYGNIF_NODE_BAR_MIN:-5}"
-      - --max-bars
-      - "${NAUTILUS_SYGNIF_NODE_MAX_BARS:-0}"
-
-  # Bybit **testnet** BTC linear bar node (same strategy/env defaults as `nautilus-sygnif-btc-node`, `--testnet`).
-  nautilus-btc-testnet:
-    <<: *sygnif-env-files
-    profiles: ["btc-testnet"]
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.nautilus_research
-    image: sygnif-nautilus-research:latest
-    container_name: nautilus-btc-testnet
-    restart: unless-stopped
-    networks:
-      - sygnif_backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - "./finance_agent:/lab/finance_agent:ro"
-      - "./finance_agent/btc_specialist/data:/lab/btc_specialist_data:rw"
-      - "./research/nautilus_lab:/lab/workspace:rw"
-      - "./prediction_agent:/lab/prediction_agent:rw"
-    environment:
-      FINANCE_AGENT_BASE_URL: ${NAUTILUS_FINANCE_AGENT_URL:-http://finance-agent:8091}
-      NAUTILUS_SYGNIF_NODE_LIVE_PREDICT: "${NAUTILUS_SYGNIF_NODE_LIVE_PREDICT:-1}"
-      NAUTILUS_SYGNIF_NODE_EXEC_ACK: ${NAUTILUS_SYGNIF_NODE_EXEC_ACK:-YES}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE:-1}
-      NAUTILUS_SYGNIF_NODE_EXEC_STAKE_FRAC: ${NAUTILUS_SYGNIF_NODE_EXEC_STAKE_FRAC:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_MAX_ORDERS: ${NAUTILUS_SYGNIF_NODE_EXEC_MAX_ORDERS:-150}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MIN_QTY: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MIN_QTY:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MAX_QTY: ${NAUTILUS_SYGNIF_NODE_EXEC_ADAPTIVE_MAX_QTY:-}
-      NAUTILUS_SYGNIF_NODE_EXEC_HEDGE: ${NAUTILUS_SYGNIF_NODE_EXEC_HEDGE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_BYPASS: ${NAUTILUS_SYGNIF_NODE_RISK_BYPASS:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_SUBMIT_RATE: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_SUBMIT_RATE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_MODIFY_RATE:-}
-      NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT: ${NAUTILUS_SYGNIF_NODE_RISK_MAX_NOTIONAL_USDT:-}
-      NAUTILUS_SYGNIF_NODE_SIDECAR_GATE: "${NAUTILUS_SYGNIF_NODE_SIDECAR_GATE:-1}"
-      NAUTILUS_SYGNIF_NODE_SIDECAR_JSON: ${NAUTILUS_SYGNIF_NODE_SIDECAR_JSON:-}
-      NAUTILUS_SYGNIF_NODE_SIDECAR_NEUTRAL_MULT: "${NAUTILUS_SYGNIF_NODE_SIDECAR_NEUTRAL_MULT:-0.75}"
-      NAUTILUS_SYGNIF_NODE_PREDICTION_GATE: ${NAUTILUS_SYGNIF_NODE_PREDICTION_GATE:-1}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_JSON: ${NAUTILUS_SYGNIF_NODE_PREDICTION_JSON:-}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL: ${NAUTILUS_SYGNIF_NODE_PREDICTION_SIGNAL:-consensus_nautilus_enhanced}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_MIN_LOGREG_CONF: ${NAUTILUS_SYGNIF_NODE_PREDICTION_MIN_LOGREG_CONF:-0}
-      NAUTILUS_SYGNIF_NODE_PREDICTION_MAX_AGE_MIN: ${NAUTILUS_SYGNIF_NODE_PREDICTION_MAX_AGE_MIN:-180}
-    depends_on:
-      finance-agent:
-        condition: service_healthy
-    command:
-      - python3
-      - /lab/workspace/run_sygnif_btc_trading_node.py
-      - --testnet
-      - --merged-single
-      - --bar-minutes
-      - "${NAUTILUS_SYGNIF_NODE_BAR_MIN:-5}"
-      - --max-bars
-      - "${NAUTILUS_SYGNIF_NODE_MAX_BARS:-0}"
-
   notification-handler:
     <<: *sygnif-env-files
     build:
@@ -495,6 +187,9 @@ services:
     networks:
       - sygnif_backend
     environment:
+      SYGNIF_SWARM_BTC_FUTURE: "${SYGNIF_SWARM_BTC_FUTURE:-1}"
+      SYGNIF_PREDICTION_AGENT_DIR: /app/prediction_agent
+      # ``SYGNIF_EXCHANGE_WEBHOOK_TOKEN`` — set in secrets ``env_file`` only (no ``${...}`` override).
       # Explicit passthrough so tokens resolve even when /app/.env is absent in the image.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_FUTURES_BOT_TOKEN: ${TELEGRAM_FUTURES_BOT_TOKEN:-}
@@ -502,6 +197,9 @@ services:
       FINANCE_BOT_TOKEN: ${FINANCE_BOT_TOKEN:-}
       AGENT_CHAT_ID: ${AGENT_CHAT_ID:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SYGNIF_NEUROLINKED_HTTP_URL: "http://host.docker.internal:8888"
+    volumes:
+      - "./prediction_agent:/app/prediction_agent:rw"
     ports:
       - "127.0.0.1:8089:8089"
     command: python3 /app/notification_handler.py --port 8089
@@ -516,11 +214,11 @@ services:
       retries: 3
       start_period: 20s
 
-  # Trade overseer: polls **Freqtrade** REST (`FT_*_URL`). Use with `archived-freqtrade-btc-dock` or `archived-main-traders`.
+  # Trade overseer: polls **Freqtrade** REST (`FT_*_URL`). Use with `archived-main-traders` (default URLs below).
   # NPU/OpenVINO: run overseer on host if needed; this image is requests-only.
   trade-overseer:
     <<: *sygnif-env-files
-    profiles: ["archived-freqtrade-btc-dock", "archived-main-traders"]
+    profiles: ["archived-main-traders"]
     build:
       context: .
       dockerfile: "./trade_overseer/Dockerfile"
@@ -531,9 +229,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      # Defaults target BTC dock; override when using profile `archived-main-traders` only (see file header).
-      FT_SPOT_URL: ${FT_SPOT_URL:-http://freqtrade-btc-spot:8080/api/v1}
-      FT_FUTURES_URL: ${FT_FUTURES_URL:-http://freqtrade-btc-0-1:8085/api/v1}
+      SYGNIF_PREDICTION_AGENT_DIR: /app/prediction_agent
+      SYGNIF_SWARM_BTC_FUTURE: "${SYGNIF_SWARM_BTC_FUTURE:-1}"
+      # BTC USDT futures Freqtrade only (``BTC_Strategy_0_1`` on :8081). Use ``all`` or ``spot`` if you need SygnifStrategy spot in the same overseer.
+      SYGNIF_OVERSEER_INSTANCE: futures
+      # Append Swarm snapshot line to overseer LLM/rules prompts; optional ``ensure_entry`` gate below.
+      OVERSEER_INCLUDE_SWARM_SNAPSHOT: "1"
+      OVERSEER_ENSURE_SWARM_GATE: "0"
+      FT_SPOT_URL: ${FT_SPOT_URL:-http://freqtrade:8080/api/v1}
+      FT_FUTURES_URL: ${FT_FUTURES_URL:-http://freqtrade-futures:8081/api/v1}
       FT_SPOT_USER: ${FT_SPOT_USER:-freqtrader}
       FT_SPOT_PASS: ${FT_SPOT_PASS:-}
       FT_FUTURES_USER: ${FT_FUTURES_USER:-freqtrader}
@@ -543,6 +247,8 @@ services:
       OVERSEER_HTTP_HOST: "0.0.0.0"
       FINANCE_AGENT_BRIEFING_URL: ${FINANCE_AGENT_BRIEFING_URL:-http://finance-agent:8091/briefing}
       OVERSEER_AGENT_URL: ${OVERSEER_AGENT_URL:-http://finance-agent:8091/overseer/commentary}
+      SYGNIF_NEUROLINKED_HTTP_URL: "http://host.docker.internal:8888"
+      SYGNIF_BEE_API_URL: "http://host.docker.internal:1633"
       # Plays from finance_agent: BTC/USDT-only view (see trade_overseer/plays_store.py)
       SYGNIF_PLAYS_BTC_USDT_ONLY: "${SYGNIF_PLAYS_BTC_USDT_ONLY:-1}"
     ports:
@@ -567,3 +273,4 @@ services:
       - "./user_data/config_futures.json:/ro/ft_futures_config.json:ro"
       # Nautilus bundle + sidecar signal for GET /orderbook and ensure_entry signal gate
       - "./finance_agent/btc_specialist/data:/ro/btc_specialist_data:ro"
+      - "./prediction_agent:/app/prediction_agent:ro"

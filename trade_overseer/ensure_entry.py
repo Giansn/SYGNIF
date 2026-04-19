@@ -7,6 +7,7 @@ import os
 import config
 import ft_client
 import orderbook_snapshot
+import swarm_snapshot
 
 logger = logging.getLogger("overseer.ensure")
 
@@ -58,6 +59,15 @@ def run_ensure_entry(
                 "reason": f"nautilus_bias_not_long ({bias})",
                 "hint": "Set OVERSEER_ENSURE_IGNORE_SIGNAL=1 or pass ignore_signal:true to bypass",
             }
+
+    ok_sw, why_sw = swarm_snapshot.swarm_long_entry_allowed()
+    if not ok_sw:
+        return {
+            "ok": True,
+            "action": "skip",
+            "reason": why_sw,
+            "hint": "Unset OVERSEER_ENSURE_SWARM_GATE or refresh swarm_knowledge_output.json",
+        }
 
     try:
         cfg = ft_client.get_show_config(inst)

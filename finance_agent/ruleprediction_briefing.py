@@ -6,11 +6,14 @@ Env:
   SYGNIF_BRIEFING_INCLUDE_RULE_PREDICT=1 — R01/R02/R03 lines when training_channel or registry mtimes change (in-process cache).
   SYGNIF_BRIEFING_INCLUDE_BTC_PREDICT=1 — one line from btc_prediction_output.json if file is fresh.
   SYGNIF_BRIEFING_BTC_PREDICT_MAX_AGE_H — max age hours for predict line (default 24).
+  SYGNIF_BRIEFING_INCLUDE_SWARM=1 — one fused line (ML + channel + sidecar + TA) via ``swarm_knowledge``.
+  SYGNIF_BRIEFING_INCLUDE_NAUTILUS_FUSION=1 — one line from ``swarm_nautilus_protocol_sidecar.json`` (Nautilus + ML + optional **btc_future** + optional protocol tick).
 """
 from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -108,7 +111,22 @@ def _btc_predict_line(*, max_chars: int) -> str:
     return line
 
 
-def extra_briefing_lines(*, max_chars: int = 320) -> str:
+def _nautilus_fusion_line(*, max_chars: int) -> str:
+    if not _env_truthy("SYGNIF_BRIEFING_INCLUDE_NAUTILUS_FUSION"):
+        return ""
+    try:
+        pa = _prediction_agent_dir()
+        if str(pa) not in sys.path:
+            sys.path.insert(0, str(pa))
+        import nautilus_protocol_fusion as npf  # noqa: PLC0415
+
+        root = pa.parent
+        return npf.briefing_line_nautilus_fusion(max_chars=max_chars, repo_root=root)
+    except Exception:
+        return ""
+
+
+def extra_briefing_lines(*, max_chars: int = 480) -> str:
     """Pipe-friendly block (no leading newline). Empty if disabled or nothing to add."""
     parts: list[str] = []
     budget = max_chars
@@ -119,6 +137,21 @@ def extra_briefing_lines(*, max_chars: int = 320) -> str:
     pred = _btc_predict_line(max_chars=max(80, budget)) if budget > 80 else ""
     if pred:
         parts.append(pred)
+        budget -= len(pred) + 1
+    nau = _nautilus_fusion_line(max_chars=max(80, budget)) if budget > 80 else ""
+    if nau:
+        parts.append(nau)
+        budget -= len(nau) + 1
+    swarm = ""
+    if budget > 60 and _env_truthy("SYGNIF_BRIEFING_INCLUDE_SWARM"):
+        try:
+            import swarm_knowledge as _sw
+
+            swarm = _sw.briefing_line_swarm(max_chars=min(300, budget))
+        except Exception:
+            swarm = ""
+    if swarm:
+        parts.append(swarm)
     body = "\n".join(parts).strip()
     if len(body) > max_chars:
         body = body[: max_chars - 3] + "..."

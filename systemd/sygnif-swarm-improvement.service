@@ -1,0 +1,20 @@
+[Unit]
+Description=SYGNIF Swarm auto-improvement telemetry (no orders; history JSONL)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/swarm_auto_improvement_flow.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/swarm_operator.env
+Environment=SYGNIF_SWARM_IMPROVEMENT_FUSION_SYNC=1
+# Weak-points bundle + emit ``swarm_demo_runtime_hints.json`` when rules fire (override in swarm_operator.env).
+Environment=SYGNIF_SWARM_IMPROVEMENT_WEAK_POINTS=1
+Environment=SYGNIF_SWARM_IMPROVEMENT_AUTO_DEMO_TUNING=1
+ExecStart=/bin/bash -c 'cd /home/ubuntu/SYGNIF && if test -x .venv/bin/python3; then exec .venv/bin/python3 scripts/swarm_auto_improvement_flow.py --json; else exec python3 scripts/swarm_auto_improvement_flow.py --json; fi'
+StandardOutput=journal
+StandardError=journal

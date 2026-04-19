@@ -4,6 +4,13 @@ Sygnif Notification Handler — Webhook-based Freqtrade notifications.
 Receives Freqtrade webhook events via HTTP POST and sends formatted
 Telegram messages with TP/SL targets (entry) and Claude trade reviews (exit).
 
+**Exchange webhook (generic HTTP ingest):** ``POST /webhook/exchange`` with JSON body.
+Bybit does **not** ship a classic per-user HTTP trade callback; use this path when a
+**forwarder** (n8n, Cloudflare Worker, custom WS bridge) posts normalized events.
+Requires ``SYGNIF_EXCHANGE_WEBHOOK_TOKEN`` (``Authorization: Bearer`` or
+``X-Sygnif-Exchange-Webhook-Token``). Appends one line to
+``${SYGNIF_PREDICTION_AGENT_DIR:-<repo>/prediction_agent}/exchange_webhook_events.jsonl``.
+
 Usage:
   python3 notification_handler.py              # Start on port 8089
   python3 notification_handler.py --port 9000  # Custom port
@@ -24,13 +31,26 @@ import argparse
 import json
 import logging
 import os
+import secrets
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_NL_URL = (os.environ.get("SYGNIF_NEUROLINKED_HTTP_URL") or "http://host.docker.internal:8888").rstrip("/")
+
+def _nl_feed(text: str) -> None:
+    if not _NL_URL:
+        return
+    try:
+        requests.post(f"{_NL_URL}/api/input/text", json={"text": text}, timeout=2)
+    except Exception:
+        pass
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_TOKEN_FUTURES = os.environ.get("TELEGRAM_FUTURES_BOT_TOKEN", "")
@@ -380,18 +400,124 @@ def format_status_msg(msg):
 
 
 # ---------------------------------------------------------------------------
+# Exchange webhook (generic JSON ingest)
+# ---------------------------------------------------------------------------
+
+
+def _prediction_agent_dir() -> str:
+    for key in ("SYGNIF_PREDICTION_AGENT_DIR", "PREDICTION_AGENT_DIR"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return os.path.expanduser(raw)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "prediction_agent")
+
+
+def _exchange_webhook_token_from_headers(handler: BaseHTTPRequestHandler) -> str:
+    auth = (handler.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (handler.headers.get("X-Sygnif-Exchange-Webhook-Token") or "").strip()
+
+
+def _exchange_webhook_auth_ok(handler: BaseHTTPRequestHandler) -> tuple[bool, str]:
+    expected = (os.environ.get("SYGNIF_EXCHANGE_WEBHOOK_TOKEN") or "").strip()
+    if not expected:
+        return False, "SYGNIF_EXCHANGE_WEBHOOK_TOKEN_unset"
+    got = _exchange_webhook_token_from_headers(handler)
+    if not got:
+        return False, "missing_Authorization_Bearer_or_X-Sygnif-Exchange-Webhook-Token"
+    if not secrets.compare_digest(got, expected):
+        return False, "invalid_token"
+    return True, ""
+
+
+def _append_exchange_webhook_event(envelope: dict[str, Any]) -> None:
+    d = _prediction_agent_dir()
+    os.makedirs(d, mode=0o755, exist_ok=True)
+    path = os.path.join(d, "exchange_webhook_events.jsonl")
+    line = json.dumps(envelope, ensure_ascii=False, default=str) + "\n"
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(line)
+
+
+def _handle_exchange_webhook(handler: BaseHTTPRequestHandler, body: bytes) -> None:
+    ok, why = _exchange_webhook_auth_ok(handler)
+    if not ok:
+        status = 503 if why == "SYGNIF_EXCHANGE_WEBHOOK_TOKEN_unset" else 401
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        err = json.dumps({"ok": False, "error": why}).encode("utf-8")
+        handler.send_header("Content-Length", str(len(err)))
+        handler.end_headers()
+        handler.wfile.write(err)
+        return
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        handler.send_response(400)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        err = json.dumps({"ok": False, "error": "invalid_json"}).encode("utf-8")
+        handler.send_header("Content-Length", str(len(err)))
+        handler.end_headers()
+        handler.wfile.write(err)
+        return
+    if not isinstance(payload, dict):
+        handler.send_response(400)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        err = json.dumps({"ok": False, "error": "json_must_be_object"}).encode("utf-8")
+        handler.send_header("Content-Length", str(len(err)))
+        handler.end_headers()
+        handler.wfile.write(err)
+        return
+
+    client = (handler.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    if not client:
+        client = handler.client_address[0] if handler.client_address else ""
+    envelope = {
+        "received_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "remote_ip": client,
+        "payload": payload,
+    }
+    try:
+        _append_exchange_webhook_event(envelope)
+    except OSError as exc:
+        logger.error("exchange webhook append failed: %s", exc)
+        handler.send_response(500)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        err = json.dumps({"ok": False, "error": "persist_failed", "detail": str(exc)[:200]}).encode(
+            "utf-8"
+        )
+        handler.send_header("Content-Length", str(len(err)))
+        handler.end_headers()
+        handler.wfile.write(err)
+        return
+
+    out = json.dumps({"ok": True, "persisted": True}).encode("utf-8")
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(out)))
+    handler.end_headers()
+    handler.wfile.write(out)
+
+
+# ---------------------------------------------------------------------------
 # Webhook HTTP handler
 # ---------------------------------------------------------------------------
 
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
-        if self.path != "/webhook":
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        if path == "/webhook/exchange":
+            _handle_exchange_webhook(self, body)
+            return
+
+        if path != "/webhook":
             self.send_response(404)
             self.end_headers()
             return
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
 
         try:
             msg = json.loads(body)
@@ -432,6 +558,18 @@ def _process_webhook(msg):
     if text:
         tg_send(text, is_futures=is_futures)
         logger.info(f"Sent {msg_type} notification")
+
+    if "entry" in msg_type:
+        pair = msg.get("pair", "?")
+        side = "SHORT" if msg.get("is_short") else "LONG"
+        stake = msg.get("stake_amount", 0)
+        _nl_feed(f"TRADE ENTRY {side} {pair} stake={stake:.2f} mode={'futures' if is_futures else 'spot'}")
+    elif "exit" in msg_type:
+        pair = msg.get("pair", "?")
+        pnl = msg.get("profit_percent", msg.get("profit_ratio", 0)) * 100
+        reason = msg.get("exit_reason", "?")
+        outcome = "WIN" if pnl > 0 else "LOSS"
+        _nl_feed(f"TRADE EXIT {outcome} {pair} pnl={pnl:+.2f}% reason={reason} mode={'futures' if is_futures else 'spot'}")
 
 
 # ---------------------------------------------------------------------------

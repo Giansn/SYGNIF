@@ -9,18 +9,24 @@ Models used (all free, local, no API keys):
 
 Data: ../finance_agent/btc_specialist/data/btc_1h_ohlcv.json  (Bybit 1h candles)
       ../finance_agent/btc_specialist/data/btc_daily_90d.json  (Bybit daily candles)
+      ../finance_agent/btc_specialist/data/btc_5m_ohlcv.json  (Bybit linear 5m — from pull_btc_context, optional)
 
 Usage:
   python3 btc_predict_runner.py              # defaults to 1h data
   python3 btc_predict_runner.py --timeframe daily
+  python3 btc_predict_runner.py --timeframe 5m   # linear 5m (JSON or live Bybit fetch)
   python3 btc_predict_runner.py --window 10  # look-back window size
   python3 btc_predict_runner.py --calibrate --dir-C 0.25  # calibrated direction + tuned C
 """
 
+import argparse
 import json
 import os
 import sys
-import argparse
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -92,6 +98,60 @@ def load_bybit_ohlcv(path):
     df = pd.DataFrame(rows).sort_values("Date").reset_index(drop=True)
     df["Mean"] = (df["High"] + df["Low"]) / 2
     return df
+
+
+BYBIT_KLINE_V5 = "https://api.bybit.com/v5/market/kline"
+
+
+def fetch_linear_5m_ohlcv_df(*, limit: int = 1000, symbol: str = "BTCUSDT") -> pd.DataFrame:
+    """
+    Public Bybit v5 **linear** 5m candles (same family as ``btc_predict_live`` / predict protocol).
+
+    ``limit`` is capped at 1000 (Bybit max per request).
+    """
+    lim = max(50, min(int(limit), 1000))
+    q = urllib.parse.urlencode(
+        {"category": "linear", "symbol": symbol.strip().upper() or "BTCUSDT", "interval": "5", "limit": str(lim)}
+    )
+    url = f"{BYBIT_KLINE_V5}?{q}"
+    last_err: Exception | None = None
+    raw: dict = {}
+    lst: list = []
+    for attempt in range(3):
+        req = urllib.request.Request(url, headers={"User-Agent": "sygnif-btc-predict-runner/1"})
+        try:
+            with urllib.request.urlopen(req, timeout=25.0) as resp:
+                raw = json.loads(resp.read().decode())
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_err = exc
+            time.sleep(1.0 + attempt)
+            continue
+        lst_try = (raw.get("result") or {}).get("list") or []
+        if lst_try:
+            lst = lst_try
+            break
+        last_err = RuntimeError(f"empty kline list retCode={raw.get('retCode')} retMsg={raw.get('retMsg')!r}")
+        time.sleep(1.0 + attempt)
+    else:
+        raise RuntimeError(f"Bybit 5m kline failed: {last_err}") from last_err
+
+    lst.sort(key=lambda x: int(x[0]))
+    rows = []
+    for c in lst:
+        rows.append(
+            {
+                "Date": datetime.fromtimestamp(int(c[0]) / 1000.0, tz=timezone.utc),
+                "Open": float(c[1]),
+                "High": float(c[2]),
+                "Low": float(c[3]),
+                "Close": float(c[4]),
+                "Volume": float(c[5]),
+            }
+        )
+    df = pd.DataFrame(rows).reset_index(drop=True)
+    df["Mean"] = (df["High"] + df["Low"]) / 2.0
+    return df
+
 
 # ---------------------------------------------------------------------------
 # Feature engineering (pure pandas/numpy — no external TA lib needed)
@@ -212,10 +272,10 @@ def run_xgboost(X_train, y_train, X_test, y_test):
 
 
 def _make_direction_model(*, calibrate: bool, C: float):
-    # saga + elasticnet l1_ratio=1 ≈ L1; avoids sklearn 1.8+ liblinear penalty deprecations
+    # saga + L1; avoids sklearn 1.8+ penalty=elasticnet FutureWarnings
     base = LogisticRegression(
         solver="saga",
-        penalty="elasticnet",
+        penalty="l1",
         l1_ratio=1.0,
         C=C,
         max_iter=1200,
@@ -290,6 +350,41 @@ def nautilus_enhanced_consensus(
     return consensus, meta
 
 
+def apply_hivemind_to_enhanced_consensus(
+    enhanced: str,
+    consensus: str,
+    consensus_up_votes: int,
+    logreg_up: bool,
+    hm_vote: int,
+    nautilus_meta: dict,
+) -> tuple[str, dict]:
+    """
+    Second fusion pass after Nautilus sidecar: **Truthcoin Hivemind liveness** (``hm`` vote ``+1``).
+
+    Does not flip bearish stacks. When trees + logreg already agree on up and Nautilus left the label
+    at **BULLISH**, a live Hivemind vote bumps display to **STRONG_BULLISH** (same allow_buy path).
+    """
+    meta = dict(nautilus_meta or {})
+    meta["hivemind_vote"] = int(hm_vote)
+    e0 = (enhanced or "").upper().strip()
+    if hm_vote < 1:
+        meta["hivemind_prediction_note"] = "no_liveness_vote"
+        return e0, meta
+    if (
+        e0 == "BULLISH"
+        and consensus_up_votes >= 2
+        and logreg_up
+        and (consensus or "").upper().strip() == "BULLISH"
+    ):
+        meta["hivemind_prediction_note"] = "liveness_boost_strong_bullish"
+        return "STRONG_BULLISH", meta
+    if e0 == "STRONG_BULLISH":
+        meta["hivemind_prediction_note"] = "liveness_confirms_strong_bullish"
+        return e0, meta
+    meta["hivemind_prediction_note"] = "liveness_observed_no_label_change"
+    return e0, meta
+
+
 def direction_accuracy(actual, predicted):
     act_dir = np.diff(actual) > 0
     pred_dir = np.diff(predicted) > 0
@@ -311,7 +406,7 @@ def fmt_pct(v):
 
 def main():
     parser = argparse.ArgumentParser(description="BTC Prediction Runner")
-    parser.add_argument("--timeframe", choices=["1h", "daily"], default="1h")
+    parser.add_argument("--timeframe", choices=["1h", "daily", "5m"], default="1h")
     parser.add_argument("--window", type=int, default=5, help="Look-back window size")
     parser.add_argument("--test-ratio", type=float, default=0.2, help="Fraction held out for testing")
     parser.add_argument(
@@ -330,11 +425,24 @@ def main():
         default=1.0,
         help="L1 LogReg C for direction model (try values from btc_nauti_predict_agent tune)",
     )
+    parser.add_argument(
+        "--kline-limit",
+        type=int,
+        default=1000,
+        help="5m only: candles to fetch from Bybit when btc_5m_ohlcv.json is missing (max 1000)",
+    )
+    parser.add_argument(
+        "--symbol",
+        type=str,
+        default="BTCUSDT",
+        help="5m Bybit linear symbol when fetching live (default BTCUSDT)",
+    )
     args = parser.parse_args()
 
     data_file = {
         "1h": os.path.join(DATA_DIR, "btc_1h_ohlcv.json"),
         "daily": os.path.join(DATA_DIR, "btc_daily_90d.json"),
+        "5m": os.path.join(DATA_DIR, "btc_5m_ohlcv.json"),
     }[args.timeframe]
 
     print(f"\n{'='*70}")
@@ -346,7 +454,19 @@ def main():
     print(f"{'='*70}\n")
 
     # Load & feature-engineer
-    df = load_bybit_ohlcv(data_file)
+    if args.timeframe == "5m":
+        if os.path.isfile(data_file):
+            df = load_bybit_ohlcv(data_file)
+            print(f"  Data: {data_file}")
+        else:
+            print(
+                f"  No local file {data_file!r} — fetching linear 5m from Bybit "
+                f"(limit={min(1000, max(50, args.kline_limit))})…",
+                flush=True,
+            )
+            df = fetch_linear_5m_ohlcv_df(limit=args.kline_limit, symbol=args.symbol)
+    else:
+        df = load_bybit_ohlcv(data_file)
     print(f"  Loaded {len(df)} candles  ({df['Date'].iloc[0].strftime('%Y-%m-%d %H:%M')} → {df['Date'].iloc[-1].strftime('%Y-%m-%d %H:%M')})")
     df = add_ta_features(df)
     print(f"  After TA features: {len(df)} rows, {len(df.columns)} columns\n")

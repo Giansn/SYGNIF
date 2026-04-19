@@ -1,0 +1,49 @@
+---
+description: Trailing TP/SL rule (Pine + exchange semantics) for SygnifStrategy / Freqtrade
+globs: user_data/strategies/SygnifStrategy.py,user_data/strategies/BTC_Strategy_0_1.py,SygnifStrategy.py,user_data/config*.json
+alwaysApply: false
+---
+
+# Trailing TP und Trailing SL (Handelsregel)
+
+## Referenzen
+
+- **Pine-Vorlage** (kombinierter Trail-Stop + fester SL + TP-Stufen): [hasnocool/tradingview-pine-scripts — Combining Trailing Stop and Stop loss](https://github.com/hasnocool/tradingview-pine-scripts/blob/main/Combining%20Trailing%20Stop%20and%20Stop%20loss%20(-%20of%20instrument%20price).pine) — Trail vom **Hoch** (Long) bzw. **Tief** (Short), fester SL in **% vom Entry**, nach erstem TP-Kontakt engerer **Boden/Deckel** (`longStopTP` / `shortStopTP` im Script).
+- **Börse (Konzept)** — Activation / Callback / kombinierte Orders: [Toobit — Trailing TP/SL FAQ](https://www.toobit.com/en-US/support/faq-for-trailing-tpsl) (Sygnif läuft auf **Bybit via Freqtrade**; Logik ist analog, nicht 1:1 API).
+
+## Sygnif-Umsetzung
+
+- **Aktivierung:** `SYGNIF_TRAILING_TPSL=1` (oder `true`/`yes`/`on`). Ohne diese Variable bleibt das bisherige Verhalten (Ratchet + Doom / Swing-Tags unverändert).
+- **Swing-Tags** (`swing_failure*`, `sygnif_swing*`, …): weiterhin **nur** bestehende SF-Logik — keine Überschreibung durch diese Regel.
+- **Stop (`custom_stoploss`):** Kombination aus
+  - Trail in **% vom besten seit Entry** (`trade.max_rate` / `trade.min_rate`, sonst Fallback),
+  - hartem SL in **% vom Entry**,
+  - nach Kontakt mit dem konfigurierten **TP-Hit-%** zusätzlicher **Lock-%** vom Entry (wie „SL after TP“ im Pine-Script).
+- **Trailing TP (`custom_exit`):** Sobald das Extrem den **TP-Hit-%**-Schwellenweg erreicht hat: Exit bei **Rücklauf um Callback-%** vom Extrem (Toobit-„Callback“-Idee).
+
+## Parameter (Umgebung)
+
+| Variable | Bedeutung (Default) |
+|----------|---------------------|
+| `SYGNIF_TS_TRAIL_PCT` | Abstand Trail vom Extrem, Anteil (0.07) |
+| `SYGNIF_TS_FIXED_SL_PCT` | Fester SL vom Entry, Anteil (0.02) |
+| `SYGNIF_TS_TP_HIT_PCT` | Extrem muss Entry±diesen Anteil erreichen, um TP-Phase / Trailing-TP zu aktivieren (0.02) |
+| `SYGNIF_TS_POST_TP_LOCK_PCT` | Nach TP-Hit: Mindestgewinn-Lock vom Entry, Anteil (0.01) |
+| `SYGNIF_TS_TP_CALLBACK_PCT` | Trailing-TP: Schließen bei Rücklauf vom Extrem, Anteil (0.01) |
+
+Preise bleiben **Spot-Geometrie** (Instrument); Futures-Doom-Cap aus `stop_threshold_doom_*` und Leverage bleibt wirksam.
+
+### BTC 0.1 + Swarm (Gewinnmitnahme)
+
+Mit **`SYGNIF_TRAILING_TPSL=1`** wertet `BTC_Strategy_0_1` aus, ob Swarm dem Long **widerspricht** (`btc_strategy_0_1_engine.swarm_adverse_to_long`): bearish Label, sehr negatives `swarm_mean`, oder `swarm_conflict` + schwaches Mean. Ist die Position **im Plus** (Schwelle wie Tag-TP: `min_profit × max(1, leverage)`), zieht ein **engerer** Trailing-TP vom Hoch (`trade.max_rate`): Exit-Reason **`exit_swarm_trailing_win`**.
+
+| Variable | Bedeutung (Default) |
+|----------|---------------------|
+| `SYGNIF_TS_SWARM_CALLBACK_PCT` | Pullback vom Peak für Swarm-Exit (0.004) |
+| `SYGNIF_TS_SWARM_MIN_PROFIT` | Mindest-`current_profit` vor Armierung, Basis × Leverage (0.008) |
+| `SYGNIF_TS_SWARM_MEAN_MAX` | Mean ≤ dieser Schwelle → adverse (-0.2) |
+| `SYGNIF_TS_SWARM_CONFLICT_MEAN_MAX` | Bei Conflict: Mean < dieser Schwelle → adverse (0.08) |
+
+Optional: `tuning.swarm_trail_tp` im Registry-JSON (`enabled`, `callback_pct`, `min_profit`, `adverse_mean_max`, …).
+
+Bei Änderungen an `custom_stoploss` / `custom_exit`: Tests unter `tests/test_strategy.py` für diesen Pfad anpassen oder erweitern.

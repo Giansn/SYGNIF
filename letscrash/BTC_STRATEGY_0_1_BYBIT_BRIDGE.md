@@ -4,6 +4,8 @@
 
 **Canonical strategy spec:** [`BTC_Strategy_0.1.md`](./BTC_Strategy_0.1.md) · **Registry:** [`btc_strategy_0_1_rule_registry.json`](./btc_strategy_0_1_rule_registry.json) · **Paper config (tracked):** `user_data/config_btc_strategy_0_1_paper_market.json` · **Demo exchange template:** `user_data/config_btc_strategy_0_1_bybit_demo.example.json`
 
+**Docker:** the dedicated **`freqtrade-btc-0-1`** compose service was **removed**. Use **`docker compose --profile archived-main-traders`** **`freqtrade-futures`** (host API **:8081**) or a host Freqtrade process; replace **8185** in older snippets with **8081** where applicable.
+
 ---
 
 ## 1. Components

@@ -10,6 +10,9 @@ Env:
 - **Isolated vs other demo linear bots:** ``BYBIT_DEMO_GRID_API_KEY`` / ``BYBIT_DEMO_GRID_API_SECRET`` (recommended).
 - Or shared demo account: ``BYBIT_DEMO_API_KEY`` / ``BYBIT_DEMO_API_SECRET`` only (grid and 0.1 then share one wallet).
 
+**Adaptive S/R grid (optional):** ``NAUTILUS_GRID_SR_OHLCV`` → path to ``btc_1h_ohlcv.json`` (default under
+``/lab/btc_specialist_data/`` in Docker). Set ``NAUTILUS_GRID_SR_DISABLE=1`` to turn off. ``NAUTILUS_GRID_SR_REFRESH_SEC`` reload interval.
+
 Bybit **hedge (default)** for USDT linear / inverse: ``BybitExecClientConfig.position_mode`` is set to
 ``BothSides`` (mode 3) for this symbol at client start (Nautilus calls Bybit ``switch-mode``).
 Use ``--merged-single`` to force one-way (``MergedSingle``) instead.
@@ -150,6 +153,23 @@ def main() -> int:
         action="store_true",
         help="Reset mid anchor on OrderRejected (legacy stormy behaviour).",
     )
+    _sr_default = os.environ.get(
+        "NAUTILUS_GRID_SR_OHLCV",
+        "/lab/btc_specialist_data/btc_1h_ohlcv.json",
+    )
+    if os.environ.get("NAUTILUS_GRID_SR_DISABLE", "").lower() in ("1", "true", "yes"):
+        _sr_default = ""
+    ap.add_argument(
+        "--sr-ohlcv-path",
+        default=_sr_default,
+        help="1h OHLCV JSON for 48-bar S/R + ATR-adaptive grid spacing; empty disables.",
+    )
+    ap.add_argument(
+        "--sr-refresh-secs",
+        type=float,
+        default=float(os.environ.get("NAUTILUS_GRID_SR_REFRESH_SEC", "120")),
+        help="Reload OHLCV for S/R at most this often.",
+    )
     ap.add_argument(
         "--merged-single",
         action="store_true",
@@ -229,6 +249,7 @@ def main() -> int:
         },
     )
 
+    sr_path = (args.sr_ohlcv_path or "").strip()
     grid_cfg = GridMarketMakerConfig(
         instrument_id=instrument_id,
         max_position=Quantity.from_str(args.max_position),
@@ -241,6 +262,8 @@ def main() -> int:
         emergency_requote_multiplier=args.emergency_requote_mult,
         clear_mid_anchor_on_reject=args.clear_anchor_on_reject,
         on_cancel_resubmit=args.on_cancel_resubmit,
+        sr_ohlcv_path=sr_path,
+        sr_refresh_interval_secs=float(args.sr_refresh_secs),
     )
 
     node = TradingNode(config=config_node)
@@ -259,7 +282,7 @@ def main() -> int:
         f"[grid-mm-live] demo=True | {instrument_id} | position_mode={pm} | trade_size={args.trade_size} | "
         f"max_position={args.max_position} | levels={args.num_levels} | step_bps={args.grid_step_bps} | "
         f"requote_bps={args.requote_threshold_bps} | requote_min_s={args.requote_min_interval_secs} | "
-        f"emergency_mult={args.emergency_requote_mult}",
+        f"emergency_mult={args.emergency_requote_mult} | sr_ohlcv={'on' if sr_path else 'off'}",
         flush=True,
     )
     try:

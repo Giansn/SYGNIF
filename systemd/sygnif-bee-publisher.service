@@ -1,0 +1,21 @@
+[Unit]
+Description=SYGNIF Bee Signal Publisher — uploads prediction signals to Ethereum Swarm
+After=network-online.target bee-light.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+Environment=BEE_PUBLISH_INTERVAL=300
+ExecStart=/home/ubuntu/SYGNIF/.venv/bin/python3 /home/ubuntu/SYGNIF/scripts/bee_signal_publisher.py
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

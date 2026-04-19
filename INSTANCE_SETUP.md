@@ -21,6 +21,20 @@ git clone https://github.com/Giansn/SYGNIF.git SYGNIF
 cd SYGNIF
 ```
 
+### Sygnif CLI (`sygnif` / `sygnif_cli.py`)
+
+The terminal UI depends on **`rich`** (listed in `requirements.txt`). Without it you get `ModuleNotFoundError: rich`.
+
+```bash
+cd ~/SYGNIF
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .   # installs console script `sygnif` into .venv/bin
+```
+
+Then: `.venv/bin/sygnif status` or `python3 sygnif_cli.py status`. A host wrapper such as `/usr/local/bin/sygnif` should `exec` the venv interpreter above — if the venv was recreated empty, reinstall deps.
+
 ## 3. Environment File
 
 ```bash
@@ -69,16 +83,16 @@ Edit both configs and set:
 1. Put **Bybit Demo Trading** API keys in **`.env`** as `BYBIT_DEMO_API_KEY` / `BYBIT_DEMO_API_SECRET` (see `.env.example`).
 2. Build **`user_data/config_futures.json`** from **`user_data/config_btc_strategy_0_1_bybit_demo.example.json`**: set `exchange.key` / `exchange.secret` (or inject via your own merge script). Keep **`ccxt_config.options`**: `defaultType` **swap**, `defaultSettle` **USDT**, **`enableDemoTrading`: true**, **`hostname`: `bybit.com`** — do **not** point linear demo at legacy hard-coded `api-demo` URLs (see bridge doc).
 3. **Rebuild** traders after changing the patch: `docker compose --profile archived-main-traders build freqtrade-futures` (or full `up -d --build`). `Dockerfile.custom` runs `bybit_ccxt_demo_patch.py` at **image** build; the **`freqtrade-futures`** service also runs it at **container start** before `freqtrade trade`.
-4. Start futures: `docker compose --profile archived-main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without that stack: `docker compose --profile btc-0-1 up -d --build freqtrade-btc-0-1` → base **`user_data/config_btc_strategy_0_1_paper_market.json`** + `apply_bybit_demo_to_btc_0_1_config.py` (`dry_run: true` if `BYBIT_DEMO_*` missing; else live demo orders).
+4. Start futures: `docker compose --profile archived-main-traders up -d` (includes `freqtrade-futures` with `BTC_Strategy_0_1` per compose). **Paper-only BTC 0.1** without the full archived stack: use **`user_data/config_btc_strategy_0_1_paper_market.json`** + `apply_bybit_demo_to_btc_0_1_config.py` on the host or a one-off Freqtrade process (`dry_run: true` if `BYBIT_DEMO_*` missing). The dedicated **`freqtrade-btc-0-1`** compose service was removed.
 5. **Never commit** a `config_futures.json` that contains real Telegram tokens or exchange secrets — use examples + `.env` only.
 
 6. **Optional — open order from BTC analysis:** `python3 scripts/btc_analysis_forceenter.py` (dry-run) posts a plan from `prediction_agent/btc_prediction_output.json` + training channel; `--execute` calls Freqtrade **`/forceenter`** (needs `force_entry_enable` + `FT_API_URL` / `FT_PASS` in env). See **`letscrash/BTC_STRATEGY_0_1_BYBIT_BRIDGE.md`** §7.
 
-**Force-enter scripts (btc-0-1, default API `http://127.0.0.1:8185/api/v1`):**
+**Force-enter scripts** (set `FT_BTC_0_1_API_URL` to your Freqtrade REST — archived futures is usually `http://127.0.0.1:8081/api/v1`):
 
 | Purpose | Path |
 |---------|------|
-| Force enter on btc-0-1 | `scripts/ft_btc_0_1_forceenter.py` |
+| Force enter on BTC 0.1 futures API | `scripts/ft_btc_0_1_forceenter.py` |
 | Force enter from BTC analysis JSON | `scripts/btc_analysis_forceenter.py` |
 | Force enter from 24h movement JSON | `scripts/ft_btc_0_1_from_24h_forecast.py` |
 
@@ -86,7 +100,7 @@ Paper config **`user_data/config_btc_strategy_0_1_paper_market.json`** uses **`m
 
 **Logs:** `docker logs freqtrade-futures --tail 80` — confirm exchange init and no Bybit **retCode** auth errors.
 
-**Grid + BTC 0.1 on the same host:** `nautilus-grid-btc01` (profile `btc-grid-mm`) and **`freqtrade-btc-0-1`** / **`freqtrade-futures`** both trade **BTCUSDT linear** on Bybit **demo** if they share **`BYBIT_DEMO_*`** — **one net position and one order book**; the grid is **not** an automatic hedge unless you use a **second demo API** (**`BYBIT_DEMO_GRID_API_KEY` / `BYBIT_DEMO_GRID_API_SECRET`**) so the MM runs on an isolated demo wallet (see `docker-compose.yml` header + `run_bybit_demo_grid_market_maker.py` startup warning).
+**Nautilus Grid MM + Freqtrade:** there is **no** `nautilus-grid-btc01` or `freqtrade-btc-0-1` compose service anymore. Run grid MM from the host (`scripts/start_bybit_demo_grid_mm.sh` + `research/nautilus_lab/`) and keep **`BYBIT_DEMO_GRID_*`** if you need a wallet isolated from **`freqtrade-futures`**.
 
 ## 5. Build and Start Containers
 
@@ -99,14 +113,15 @@ Verify:
 docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
 ```
 
-Expected containers:
+Expected containers (default / archived profile):
 
 | Container | Host bind | Role |
 |-----------|-----------|------|
-| `freqtrade` | `0.0.0.0:8080` | Spot Freqtrade API |
-| `freqtrade-futures` | `0.0.0.0:8081` | Futures Freqtrade API |
+| `finance-agent` | `127.0.0.1:8091` | Briefing / sentiment HTTP |
 | `notification-handler` | `127.0.0.1:8089` | Webhooks → Telegram routing |
-| `trade-overseer` | `127.0.0.1:8090` | LLM trade monitor HTTP (`/overview`, `/plays`, …) |
+| `freqtrade` | `0.0.0.0:8181→8080` | Spot Freqtrade API (archived profile) |
+| `freqtrade-futures` | `0.0.0.0:8081` | Futures Freqtrade API (archived profile) |
+| `trade-overseer` | `127.0.0.1:8090` | LLM trade monitor HTTP (`/overview`, `/plays`, …) (archived profile) |
 
 **Trade overseer: avoid double bind on 8090.** Do **not** `systemctl enable --now trade-overseer` on the host while Docker runs `trade-overseer` — both use `127.0.0.1:8090` and the systemd unit will fail with `Address already in use`. **Production = Docker** (`docker-compose.yml`). Use the host unit only for a **host-only** overseer (stop the container first); comments in `/etc/systemd/system/trade-overseer.service` describe this.
 
@@ -135,7 +150,7 @@ curl -s http://localhost:8888/interface | head -1   # BTC Interface (when btc-te
 curl -s http://localhost:8889 | head -1   # Futures dashboard
 ```
 
-**Port 8888 — one listener only:** `sygnif-dashboard-btc-terminal`, `sygnif-dashboard-spot`, and **Docker** services that publish **8888** (e.g. **`nautilus-jupyter-lab`** `8888:8888`) **cannot** all run at once. Stop the conflicting unit/container or set `SYGNIF_BTC_TERMINAL_PORT` (e.g. `8891`) in `.env` for the terminal unit. Then `sudo systemctl restart sygnif-dashboard-btc-terminal`.
+**Port 8888 — one listener only:** `sygnif-dashboard-btc-terminal` and `sygnif-dashboard-spot` **cannot** both bind **8888**. Stop one or set `SYGNIF_BTC_TERMINAL_PORT` (e.g. `8891`) in `.env` for the terminal unit. Then `sudo systemctl restart sygnif-dashboard-btc-terminal`.
 
 ### Reverse SSH tunnel (optional — stable URL via your own gateway)
 
@@ -185,6 +200,8 @@ sudo systemctl enable --now cursor-agent-worker
 
 Verify: `curl -fsS http://127.0.0.1:8093/healthz`
 
+The unit loads **`swarm_operator.env`** after `.env` so the worker process shares **Truthcoin / Hivemind / Swarm** operator variables with other host services. For **MCP** (NeuroLinked brain tools in Cursor), see **`.cursor/mcp.json`** → server `neurolinked` (expects NeuroLinked on **:8889** by default).
+
 ### BTC 0.1 persistent finetune tick (optional, complements Cursor worker)
 
 The **Cursor worker** (`cursor-agent-worker`) is for **Cloud-side** tasks (edits, reviews). It does **not** run a schedule by itself. For **continuous R01/R02/R03 evidence** on disk (report + monitor + optional `rule_tag_journal.csv` rows), enable this **systemd timer**:
@@ -214,6 +231,39 @@ sudo systemctl enable --now finance-agent
 ```
 
 Default briefing URL: `http://127.0.0.1:8091` (see `FINANCE_AGENT_HTTP_*` in `finance_agent/bot.py`). Docker `trade-overseer` reaches the host via `extra_hosts: host.docker.internal:host-gateway` in `docker-compose.yml`.
+
+### Swarm predict loop (systemd, optional — Bybit API demo automation)
+
+Continuous **`swarm_auto_predict_protocol_loop.py --execute`**: live 5m fit → Swarm gate + fusion (**btc_future** `bf`) → demo linear orders (`api-demo.bybit.com`). **Not** mainnet `api.bybit.com`. **Does not** replace Freqtrade spot/futures; use a **separate** demo sub-account / keys if you also run bots.
+
+**Prerequisites**
+
+- `~/SYGNIF/swarm_operator.env` (copy from `swarm_operator.env.example`): **`SYGNIF_PREDICT_PROTOCOL_LOOP_ACK=YES`**, **`BYBIT_DEMO_API_KEY`**, **`BYBIT_DEMO_API_SECRET`**.
+- Python deps for `run_live_fit` (e.g. `~/SYGNIF/.venv` with sklearn/xgboost, or `research/nautilus_lab/.venv` — the lock script picks the first usable interpreter).
+- Optional Nautilus chain: in `.env` / `swarm_operator.env` set **`NAUTILUS_SWARM_HOOK=1`** and **`NAUTILUS_SWARM_HOOK_KNOWLEDGE=1`** so training/sidecar sinks refresh `swarm_nautilus_protocol_sidecar.json` and `swarm_knowledge_output.json` without a separate cron.
+
+**Install**
+
+The unit **`Wants=` / `After=`** `btc-predict-runner.timer` so the hourly `btc_predict_runner` timer is pulled in with the loop (install both units if you use hourly ML refresh):
+
+```bash
+sudo cp /home/ubuntu/SYGNIF/systemd/btc-predict-runner.service /etc/systemd/system/
+sudo cp /home/ubuntu/SYGNIF/systemd/btc-predict-runner.timer /etc/systemd/system/
+sudo systemctl enable --now btc-predict-runner.timer
+
+sudo cp /home/ubuntu/SYGNIF/systemd/sygnif-swarm-predict-loop.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sygnif-swarm-predict-loop
+journalctl -u sygnif-swarm-predict-loop -f
+```
+
+**Stop / disable**
+
+```bash
+sudo systemctl disable --now sygnif-swarm-predict-loop
+```
+
+**Single instance:** `scripts/sygnif_swarm_predict_loop_locked.sh` uses `flock` on `/run/user/$UID/sygnif-swarm-predict-loop.lock` (override with `SYGNIF_SWARM_PREDICT_LOOP_LOCK_FILE`). If a second start races, it exits cleanly so you do not get duplicate venue loops. The wrapper also exports fusion-compat defaults (`SWARM_ORDER_BTC_FUTURE_*FLAT_PASS`, `SYGNIF_FUSION_BTC_FUTURE_ADAPT_WHEN_FLAT`) so a **flat** Bybit demo book still yields a usable `vote_btc_future` in `swarm_nautilus_protocol_sidecar.json` (see `prediction_agent/nautilus_protocol_fusion.py`).
 
 ## 7. Movers Pairlist (Optional Cron)
 
@@ -272,7 +322,7 @@ curl -fsS http://127.0.0.1:8090/overview 2>/dev/null | head -c 200
 curl -fsS http://127.0.0.1:8093/healthz   # Cursor worker
 ```
 
-Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /health`; `notification-handler` → `GET /`; Freqtrade containers (when started) → `GET /api/v1/ping`; `trade-overseer` (when started) → `GET /health`; `nautilus-research` → `python3 /lab/workspace/nautilus_smoke.py`. Freqtrade-based services **wait on** `finance-agent` + `notification-handler` **healthy** where `depends_on` is set — rebuild/recreate may take longer on first boot until `start_period` elapses.
+Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /health`; `notification-handler` → `GET /`; Freqtrade containers (when started) → `GET /api/v1/ping`; `trade-overseer` (when started) → `GET /health`. Freqtrade-based services **wait on** `finance-agent` + `notification-handler` **healthy** where `depends_on` is set — rebuild/recreate may take longer on first boot until `start_period` elapses.
 
 ## Services Summary
 
@@ -283,13 +333,60 @@ Compose **healthchecks** (Docker `HEALTHY` status): `finance-agent` → `GET /he
 | `notification-handler` | Docker | 8089 (**localhost only**) | yes |
 | `trade-overseer` | Docker | 8090 (**localhost only**) | yes |
 | `sygnif-dashboard-spot` | systemd | 8888 | yes (**exclusive** with btc-terminal on same port) |
-| `sygnif-dashboard-futures` | systemd | 8889 | yes |
+| `sygnif-dashboard-futures` | systemd | 8889 | yes (**exclusive** with `sygnif-neurolinked` on same port) |
 | `sygnif-dashboard-btc-terminal` | systemd | 8888 (`/interface` = Bybit demo) | yes (**exclusive** with spot on same port) |
 | `sygnif-reverse-tunnel` | systemd (optional) | — (outbound SSH) | yes |
 | `sygnif-notify` | systemd | — | yes |
 | `cursor-agent-worker` | systemd (optional) | 8093 (**localhost**, management) | yes |
 | `sygnif-btc01-finetune.timer` | systemd (optional) | — (runs `btc01_finetune_tick.py` on interval) | yes |
 | `finance-agent` | systemd (optional) | 8091 (default **localhost**, briefing HTTP) | yes |
+| `sygnif-neurolinked` | systemd (optional) | **8889** (`GET /` → `dashboard/index.html`, WebSocket) | yes (**exclusive** with `sygnif-dashboard-futures`) |
+
+## NeuroLinked dashboard (optional, port **8889**)
+
+Vendored under **`third_party/neurolinked`**. Serves the **3D brain UI** + WebSocket updates; brain persistence in **`third_party/neurolinked/brain_state/`** (keep across code updates).
+
+**Port clash:** `dashboard_server_futures.py` uses **8889** by default (`sygnif-dashboard-futures`). **Do not run** futures dashboard and NeuroLinked **at the same time** on this host unless you move one of them to another port (e.g. change `PORT` in `dashboard_server_futures.py` / its unit, or override NeuroLinked `ExecStart` port via `systemctl edit`).
+
+| Item | Detail |
+|------|--------|
+| **URL** | `http://127.0.0.1:8889/` |
+| **Predict-loop hook** | `SYGNIF_NEUROLINKED_HTTP_URL` (default `http://127.0.0.1:8889`) → `POST /api/input/text` — see `finance_agent/neurolinked_predict_loop_hook.py` |
+| **Deps** | `~/SYGNIF/.venv`: `uvicorn`, `fastapi`, `websockets`; full stack: `pip install -r third_party/neurolinked/requirements.txt` |
+
+**Manual run (foreground):**
+
+```bash
+sudo systemctl stop sygnif-dashboard-futures   # free 8889 if it was running
+cd ~/SYGNIF/third_party/neurolinked
+~/SYGNIF/.venv/bin/python3 run.py --host 127.0.0.1 --port 8889 --neurons 10000
+```
+
+**systemd (survives reboot):**
+
+```bash
+sudo cp ~/SYGNIF/systemd/sygnif-neurolinked.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl stop sygnif-dashboard-futures   # before enable if both were active
+sudo systemctl enable --now sygnif-neurolinked.service
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8889/   # expect 200
+journalctl -u sygnif-neurolinked.service -n 40 --no-pager
+```
+
+**Stop:** `sudo systemctl stop sygnif-neurolinked` or `pkill -f 'run.py.*8889'` (avoid killing unrelated processes).
+
+**Remote SSH:** `ssh -L 8889:127.0.0.1:8889 user@sygnif-host` then open `http://127.0.0.1:8889/` on the laptop.
+
+**„HTTP öffnet nicht“ (Browser):**
+
+| Situation | Ursache | Lösung |
+|-----------|---------|--------|
+| Laptop / Handy, URL = `http://<EC2-IP>:8889` | Server bindet nur **Loopback** (`127.0.0.1`), nicht die öffentliche IP | SSH-Tunnel (Zeile oben) **oder** `run.py` / Unit mit `--host 0.0.0.0` und Security-Group **Inbound TCP 8889** (nur wenn nötig, weniger restriktiv) |
+| URL mit **https://** | Uvicorn spricht nur **http** | `http://127.0.0.1:8889/` verwenden |
+| Prozess läuft nicht / **Address already in use** | Nichts auf :8889 **oder** Futures-Dashboard blockiert 8889 | `ss -tlnp | grep 8889` — `sudo systemctl stop sygnif-dashboard-futures` dann NeuroLinked starten |
+| Nur **IPv6** `localhost` → `::1` | Manche Systeme lösen `localhost` nach `::1` auf, Server lauscht nur IPv4 | **`http://127.0.0.1:8889/`** statt `localhost` testen |
+
+Schnelltest **auf dem Sygnif-Host:** `curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8889/` → erwartet `200`.
 
 ## Automation as an instance-wide network (stable ops)
 
@@ -321,6 +418,7 @@ Treat the **EC2 host** as one **control plane**: processes are **nodes** that ta
 | Movers data | `movers_pairlist.json` (gitignored) |
 | Env secrets | `.env` (gitignored) |
 | Systemd units | `systemd/` (repo copies) |
+| NeuroLinked (vendored) | `third_party/neurolinked/` — state in `third_party/neurolinked/brain_state/` |
 
 ## Ports to Open (Security Group / Firewall)
 
@@ -329,57 +427,14 @@ Treat the **EC2 host** as one **control plane**: processes are **nodes** that ta
 | 8080 | Freqtrade API (spot) | Typically open for UI/API access |
 | 8081 | Freqtrade API (futures) | Same |
 | 8888 | Spot dashboard **or** BTC Terminal + `/interface` | **One** service only on this port |
-| 8889 | Futures dashboard | |
+| 8889 | Futures dashboard **or** NeuroLinked | **One** listener — not both `sygnif-dashboard-futures` and `sygnif-neurolinked` |
 | 8089 | Notification handler | **Bound to localhost** in compose — not exposed publicly by default |
 | 8090 | Trade overseer HTTP | **Localhost** — use SSH tunnel if needed remotely |
 | 8091 | Finance agent briefing | Default **127.0.0.1** — overseer container uses `host.docker.internal` |
 | 8093 | Cursor worker management | **Localhost** |
+## BTC Nautilus / grid (host only; compose services removed)
 
-## BTC dock: pure Nautilus (`btc-nautilus`)
-
-Profile **`btc-nautilus`** starts **`nautilus-research`** (Bybit HTTP sink → `finance_agent/btc_specialist/data/` for **`btc_predict_runner`** / training) + **`nautilus-sygnif-btc-node`** (Nautilus **`TradingNode`** bar strategy — extend for BTC execution logic). **No Freqtrade** in this profile. Optional archived Freqtrade BTC dock + **`trade-overseer`**: profile **`archived-freqtrade-btc-dock`** (see `archive/freqtrade-btc-dock-2026-04-13/RESTORE.txt`).
-
-```bash
-cd ~/SYGNIF
-docker compose --profile btc-nautilus up -d --build
-```
-
-## Optional: `nautilus-research` only (same image as BTC dock)
-
-Profile **`btc-nautilus`** groups **`nautilus-research`** and **`nautilus-sygnif-btc-node`**. Start **only** the sink container by naming the service. Legacy merge files **`docker-compose.nautilus-research.yml`** / **`docker-compose.nautilus-strategy-sidecar.yml`** / **`docker-compose.btc-nautilus-research.yml`** were removed — use **`docker-compose.yml`** only.
-
-```bash
-cd ~/SYGNIF
-docker compose --profile btc-nautilus up -d --build finance-agent nautilus-research
-# full BTC Nautilus dock (research + bar node): omit the service name
-# docker compose --profile btc-nautilus up -d --build
-docker exec -it nautilus-research python3 /lab/workspace/btc_regime_assessment.py
-```
-
-See `research/nautilus_lab/README.md` and `SWING_FAILURE_ANALYSIS.md`.
-
-## Optional: `nautilus-grid-btc01` (Nautilus **GridMarketMaker** on Bybit demo, BTCUSDT linear)
-
-Profile **`btc-grid-mm`**: places live **demo** orders via Nautilus `GridMarketMaker`. Set **`NAUTILUS_GRID_MM_DEMO_ACK=YES`** in `.env` plus **`BYBIT_DEMO_*`**. Prefer **`BYBIT_DEMO_GRID_*`** (or a separate demo key) if you also run other Bybit demo linear bots.
-
-**Sizing (defaults in `docker-compose.yml`):** **`NAUTILUS_GRID_BTC01_NUM_LEVELS=8`** → up to **16** resting post-only limits (8 bid + 8 ask rungs) when flat and **`NAUTILUS_GRID_BTC01_MAX_POSITION`** allows (`≥ num_levels × trade_size` per side). Wider **`NAUTILUS_GRID_BTC01_GRID_STEP_BPS`** spreads rungs for larger BTC moves. **`NAUTILUS_GRID_BTC01_REQUOTE_BPS`** (wider = fewer cancel/replace cycles) plus **`NAUTILUS_GRID_BTC01_REQUOTE_MIN_SEC`** debounce reduce orders “flashing” on the Bybit UI when quote ticks outpace cancel acks; override in `.env` if needed.
-
-**Persistent after reboot:** service uses **`restart: unless-stopped`**. Add **`COMPOSE_PROFILES=btc-grid-mm`** (alone or comma-appended) to `.env` so a normal **`docker compose up -d`** from `~/SYGNIF` recreates the grid after a host restart (still needs `finance-agent` healthy).
-
-**Cancel all open BTCUSDT linear orders on demo** (stop the grid container first if you do not want immediate re-quotes):
-
-```bash
-cd ~/SYGNIF
-docker stop nautilus-grid-btc01 2>/dev/null || true
-PYTHONPATH=. python3 scripts/bybit_demo_cancel_open_orders.py
-```
-
-```bash
-cd ~/SYGNIF
-./scripts/start_btc01_nautilus_grid.sh
-# or: docker compose --profile btc-grid-mm up -d nautilus-grid-btc01
-docker logs nautilus-grid-btc01 -f
-```
+**`docker-compose.yml` no longer defines** `nautilus-research`, `nautilus-sygnif-btc-node`, `nautilus-grid-btc01`, `nautilus-btc-testnet`, `freqtrade-btc-0-1`, or `freqtrade-btc-spot`. Refresh OHLCV / run bar node / grid MM from **`research/nautilus_lab/`** with a local Python venv (`requirements-bybit-demo-live.txt`). Snapshot of the old compose stack: **`archive/freqtrade-btc-dock-2026-04-13/`**.
 
 ## Optional: `btc-predict-runner` (ML bot on host, not Docker)
 

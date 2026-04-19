@@ -81,6 +81,7 @@ flowchart LR
 | **Daily (06:15 UTC)** | `collect_ms3_metrics.py` | `market_strategy_3_metrics.json` + JSONL + entry_perf log |
 | **Every 6h (:30 UTC)** | `cron_trading_success.sh` | `trading_success` Telegram + `strategy_paths` + logs |
 | **Every 20m** | `scripts/sentiment_health_watch.py` | Log always; **@sygnif_agent_bot** if sentiment/HTTP urgent **or** any `enter_tag` has **5 consecutive losing** closes (`close_profit < 0`) in spot/futures DB (see `.cursor/rules/sygnif-sentiment-layer.mdc`) |
+| **Weekly (optional, research)** | `predict_protocol_gate_optimizer.py` | Offline **walk-forward** gate search on public 5m klines; log JSON + human review before any `.env` change (see Swarm section below). |
 | **On demand** | `/sygnif`, `/finance-agent cycle`, Cursor task | LLM + raw bundle |
 | **Before code edits** | GitNexus impact / query | Safer refactors |
 
@@ -102,9 +103,44 @@ For Linear / Cloud tasks that must be machine-readable, follow **`cloud-runbook.
 - [ ] `.env` for Docker: escape **`$`** in passwords as **`$$`** (Compose interpolation).
 - [ ] After bounded tuning: run **`pytest`** for strategy tests when Python changes.
 
+## Swarm auto-improvement (telemetry loop)
+
+**Purpose:** a **Swarm-native** observe → persist trail for fusion / gates / briefing — **no orders**, no automatic `strategy_adaptation.json` writes.
+
+| Piece | Role |
+|-------|------|
+| `scripts/swarm_auto_improvement_flow.py` | Each run: `compute_swarm()`, optional `write_fused_sidecar` (`SYGNIF_SWARM_IMPROVEMENT_FUSION_SYNC=1`), delta vs last state, append `prediction_agent/swarm_auto_improvement_history.jsonl`, write `swarm_auto_improvement_state.json` + **hints** (conflict persistence, mean sign flip, source shifts). |
+| `scripts/swarm_analyze_btc.py` | Heavier **train + read-only** swarm loop (ML/channel refresh); use when you want model JSON refreshed, not only fuse. |
+| `scripts/swarm_auto_predict_protocol_loop.py` | **Venue** auto path with `SYGNIF_SWARM_GATE_LOOP` — trading; keep **ACK** gates; not the same as improvement telemetry. |
+
+**Schedule (example):** cron every 15–60m: `cd ~/SYGNIF && python3 scripts/swarm_auto_improvement_flow.py`  
+**Tight loop (dev only):** `SWARM_IMPROVE_INTERVAL_SEC=120 python3 scripts/swarm_auto_improvement_flow.py --loop`
+
+Use hints + history to tune `swarm_order_gate.py` env, channel training cadence, or TA snapshot freshness — then validate bounded changes via the **Act bounded** gates above.
+
+**Offline Swarm + predict-protocol P/L (research):** `scripts/predict_protocol_offline_swarm_backtest.py` replays **5m fit + decide_side** on public klines, optional **`swarm_fusion_allows`** with **simulated `vote_btc_future` = simulated position**, optional **intrabar TP/SL**, and `--grid-mean-long` for a coarse **`SWARM_ORDER_MIN_MEAN_LONG`** sweep. **`--offline-hm-source demo_once|demo_refresh`** maps **`sources.hm`** from **Bybit demo** `position/list` (`BYBIT_DEMO_*`) — **as-of API time**, not true per-bar history. Does **not** replace live `btc_predict_protocol_loop.py` (no venue).
+
+**Full gate hyperparameter search:** `scripts/predict_protocol_gate_optimizer.py` — **Optuna TPE** (default) or **random** or **pyswarms** (continuous subset + bool preset) over **all** `swarm_fusion_allows` env knobs (mean bounds, conflict, bf/hm/nautilus/fusion/ML logreg, …). Uses the same offline sim; **`pip install optuna`** from `requirements-dev.txt`.
+
+**Walk-forward:** `--walk-forward --wf-folds 4` splits the trailing `--hours` window; slice **0** is in-sample for the search, later slices are **OOS**. By default **position state carries** from IS into each OOS slice (`walk_forward_report.wf_carry_state`); use **`--wf-independent-folds`** if every slice should start flat. **`--log-jsonl PATH`** appends trial lines (`wf_phase`: `is_search`, `is_rerun_carry_seed`, `oos_fold`).
+
+**Cron example (weekly, low priority, UTC):** append a log and review manually — not applied to production `.env` automatically.
+
+```cron
+15 4 * * 1 cd /home/ubuntu/SYGNIF && \
+  OUT=prediction_agent/gate_opt_wf_$(date -u +%F).jsonl && \
+  python3 scripts/predict_protocol_gate_optimizer.py --walk-forward --wf-folds 4 \
+  --engine optuna --trials 80 --hours 96 --seed $(date +%s) --log-jsonl "$OUT" >> /tmp/gate_opt_cron.log 2>&1
+```
+
+**CI:** scripts are **byte-compiled** in `.github/workflows/python-ci.yml`. Optional end-to-end smoke (slow, Bybit + ML): `SYGNIF_GATE_OPT_SMOKE=1 pytest -m integration tests/test_predict_protocol_gate_optimizer_integration.py`.
+
 ## Related files
 
 - `.cursor/cursor-agent-config.md` — worker + Telegram alignment.
 - `AGENT_OPS_README.md` — ops summary.
 - `scripts/prediction_horizon_check.py` — horizon discipline.
 - `user_data/strategy_adaptation.py` — override rails.
+- `scripts/swarm_auto_improvement_flow.py` — Swarm improvement telemetry.
+- `scripts/predict_protocol_offline_swarm_backtest.py` — offline gated protocol P/L sim.
+- `scripts/predict_protocol_gate_optimizer.py` — Optuna / random / pyswarms gate search.

@@ -16,3 +16,10 @@ httpx>=0.28.0
 
 # Optional: faster resolver / venv (CI still uses pip)
 uv>=0.6.0
+
+# system_snapshot_shot.py — also run: playwright install chromium && playwright install-deps chromium
+playwright>=1.49.0
+
+# scripts/predict_protocol_gate_optimizer.py — Bayesian-style gate search (optional)
+optuna>=4.0.0
+# pyswarms>=2.7.0  # optional: --engine pyswarms

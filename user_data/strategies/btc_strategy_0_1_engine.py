@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +106,179 @@ def r01_r03_stack_guard_loss_pct() -> float:
 
 def training_channel_path() -> Path:
     return _repo_root() / "prediction_agent" / "training_channel_output.json"
+
+
+# --- Swarm snapshot (``prediction_agent/swarm_knowledge_output.json``) — optional BTC-0.1 gate ---
+_swarm_snap_mtime: float = -1.0
+_swarm_snap_doc: dict[str, Any] = {}
+
+
+def swarm_knowledge_path() -> Path:
+    d = (os.environ.get("SYGNIF_PREDICTION_AGENT_DIR") or os.environ.get("PREDICTION_AGENT_DIR") or "").strip()
+    if d:
+        return Path(d) / "swarm_knowledge_output.json"
+    return _repo_root() / "prediction_agent" / "swarm_knowledge_output.json"
+
+
+def load_swarm_snapshot() -> dict[str, Any]:
+    """Read fused swarm JSON (mtime-cached). Empty if missing."""
+    global _swarm_snap_mtime, _swarm_snap_doc
+    p = swarm_knowledge_path()
+    if not p.is_file():
+        return {}
+    try:
+        st = p.stat().st_mtime
+    except OSError:
+        return {}
+    if st == _swarm_snap_mtime and _swarm_snap_doc:
+        return _swarm_snap_doc
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.debug("btc01 swarm snapshot read: %s", e)
+        return {}
+    _swarm_snap_mtime = st
+    _swarm_snap_doc = doc if isinstance(doc, dict) else {}
+    return _swarm_snap_doc
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def swarm_trail_tp_tuning() -> dict[str, Any]:
+    """Optional ``tuning.swarm_trail_tp`` in registry (overrides env defaults when set)."""
+    raw = tuning_config().get("swarm_trail_tp")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _env_float_swarm(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def swarm_adverse_to_long(row: pd.Series) -> bool:
+    """
+    Swarm snapshot disagrees with holding a long (bearish / weak / conflict).
+
+    Used with ``SYGNIF_TRAILING_TPSL`` + ``BTC_Strategy_0_1`` to tighten take-profit
+    (smaller callback from ``trade.max_rate``) and bank a win.
+    """
+    st = swarm_trail_tp_tuning()
+    if st.get("enabled") is False:
+        return False
+    label = str(row.get("swarm_label") or "").upper()
+    try:
+        bear_needle = str(st.get("bear_label_substr", "BEAR") or "BEAR").upper()
+    except Exception:
+        bear_needle = "BEAR"
+    if bear_needle and bear_needle in label:
+        return True
+    try:
+        mean = float(row.get("swarm_mean") or 0.0)
+    except (TypeError, ValueError):
+        mean = 0.0
+    raw_m = st.get("adverse_mean_max")
+    if raw_m is not None and raw_m != "":
+        try:
+            mean_adverse = float(raw_m)
+        except (TypeError, ValueError):
+            mean_adverse = _env_float_swarm("SYGNIF_TS_SWARM_MEAN_MAX", -0.2)
+    else:
+        mean_adverse = _env_float_swarm("SYGNIF_TS_SWARM_MEAN_MAX", -0.2)
+    if mean <= mean_adverse:
+        return True
+    conflict = bool(row.get("swarm_conflict"))
+    raw_c = st.get("adverse_conflict_mean_max")
+    if raw_c is not None and raw_c != "":
+        try:
+            c_mean = float(raw_c)
+        except (TypeError, ValueError):
+            c_mean = _env_float_swarm("SYGNIF_TS_SWARM_CONFLICT_MEAN_MAX", 0.08)
+    else:
+        c_mean = _env_float_swarm("SYGNIF_TS_SWARM_CONFLICT_MEAN_MAX", 0.08)
+    if conflict and mean < c_mean:
+        return True
+    return False
+
+
+def swarm_trail_callback_pct() -> float:
+    """Pullback from peak (instrument %) to realize win when Swarm is adverse — tighter than generic TSL."""
+    st = swarm_trail_tp_tuning()
+    try:
+        v = float(st.get("callback_pct", 0.0))
+        if v > 0:
+            return max(1e-6, min(v, 0.08))
+    except (TypeError, ValueError):
+        pass
+    return max(1e-6, min(_env_float_swarm("SYGNIF_TS_SWARM_CALLBACK_PCT", 0.004), 0.08))
+
+
+def swarm_trail_min_profit_gate(leverage: float) -> float:
+    """Minimum ``current_profit`` (same units as Freqtrade / BTC-0.1 tag TP) before Swarm trail TP arms."""
+    st = swarm_trail_tp_tuning()
+    try:
+        base = float(st.get("min_profit", 0.0))
+        if base > 0:
+            return base * max(1.0, float(leverage))
+    except (TypeError, ValueError):
+        pass
+    base = _env_float_swarm("SYGNIF_TS_SWARM_MIN_PROFIT", 0.008)
+    return base * max(1.0, float(leverage))
+
+
+def attach_swarm_columns(df: pd.DataFrame) -> None:
+    """Broadcast ``swarm_mean`` / ``swarm_label`` / ``swarm_conflict`` from snapshot onto ``df``."""
+    if df.empty:
+        return
+    sw = load_swarm_snapshot()
+    mean = float(sw.get("swarm_mean") or 0.0) if sw else 0.0
+    label = str(sw.get("swarm_label") or "") if sw else ""
+    conflict = bool(sw.get("swarm_conflict")) if sw else False
+    if "swarm_mean" not in df.columns:
+        df.loc[:, "swarm_mean"] = mean
+    else:
+        df.loc[:, "swarm_mean"] = mean
+    if "swarm_label" not in df.columns:
+        df.loc[:, "swarm_label"] = label
+    else:
+        df.loc[:, "swarm_label"] = label
+    if "swarm_conflict" not in df.columns:
+        df.loc[:, "swarm_conflict"] = conflict
+    else:
+        df.loc[:, "swarm_conflict"] = conflict
+
+
+def swarm_root_blocks_long() -> bool:
+    """
+    When ``SYGNIF_BTC01_SWARM_ROOT=1``, Swarm may veto **all** new long entries on BTC
+    (read-only signal from ``swarm_knowledge_output.json``).
+
+    Blocks when: bearish label, strongly negative mean, or conflict + non-bull mean.
+    """
+    if not _env_truthy("SYGNIF_BTC01_SWARM_ROOT"):
+        return False
+    sw = load_swarm_snapshot()
+    if not sw:
+        return False
+    try:
+        mean = float(sw.get("swarm_mean") or 0.0)
+    except (TypeError, ValueError):
+        mean = 0.0
+    label = str(sw.get("swarm_label") or "")
+    conflict = bool(sw.get("swarm_conflict"))
+    if "BEAR" in label.upper():
+        return True
+    if mean <= -0.35:
+        return True
+    if conflict and mean < 0.05:
+        return True
+    return False
 
 
 def load_notional_cap_usdt() -> float:

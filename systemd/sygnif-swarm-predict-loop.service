@@ -1,0 +1,30 @@
+[Unit]
+Description=SYGNIF Swarm-gated BTC predict-protocol loop (Bybit API demo; swarm_auto --execute)
+Documentation=file:///home/ubuntu/SYGNIF/scripts/swarm_auto_predict_protocol_loop.py
+After=network-online.target
+Wants=network-online.target
+# Hourly ML refresh (btc_predict_runner) — weak dep: start timer with loop; install timer unit if missing.
+Wants=btc-predict-runner.timer
+After=btc-predict-runner.timer
+StartLimitIntervalSec=400
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/swarm_operator.env
+# Apply ``prediction_agent/swarm_demo_runtime_hints.json`` when present (whitelist env; override in swarm_operator.env).
+Environment=SYGNIF_SWARM_RUNTIME_HINTS_APPLY=1
+# Human ACK for venue orders — set SYGNIF_PREDICT_PROTOCOL_LOOP_ACK=YES in swarm_operator.env (gitignored).
+ExecStart=/bin/bash /home/ubuntu/SYGNIF/scripts/sygnif_swarm_predict_loop_locked.sh
+Restart=on-failure
+RestartSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

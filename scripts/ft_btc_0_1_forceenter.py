@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Open a position on **freqtrade-btc-0-1** (Bybit demo when configured) via Freqtrade REST.
+Open a position via Freqtrade REST (default: **archived-main-traders** futures API on host **8081**).
 
-**Paths** (relative to API base, default ``http://127.0.0.1:8185/api/v1``):
+**Paths** (relative to API base, default ``http://127.0.0.1:8081/api/v1``):
 
 1. ``POST …/token/login`` — HTTP Basic auth (username + password) → JWT ``access_token``
 2. ``POST …/forceenter`` — header ``Authorization: Bearer <token>``, JSON body per
@@ -34,7 +34,7 @@ from urllib.request import Request, urlopen
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG = _REPO_ROOT / "user_data/config_btc_strategy_0_1_paper_market.json"
-_DEFAULT_API_BASE = "http://127.0.0.1:8185/api/v1"
+_DEFAULT_API_BASE = "http://127.0.0.1:8081/api/v1"
 
 
 def _password_from_config(path: Path) -> str:
@@ -105,7 +105,7 @@ def _forceenter(api_base: str, token: str, payload: dict) -> dict:
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="POST /api/v1/forceenter on freqtrade-btc-0-1 (host port 8185 by default).",
+        description="POST /api/v1/forceenter on Freqtrade futures (host port 8081 by default; was 8185 for removed freqtrade-btc-0-1).",
     )
     p.add_argument(
         "--api-url",

@@ -7,12 +7,17 @@ computes a simple regime hint, writes ``nautilus_strategy_signal.json`` next to 
 
 **Does not** place exchange orders and **does not** call Bybit — avoids racing the sink.
 Downstream execution is outside this sidecar; this file is an optional signal feed for research and dashboards.
+
+**Swarm hook:** ``NAUTILUS_SWARM_HOOK=1`` and/or ``NAUTILUS_FUSION_SIDECAR_SYNC=1`` →
+``prediction_agent/nautilus_swarm_hook.py`` after each signal write. Add ``NAUTILUS_SWARM_HOOK_KNOWLEDGE=1``
+to refresh ``swarm_knowledge_output.json``.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +27,32 @@ import numpy as np
 import pandas as pd
 
 OUT_NAME = "nautilus_strategy_signal.json"
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _maybe_swarm_hook_after_sidecar_write() -> None:
+    """Optional: ``nautilus_swarm_hook`` (fusion + optional swarm_knowledge) — see prediction_agent."""
+    if not (
+        _env_truthy("NAUTILUS_SWARM_HOOK")
+        or _env_truthy("NAUTILUS_FUSION_SIDECAR_SYNC")
+        or _env_truthy("SYGNIF_BYBIT_DEMO_PREDICTED_MOVE_EXPORT")
+    ):
+        return
+    try:
+        root = Path(__file__).resolve().parents[2]
+        pa = root / "prediction_agent"
+        if not pa.is_dir():
+            return
+        if str(pa) not in sys.path:
+            sys.path.insert(0, str(pa))
+        from nautilus_swarm_hook import run_nautilus_swarm_hook  # noqa: PLC0415
+
+        run_nautilus_swarm_hook(phase="sidecar", repo_root=root)
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({"nautilus_swarm_hook_sidecar_error": str(exc)}), flush=True)
 
 
 def _data_dir() -> Path:
@@ -113,6 +144,7 @@ def run_once() -> dict[str, Any] | None:
     out = analyze(df)
     out_path = ddir / OUT_NAME
     _atomic_write(out_path, out)
+    _maybe_swarm_hook_after_sidecar_write()
     return out
 
 

@@ -78,6 +78,31 @@ def _write_crypto_market_data_bundle(utc: str) -> bool:
         return False
 
 
+def _write_btc_usd_index_correlation(d1: list, utc: str) -> bool:
+    """FRED broad USD index vs BTC daily returns (optional ``FRED_API_KEY``)."""
+    sys.path.insert(0, str(FINANCE_AGENT_DIR))
+    try:
+        from btc_usd_index_correlation import compute_btc_usd_index_correlation
+        from btc_usd_index_correlation import fred_api_key
+    except ImportError:
+        return False
+    if not fred_api_key():
+        return False
+    doc, err = compute_btc_usd_index_correlation(d1)
+    if err or not doc:
+        return False
+    payload = {
+        "generated_utc": utc,
+        "source": "FRED DTWEXBGS + Bybit BTCUSDT daily (pull_btc_context)",
+        **doc,
+    }
+    (OUT / "btc_usd_index_correlation.json").write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return True
+
+
 def _write_newhedge_altcoins_correlation(utc: str) -> bool:
     if not (os.environ.get("NEWHEDGE_API_KEY") or "").strip():
         return False
@@ -266,17 +291,23 @@ def main() -> int:
     d1 = _kline("spot", "BTCUSDT", "D", 90)
     (OUT / "btc_daily_90d.json").write_text(json.dumps(d1, indent=2) + "\n", encoding="utf-8")
 
+    m5 = _kline("linear", "BTCUSDT", "5", 1000)
+    (OUT / "btc_5m_ohlcv.json").write_text(json.dumps(m5, indent=2) + "\n", encoding="utf-8")
+
     _write_sygnif_ta_snapshot(h1, utc)
 
     files_written = [
         "bybit_btc_ticker.json",
         "btc_1h_ohlcv.json",
         "btc_daily_90d.json",
+        "btc_5m_ohlcv.json",
     ]
     if (OUT / "btc_sygnif_ta_snapshot.json").is_file():
         files_written.append("btc_sygnif_ta_snapshot.json")
     if _write_newhedge_altcoins_correlation(utc):
         files_written.append("btc_newhedge_altcoins_correlation.json")
+    if _write_btc_usd_index_correlation(d1, utc):
+        files_written.append("btc_usd_index_correlation.json")
     if _write_cryptoapis_foundation(utc):
         files_written.append("btc_cryptoapis_foundation.json")
 
@@ -287,9 +318,9 @@ def main() -> int:
     manifest = {
         "generated_utc": utc,
         "source": (
-            "Bybit v5 public market API (spot); optional Crypto APIs BTC mainnet + market-data; "
-            "optional NewHedge altcoins correlation; "
-            "optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)"
+            "Bybit v5 public market API (spot 1h+daily, linear 5m BTCUSDT); optional Crypto APIs BTC mainnet + "
+            "market-data; optional NewHedge altcoins correlation; optional FRED broad USD vs BTC daily "
+            "correlation (FRED_API_KEY); optional ErcinDedeoglu/crypto-market-data (CC BY 4.0)"
         ),
         "symbol": "BTCUSDT",
         "files": files_written,

@@ -67,9 +67,15 @@ Document `source`, `reason`, and `updated` (ISO UTC) when you change overrides.
 - Strategy reference: **`user_data/strategies/SygnifStrategy.py`** (and root `SygnifStrategy.py` for tests). Use the same entry/exit vocabulary (tags, TA score, protections) when explaining behaviour.
 - **Analysis-only** for market calls: do not place orders or flip `dry_run` from this agent unless the user explicitly asks for a config/code change.
 
+## Swarm ↔ Sygnif strategy (signal layer)
+
+**Swarm** (`finance_agent/swarm_knowledge.py` → `prediction_agent/swarm_knowledge_output.json`) is the **fused consensus** used as the **strategy signal layer** for Sygnif tooling: ML + channel + sidecar + TA (+ optional Bybit reads, e.g. **bf** demo position). It is **not** a separate bot — it feeds **fusion** (`nautilus_protocol_fusion.py`), **briefing**, **BTC 0.1** (`user_data/strategies/btc_strategy_0_1_engine.py` reads `swarm_mean` / `swarm_label` / `swarm_conflict`), and **adaptive** hooks — while **SygnifStrategy** remains the **default live execution** strategy (TA/tags/sentiment; add Swarm columns there only if you extend the dataframe).
+
+Treat **Swarm = Sygnif multi-source strategy context** when interpreting votes — not a single TA line.
+
 ## Services (context)
 
-- Telegram Sygnif Agent: `finance-agent.service` → `~/finance_agent/bot.py` (shared `.env` with this repo).
+- Telegram **[@sygnif_agent_bot](https://t.me/sygnif_agent_bot)** (`finance-agent.service` → `finance_agent/bot.py`; token `AGENT_BOT_TOKEN`; shared `.env` with this repo). Display name may show as “Sygnif Agent Bot”; username is **`@sygnif_agent_bot`**.
 - This worker: `cursor-agent-worker.service` — same repo, Cloud-side agent runs with full file/shell tools.
 - Optional **BTC-only spot** Freqtrade container (second trader) — design and compose fragment: **`letscrash/BTC_TRADING_DOCKER_SYGNIF_INHERIT_DESIGN.md`**; when implementing, keep **one `finance-agent` :8091** surface (**ruleprediction-agent**) and shared **inherit** behaviour above.
 

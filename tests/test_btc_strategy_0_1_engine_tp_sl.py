@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,3 +81,52 @@ def test_tag_takeprofit_r01_r03(monkeypatch: pytest.MonkeyPatch):
     )
     assert b01.tag_takeprofit_profit_pct("BTC-0.1-R01") == pytest.approx(0.03)
     assert b01.tag_takeprofit_profit_pct("BTC-0.1-R03") == pytest.approx(0.01)
+
+
+def test_swarm_adverse_bear_label(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(b01, "_registry_raw", lambda: {})
+    row = pd.Series({"swarm_label": "SWARM_BEAR", "swarm_mean": 0.0, "swarm_conflict": False})
+    assert b01.swarm_adverse_to_long(row) is True
+
+
+def test_swarm_adverse_negative_mean(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(b01, "_registry_raw", lambda: {})
+    row = pd.Series({"swarm_label": "MIXED", "swarm_mean": -0.25, "swarm_conflict": False})
+    assert b01.swarm_adverse_to_long(row) is True
+
+
+def test_swarm_adverse_conflict_weak_mean(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(b01, "_registry_raw", lambda: {})
+    row = pd.Series({"swarm_label": "X", "swarm_mean": 0.0, "swarm_conflict": True})
+    assert b01.swarm_adverse_to_long(row) is True
+
+
+def test_swarm_not_adverse_bull(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(b01, "_registry_raw", lambda: {})
+    row = pd.Series({"swarm_label": "SWARM_BULL", "swarm_mean": 0.2, "swarm_conflict": False})
+    assert b01.swarm_adverse_to_long(row) is False
+
+
+def test_swarm_trail_disabled_in_registry(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        b01,
+        "_registry_raw",
+        lambda: {"tuning": {"swarm_trail_tp": {"enabled": False}}},
+    )
+    row = pd.Series({"swarm_label": "SWARM_BEAR", "swarm_mean": -1.0, "swarm_conflict": False})
+    assert b01.swarm_adverse_to_long(row) is False
+
+
+def test_swarm_trail_callback_from_registry(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        b01,
+        "_registry_raw",
+        lambda: {"tuning": {"swarm_trail_tp": {"callback_pct": 0.01}}},
+    )
+    assert b01.swarm_trail_callback_pct() == pytest.approx(0.01)
+
+
+def test_swarm_trail_min_profit_gate(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(b01, "_registry_raw", lambda: {})
+    assert b01.swarm_trail_min_profit_gate(1.0) == pytest.approx(0.008)
+    assert b01.swarm_trail_min_profit_gate(3.0) == pytest.approx(0.024)

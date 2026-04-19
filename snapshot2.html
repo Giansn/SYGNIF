@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SYGNIF snapshot2 — live · connections &amp; data flow</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: #06080c; font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; }
+    #canvas-wrap { position: fixed; inset: 0; }
+    canvas { display: block; }
+    #hud {
+      position: fixed; left: 12px; top: 12px; z-index: 10;
+      color: #9ae6b4; font-size: 11px; line-height: 1.45; max-width: 300px;
+      text-shadow: 0 0 12px rgba(154, 230, 180, 0.35);
+      pointer-events: none;
+    }
+    #hud strong { color: #f6ad55; }
+    #hud .ver { color: #63b3ed; font-weight: 700; }
+    #flow-panel {
+      position: fixed; right: 10px; top: 10px; z-index: 12;
+      width: min(380px, 42vw); max-height: 48vh; overflow: auto;
+      background: rgba(10, 14, 22, 0.92);
+      border: 1px solid rgba(79, 209, 197, 0.35);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 10px; line-height: 1.5; color: #cbd5e0;
+      pointer-events: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    #flow-panel h3 {
+      color: #4fd1c5; font-size: 11px; margin: 0 0 6px 0; font-weight: 700;
+      border-bottom: 1px solid rgba(79, 209, 197, 0.25); padding-bottom: 4px;
+    }
+    #flow-panel h3:not(:first-child) { margin-top: 12px; }
+    #flow-panel ul { margin: 0; padding-left: 14px; }
+    #flow-panel li { margin: 3px 0; word-break: break-word; }
+    #flow-panel .arrow { color: #f6ad55; }
+    #flow-panel .stage { color: #b794f4; }
+    #legend {
+      position: fixed; right: 12px; bottom: 10px; z-index: 10;
+      color: #a0aec0; font-size: 10px; text-align: right; max-width: min(380px, 42vw);
+      pointer-events: none;
+    }
+    .label {
+      color: #e2e8f0; font-size: 10px; font-weight: 600;
+      padding: 2px 6px; border-radius: 3px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(246, 173, 85, 0.35);
+      white-space: nowrap; pointer-events: none;
+    }
+    .label.hot { border-color: #48bb78; color: #c6f6d5; box-shadow: 0 0 14px rgba(72, 187, 120, 0.25); }
+  </style>
+</head>
+<body>
+  <div id="canvas-wrap"></div>
+  <div id="hud">
+    <strong>snapshot2.html</strong> · <span class="ver">live</span> (v0.2 + connections + directed flow)<br/>
+    Drag orbit · scroll zoom · right-drag pan<br/>
+    <span style="opacity:0.8">Cyan links = topology · cones = flow direction · ember pixels = flux A→B</span>
+  </div>
+  <div id="flow-panel"></div>
+  <div id="legend">
+    <strong style="color:#4fd1c5">Data flow:</strong> Host ↓ traders ↓ (lab | systemd | compose) ↓ sinks ↓ <strong style="color:#fbd38d">swarm_knowledge</strong>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+    import { Line2 } from "three/addons/lines/Line2.js";
+    import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+    import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+
+    const nodes = [
+      { id: "host", label: "BCI Host (Linux)", y: 9, x: 0, z: 0, hot: false },
+      { id: "arch", label: "archived-multi-trader", y: 7.5, x: 0, z: 0, hot: false },
+      { id: "spot", label: "maxtrade spot", y: 6, x: -5, z: 1, hot: false },
+      { id: "fut", label: "maxtrade futures", y: 6, x: 0, z: -1, hot: false },
+      { id: "exec", label: "trade-executor", y: 6, x: 5, z: 1, hot: false },
+      { id: "lab", label: "base-env · research / ML lab", y: 3.5, x: -8, z: 3, hot: false },
+      { id: "bybit", label: "Bybit demo / mainnet APIs", y: 1.5, x: -10, z: 5, hot: false },
+      { id: "sysd", label: "systemd / cron · dashboards 8888/8889", y: 3.5, x: 0, z: 0, hot: false },
+      { id: "agw", label: "server-agent-worker", y: 1.5, x: 0, z: -2, hot: false },
+      { id: "comp", label: "Docker compose · multi-others-handler", y: 3.5, x: 8, z: 2, hot: false },
+      { id: "fin", label: "finance-agent (live)", y: 2, x: 10, z: 4, hot: true },
+      { id: "sqlite", label: "env / sqlite recordings", y: 0, x: -6, z: -4, hot: false },
+      { id: "runsvc", label: "run_svc localhost", y: 0, x: 6, z: -3, hot: false },
+      { id: "tg", label: "Telegram bots", y: -2.5, x: -7, z: 0, hot: false },
+      { id: "ov", label: "Overseer / Cursor / operators", y: -2.5, x: -2, z: 2, hot: false },
+      { id: "pred", label: "prediction-agent.json", y: -2.5, x: 3, z: 1, hot: false },
+      { id: "fad", label: "finance-agent data/*.json", y: -2.5, x: 8, z: 0, hot: false },
+      { id: "swarm", label: "swarm_knowledge_output.json", y: -5.5, x: 0, z: 0, hot: true },
+    ];
+
+    const edges = [
+      ["host", "arch"], ["arch", "spot"], ["arch", "fut"], ["arch", "exec"],
+      ["spot", "sysd"], ["fut", "sysd"], ["exec", "comp"],
+      ["lab", "bybit"], ["arch", "lab"], ["arch", "sysd"], ["arch", "comp"],
+      ["sysd", "agw"], ["comp", "fin"], ["fin", "fad"],
+      ["spot", "sqlite"], ["fut", "sqlite"], ["comp", "runsvc"],
+      ["sqlite", "tg"], ["agw", "ov"], ["fin", "tg"], ["fin", "ov"],
+      ["lab", "pred"], ["comp", "pred"],
+      ["tg", "swarm"], ["ov", "swarm"], ["pred", "swarm"], ["fad", "swarm"],
+    ];
+
+    const idToLabel = Object.fromEntries(nodes.map((n) => [n.id, n.label]));
+    const flowStages = [
+      { stage: "1 · Host / profile", detail: "BCI Host → archived-multi-trader envelope" },
+      { stage: "2 · Traders", detail: "spot / futures / executor under profile" },
+      { stage: "3 · Parallel rails", detail: "research+Bybit · systemd+dashboards+agent-worker · compose→finance-agent" },
+      { stage: "4 · Persistence & services", detail: "sqlite recordings · run_svc localhost" },
+      { stage: "5 · Sinks (interfaces)", detail: "Telegram · Overseer/Cursor · prediction JSON · finance-agent data" },
+      { stage: "6 · Fusion", detail: "all sinks → swarm_knowledge_output.json" },
+    ];
+
+    const panel = document.getElementById("flow-panel");
+    let connHtml = "<h3>Connections (directed)</h3><ul>";
+    for (const [a, b] of edges) {
+      connHtml += `<li><span class="arrow">→</span> ${idToLabel[a] ?? a} <span class="arrow">→</span> ${idToLabel[b] ?? b}</li>`;
+    }
+    connHtml += "</ul>";
+    let stageHtml = "<h3>Data flow (stages)</h3><ul>";
+    for (const s of flowStages) {
+      stageHtml += `<li><span class="stage">${s.stage}</span><br/><span style="opacity:0.85">${s.detail}</span></li>`;
+    }
+    stageHtml += "</ul>";
+    panel.innerHTML = connHtml + stageHtml;
+
+    const wrap = document.getElementById("canvas-wrap");
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x06080c, 0.042);
+
+    const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 200);
+    camera.position.set(18, 12, 22);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setClearColor(0x06080c, 1);
+    wrap.appendChild(renderer.domElement);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(innerWidth, innerHeight);
+    labelRenderer.domElement.style.position = "absolute";
+    labelRenderer.domElement.style.inset = "0";
+    labelRenderer.domElement.style.pointerEvents = "none";
+    wrap.appendChild(labelRenderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 1, 0);
+
+    scene.add(new THREE.AmbientLight(0x334455, 0.6));
+    const key = new THREE.DirectionalLight(0xfff5e6, 0.9);
+    key.position.set(10, 20, 8);
+    scene.add(key);
+    const rim = new THREE.PointLight(0xff6b35, 1.1, 40);
+    rim.position.set(-8, 4, -6);
+    scene.add(rim);
+
+    const idToPos = new Map();
+    const nodeGeo = new THREE.IcosahedronGeometry(0.55, 1);
+    for (const n of nodes) {
+      const pos = new THREE.Vector3(n.x, n.y, n.z);
+      idToPos.set(n.id, pos);
+      const mat = new THREE.MeshStandardMaterial({
+        color: n.hot ? 0x48bb78 : 0x2c5282,
+        emissive: n.hot ? 0x22543d : 0x1a365d,
+        emissiveIntensity: n.hot ? 0.55 : 0.25,
+        metalness: 0.35,
+        roughness: 0.45,
+      });
+      const mesh = new THREE.Mesh(nodeGeo, mat);
+      mesh.position.copy(pos);
+      scene.add(mesh);
+
+      const div = document.createElement("div");
+      div.className = "label" + (n.hot ? " hot" : "");
+      div.textContent = n.label;
+      const lbl = new CSS2DObject(div);
+      lbl.position.set(0, 0.9, 0);
+      mesh.add(lbl);
+    }
+
+    const resVec = new THREE.Vector2(innerWidth, innerHeight);
+    const lineMat = new LineMaterial({
+      color: 0x4fd1c5,
+      linewidth: 2.2,
+      transparent: true,
+      opacity: 0.75,
+      resolution: resVec,
+      dashed: false,
+    });
+
+    const edgeSegments = [];
+    const coneGeo = new THREE.ConeGeometry(0.14, 0.4, 8);
+    const coneMat = new THREE.MeshStandardMaterial({
+      color: 0xf6ad55,
+      emissive: 0x744210,
+      emissiveIntensity: 0.4,
+      metalness: 0.2,
+      roughness: 0.5,
+    });
+    const yAxis = new THREE.Vector3(0, 1, 0);
+
+    for (const [aid, bid] of edges) {
+      const pa = idToPos.get(aid);
+      const pb = idToPos.get(bid);
+      if (!pa || !pb) continue;
+      const ax = pa.x, ay = pa.y, az = pa.z;
+      const bx = pb.x, by = pb.y, bz = pb.z;
+      const lg = new LineGeometry();
+      lg.setPositions([ax, ay, az, bx, by, bz]);
+      const line2 = new Line2(lg, lineMat);
+      line2.computeLineDistances();
+      scene.add(line2);
+      edgeSegments.push({ a: pa.clone(), b: pb.clone(), from: aid, to: bid });
+
+      const dir = new THREE.Vector3().subVectors(pb, pa);
+      const len = dir.length();
+      dir.normalize();
+      const mid = new THREE.Vector3().lerpVectors(pa, pb, 0.68);
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.copy(mid);
+      cone.quaternion.setFromUnitVectors(yAxis, dir);
+      scene.add(cone);
+    }
+
+    const PIX = 560;
+    const pixGeo = new THREE.PlaneGeometry(0.16, 0.16);
+    const pixMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const pixMesh = new THREE.InstancedMesh(pixGeo, pixMat, PIX);
+    pixMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    pixMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(PIX * 3), 3);
+
+    const dummy = new THREE.Object3D();
+    const pixState = [];
+    for (let i = 0; i < PIX; i++) {
+      const seg = edgeSegments[(Math.random() * edgeSegments.length) | 0];
+      const t = Math.random();
+      const speed = 0.18 + Math.random() * 0.5;
+      pixState.push({ seg, t, speed, wobble: Math.random() * Math.PI * 2 });
+    }
+    scene.add(pixMesh);
+
+    const _c = new THREE.Color();
+    function fireColor(t) {
+      if (t < 0.35) return _c.setHSL(0.02 + t * 0.05, 1, 0.55 + t * 0.2);
+      if (t < 0.7) return _c.setHSL(0.08, 0.95, 0.45);
+      return _c.setHSL(0.12, 0.7, 0.25 + (1 - t) * 0.15);
+    }
+
+    const clock = new THREE.Clock();
+    const tmpV = new THREE.Vector3();
+    const tmpDir = new THREE.Vector3();
+    const tmpPerp = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      const tWall = clock.elapsedTime;
+
+      for (let i = 0; i < PIX; i++) {
+        const s = pixState[i];
+        s.t += s.speed * dt;
+        if (s.t > 1) {
+          s.t = 0;
+          s.seg = edgeSegments[(Math.random() * edgeSegments.length) | 0];
+          s.speed = 0.14 + Math.random() * 0.55;
+        }
+        const { a, b } = s.seg;
+        tmpV.lerpVectors(a, b, s.t);
+        tmpDir.subVectors(b, a).normalize();
+        tmpPerp.crossVectors(tmpDir, up);
+        if (tmpPerp.lengthSq() < 1e-8) tmpPerp.set(1, 0, 0).cross(tmpDir);
+        tmpPerp.normalize();
+        const w = Math.sin(tWall * 3 + s.wobble) * 0.12;
+        tmpV.addScaledVector(tmpPerp, w);
+        dummy.position.copy(tmpV);
+        dummy.lookAt(camera.position);
+        dummy.rotateZ(tWall * 2 + i);
+        dummy.updateMatrix();
+        pixMesh.setMatrixAt(i, dummy.matrix);
+        fireColor(s.t);
+        pixMesh.setColorAt(i, _c);
+      }
+      pixMesh.instanceMatrix.needsUpdate = true;
+      pixMesh.instanceColor.needsUpdate = true;
+
+      controls.update();
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+    }
+
+    window.addEventListener("resize", () => {
+      resVec.set(innerWidth, innerHeight);
+      lineMat.resolution.copy(resVec);
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      labelRenderer.setSize(innerWidth, innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>

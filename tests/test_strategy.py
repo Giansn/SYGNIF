@@ -466,6 +466,35 @@ class TestCustomStoploss:
         )
         assert sl == pytest.approx(-0.04)  # -0.20 / 5
 
+    def test_trailing_tpsl_long_combined_stop(self, strategy, mock_trade, monkeypatch):
+        """SYGNIF_TRAILING_TPSL=1: Pine-style max(trail, fixed, post-TP lock) → Freqtrade stoploss."""
+        monkeypatch.setenv("SYGNIF_TRAILING_TPSL", "1")
+        strategy.config = {"trading_mode": "spot"}
+        trade = mock_trade(open_rate=100.0, max_rate=105.0, leverage=1.0)
+        sl = strategy.custom_stoploss(
+            "BTC/USDT", trade, None, 104.0, 0.04, after_fill=False,
+        )
+        # peak 105, post_tp, trail=97.65, fixed=98, lock=101 → effective 101 → 101/104-1
+        assert sl == pytest.approx(101.0 / 104.0 - 1.0)
+
+    def test_trailing_tpsl_long_take_profit_exit(self, strategy, mock_trade, make_df, monkeypatch):
+        monkeypatch.setenv("SYGNIF_TRAILING_TPSL", "1")
+        strategy.dp = type("DP", (), {"get_analyzed_dataframe": lambda self, pair, tf: (make_df(rows=5), None)})()
+        trade = mock_trade(open_rate=100.0, max_rate=103.0)
+        out = strategy.custom_exit(
+            "BTC/USDT", trade, None, 101.5, 0.015,
+        )
+        assert out == "exit_trailing_take_profit"
+
+    def test_trailing_tpsl_respects_swing_tag(self, strategy, mock_trade, make_df, monkeypatch):
+        monkeypatch.setenv("SYGNIF_TRAILING_TPSL", "1")
+        strategy.config = {"trading_mode": "spot"}
+        df = make_df(rows=10)
+        strategy.dp = type("DP", (), {"get_analyzed_dataframe": lambda self, pair, tf: (df, None)})()
+        trade = mock_trade(enter_tag="swing_failure", open_rate=100.0, leverage=1.0)
+        sl = strategy.custom_stoploss("BTC/USDT", trade, None, 105.0, 0.05, after_fill=False)
+        assert sl == pytest.approx(-0.02)  # sf ratchet at +5% profit, not tsl
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Doom Cooldown
@@ -777,6 +806,96 @@ class TestSentimentTierGate:
                 "long",
             )
             is True
+        )
+
+
+class TestPremiumReserveBypass:
+    """ORB / hybrid swing / strong sentiment keep slots when non-premium book is full."""
+
+    def _make_open_trades(self, tags):
+        trades = []
+        for tag in tags:
+            trades.append(type("T", (), {"enter_tag": tag, "pair": "X/USDT"})())
+        return trades
+
+    def test_orb_long_allowed_when_ten_strong_ta(self, strategy):
+        from freqtrade.persistence import Trade
+
+        trades = self._make_open_trades(["strong_ta"] * 10)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        strategy.config = {"trading_mode": "spot"}
+        assert (
+            strategy.confirm_trade_entry(
+                "ETH/USDT",
+                "limit",
+                1,
+                1.0,
+                "GTC",
+                None,
+                "orb_long",
+                "long",
+            )
+            is True
+        )
+
+    def test_sygnif_swing_allowed_when_ten_strong_ta(self, strategy):
+        from freqtrade.persistence import Trade
+
+        trades = self._make_open_trades(["strong_ta"] * 10)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        strategy.config = {"trading_mode": "spot"}
+        assert (
+            strategy.confirm_trade_entry(
+                "TAC/USDT",
+                "limit",
+                1,
+                1.0,
+                "GTC",
+                None,
+                "sygnif_swing",
+                "long",
+            )
+            is True
+        )
+
+    def test_sygnif_s4_allowed_when_ten_strong_ta(self, strategy):
+        from freqtrade.persistence import Trade
+
+        trades = self._make_open_trades(["strong_ta"] * 10)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        strategy.config = {"trading_mode": "spot"}
+        assert (
+            strategy.confirm_trade_entry(
+                "BAN/USDT",
+                "limit",
+                1,
+                1.0,
+                "GTC",
+                None,
+                "sygnif_s-4",
+                "long",
+            )
+            is True
+        )
+
+    def test_sygnif_s3_blocked_when_ten_strong_ta(self, strategy):
+        from freqtrade.persistence import Trade
+
+        trades = self._make_open_trades(["strong_ta"] * 10)
+        Trade.get_trades_proxy = staticmethod(lambda is_open=True: trades)
+        strategy.config = {"trading_mode": "spot"}
+        assert (
+            strategy.confirm_trade_entry(
+                "BAN/USDT",
+                "limit",
+                1,
+                1.0,
+                "GTC",
+                None,
+                "sygnif_s-3",
+                "long",
+            )
+            is False
         )
 
 

@@ -39,6 +39,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    from sentiment_constants import tag_bypasses_premium_reserve
+except ImportError:  # trade_overseer without user_data/strategies on PYTHONPATH
+
+    def tag_bypasses_premium_reserve(tag, premium_tags):  # pragma: no cover
+        if not tag:
+            return False
+        if tag in premium_tags:
+            return True
+        return tag in ("orb_long", "sygnif_swing")
+
 
 class TradingState(Enum):
     """NT crates/model/src/enums.rs → TradingState.
@@ -234,7 +245,7 @@ class RiskManager:
             if count >= cfg.max_slots_swing:
                 return EntryDecision(False, f"swing_cap ({count}/{cfg.max_slots_swing})", "SlotCap")
 
-        if tag not in cfg.premium_tags:
+        if not tag_bypasses_premium_reserve(tag, cfg.premium_tags):
             if len(open_trades) >= cfg.premium_nonreserved_max:
                 return EntryDecision(
                     False,

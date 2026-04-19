@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sygnif Finance Agent — Telegram bot for crypto research & analysis.
+Sygnif Finance Agent — Telegram bot (**@sygnif_agent_bot**, token ``AGENT_BOT_TOKEN``).
 Combines market scanning, technical analysis, and AI-powered insights.
 Strategy-aware: computes the same TA score and detects entry/exit signals
 as SygnifStrategy.py so research aligns with live bot behavior. Indicators include
@@ -14,6 +14,10 @@ Commands:
   /research <TICK> — Full research (market + TA + news + AI)
   /finance-agent network [docs|nodes|nn] — Network submodule; nodes+NN topology + OpenVINO stack
   /finance-agent trades|check — Open positions + closed-trade aggregates (overseer)
+  /sygnif trades|check — Same as above (Sygnif agent shortcut; needs trade-overseer on OVERSEER_URL)
+  /sygnif swarm-weak — Swarm weak-points bundle (``swarm_knowledge`` + demo closed PnL + predict-loop dataset)
+  HTTP GET /sygnif/swarm, /webhook/swarm — live ``compute_swarm()`` JSON (needs ``SYGNIF_SWARM_WEBHOOK_TOKEN``; Bearer or ``X-Sygnif-Swarm-Token``)
+  HTTP POST /sygnif/swarm — same; optional JSON ``{"persist": true}`` writes ``swarm_knowledge_output.json``
   /plays           — AI investment opportunity scan
   /signals         — Quick scan: active entry signals across top pairs
   /news            — Latest crypto headlines
@@ -71,7 +75,7 @@ logger = logging.getLogger("finance_agent")
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-# Telegram: @sygnif_agent_bot — AGENT_* in .env; legacy fallbacks.
+# Telegram: @Sygnif_Agent_Bot → canonical username @sygnif_agent_bot — AGENT_* in .env; legacy fallbacks.
 TG_TOKEN = (
     os.environ.get("AGENT_BOT_TOKEN", "").strip()
     or os.environ.get("SYGNIF_HEDGE_BOT_TOKEN", "").strip()
@@ -439,7 +443,7 @@ def _try_sygnif_direct(text: str) -> str | None:
     if len(parts) < 2:
         return None
     root = parts[0].lower().split("@")[0]
-    if root != "/sygnif":
+    if root not in ("/sygnif", "/cursor"):
         return None
     sub = parts[1].lower().split("@")[0]
     if sub == "state":
@@ -448,6 +452,10 @@ def _try_sygnif_direct(text: str) -> str | None:
         return cmd_sygnif_pending()
     if sub == "approve" and len(parts) >= 3:
         return cmd_sygnif_approve(parts[2])
+    if sub in ("trades", "check"):
+        return cmd_trades_and_history()
+    if sub in ("swarm-weak", "swarm_weak", "swarmweak"):
+        return cmd_swarm_weak_points()
     return None
 
 
@@ -2477,7 +2485,7 @@ def cmd_ask(args: str, chat_id: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 def cmd_help() -> str:
     return (
-        "*Sygnif Finance Agent*\n\n"
+        "*Sygnif Finance Agent* — [@sygnif_agent_bot](https://t.me/sygnif_agent_bot)\n\n"
         "`/sygnif` / `/cursor` — **Zyklus:** Cursor-Worker + Overseer + Strategie-Adaptation + Signals + Tendency + Macro (ein Kontext für das LLM)\n"
         "`/sygnif state` — letzter Observer-Snapshot (`advisor_state.json`, kein LLM)\n"
         "`/sygnif pending` — Warteschlange für Live-Overrides (`advisor_pending.json`)\n"
@@ -2491,6 +2499,9 @@ def cmd_help() -> str:
         "`/finance-agent network nodes` — topology + `run_npu` / `placement` / `wire_tensor` + optional `NETWORK_NN_STATUS_URL`\n"
         "`/finance-agent network docs` — doc index + SSM hint\n"
         "`/finance-agent trades` / `check` — open positions + closed P/L aggregates (overseer)\n"
+        "`/sygnif trades` / `check` — **same** (print trade results via overseer; no LLM)\n"
+        "`/sygnif swarm-weak` — Swarm-Schwachstellen: live ``compute_swarm()`` + Demo-Closed-PnL + Gate-Stats (kein LLM)\n"
+        "`/finance-agent swarm-weak` — gleicher Bundle wie oben\n"
         "`/finance-agent <cmd>` — Run specific module\n"
         "`/finance-agent <TICKER>` — Research for ticker\n"
         "`/overview` — Trades + TA + market (full dashboard)\n"
@@ -2513,6 +2524,31 @@ def cmd_help() -> str:
         "`/evaluate` — Force trade evaluation\n"
         "`/fa_help` — This message"
     )
+
+
+def cmd_swarm_weak_points() -> str:
+    """Swarm weak-point diagnosis: ``compute_swarm`` + Bybit demo closed PnL + predict-loop JSONL tail."""
+    repo = _sygnif_repo()
+    try:
+        if str(repo) not in sys.path:
+            sys.path.insert(0, str(repo))
+        fa = repo / "finance_agent"
+        if str(fa) not in sys.path:
+            sys.path.insert(0, str(fa))
+        from swarm_instance_paths import apply_swarm_instance_env  # noqa: PLC0415
+
+        envf = repo / "swarm_operator.env"
+        apply_swarm_instance_env(repo, extra_env_file=envf if envf.is_file() else None)
+        from swarm_weak_points_solution import (  # noqa: PLC0415
+            build_swarm_weak_points_bundle,
+            format_swarm_weak_points_telegram,
+        )
+
+        bundle = build_swarm_weak_points_bundle(repo)
+        return format_swarm_weak_points_telegram(bundle)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("cmd_swarm_weak_points")
+        return f"_Swarm weak-points error:_ `{e}`"
 
 
 # ---------------------------------------------------------------------------
@@ -2648,6 +2684,9 @@ def cmd_finance_agent(args: str, chat_id: str | None = None) -> str:
         "research": lambda: cmd_research(tail or "BTC"),
         "btc-specialist": lambda: cmd_btc_specialist(),
         "crypto-daily": lambda: cmd_crypto_market_daily(),
+        "swarm-weak": lambda: cmd_swarm_weak_points(),
+        "swarm_weak": lambda: cmd_swarm_weak_points(),
+        "swarmweak": lambda: cmd_swarm_weak_points(),
     }
     if sub in subcommands:
         return subcommands[sub]()
@@ -2660,7 +2699,7 @@ def cmd_finance_agent(args: str, chat_id: str | None = None) -> str:
             f"Rohtext: `{raw}`"
         )
     return (
-        "Unknown /finance-agent command. Use `trades|check|network|network nodes|network docs|overview|cycle|"
+        "Unknown /finance-agent command. Use `trades|check|swarm-weak|network|network nodes|network docs|overview|cycle|"
         "analytics|market|movers|ta <TICK>|btc|btc-specialist|crypto-daily|briefing|signals|scan|research <TICK>|"
         "plays|tendency|macro|deduce|ask`"
     )
@@ -3220,6 +3259,8 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
                 return cmd_strategy_analytics()
             if sub == "tendency":
                 return _gather_tendency_for_agent()
+            if sub in ("trades", "check"):
+                return cmd_trades_and_history()
             if sub == "finance":
                 return _gather_finance_agent_for_agent(rest)
             if sub == "signals":
@@ -3232,10 +3273,14 @@ def _gather_slash_context(cmd: str, args: str, raw: str) -> str:
                 return (
                     "`/sygnif` — voller Zyklus (Worker + Overseer + Adaptation + Signals + Tendency + Macro).\n"
                     "`/sygnif state|pending|approve <id>` — Observer / Freigabe (ohne LLM; siehe /fa_help).\n"
+                    "`/sygnif trades` / `check` — offene Trades + P/L-Aggregate (Overseer; wie `/finance-agent trades`).\n"
+                    "`/sygnif swarm-weak` — Swarm + Demo-PnL + Gate-Statistik (``swarm_knowledge``; kein LLM).\n"
                     "`/sygnif analytics` — nur `strategy_adaptation.json`.\n"
                     "`/sygnif tendency|signals|macro|finance [args]` — Teilmodul.\n"
                     "`/cursor` — Alias wie `/sygnif`."
                 )
+            if sub in ("swarm-weak", "swarm_weak", "swarmweak"):
+                return cmd_swarm_weak_points()
             return gather_sygnif_cycle()
         if cmd == "/clear":
             return "(Intern: Verlauf geleert.)"
@@ -3293,6 +3338,10 @@ def _slash_tools_first_body(cmd: str, args: str, raw: str, chat_id: str) -> str 
             if h2 in ("deduce", "ask", "chat"):
                 return None
             return cmd_finance_agent(rr, chat_id)
+        if sub in ("trades", "check"):
+            return cmd_trades_and_history()
+        if sub in ("swarm-weak", "swarm_weak", "swarmweak"):
+            return cmd_swarm_weak_points()
         return None
 
     dispatch: dict[str, object] = {
@@ -3457,6 +3506,73 @@ FINANCE_AGENT_HTTP_HOST = os.environ.get("FINANCE_AGENT_HTTP_HOST", "127.0.0.1")
 FINANCE_AGENT_HTTP_PORT = int(os.environ.get("FINANCE_AGENT_HTTP_PORT", "8091"))
 
 
+def _compute_swarm_fn():
+    """``compute_swarm`` for Docker (``PYTHONPATH`` includes repo root) or dev (``finance_agent`` on path)."""
+    try:
+        from finance_agent.swarm_knowledge import compute_swarm as _cs
+
+        return _cs
+    except ImportError:
+        import swarm_knowledge as _sk  # type: ignore[no-redef]
+
+        return _sk.compute_swarm
+
+
+def _swarm_webhook_token_from_headers(handler: BaseHTTPRequestHandler) -> str:
+    auth = (handler.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (handler.headers.get("X-Sygnif-Swarm-Token") or "").strip()
+
+
+def _swarm_webhook_auth_ok(handler: BaseHTTPRequestHandler) -> tuple[bool, str]:
+    """Bearer ``SYGNIF_SWARM_WEBHOOK_TOKEN`` or header ``X-Sygnif-Swarm-Token`` (same value)."""
+    import secrets
+
+    expected = os.environ.get("SYGNIF_SWARM_WEBHOOK_TOKEN", "").strip()
+    if not expected:
+        return False, "SYGNIF_SWARM_WEBHOOK_TOKEN_unset"
+    got = _swarm_webhook_token_from_headers(handler)
+    if not got:
+        return False, "missing_Authorization_Bearer_or_X-Sygnif-Swarm-Token"
+    if not secrets.compare_digest(got, expected):
+        return False, "invalid_token"
+    return True, ""
+
+
+def _handle_sygnif_swarm_http(handler: BaseHTTPRequestHandler, *, persist: bool) -> None:
+    """GET/POST ``/sygnif/swarm`` or ``/webhook/swarm`` — live ``compute_swarm()`` JSON (token-gated)."""
+    ok, why = _swarm_webhook_auth_ok(handler)
+    if not ok:
+        status = 503 if why == "SYGNIF_SWARM_WEBHOOK_TOKEN_unset" else 401
+        handler._send_json(status, {"ok": False, "error": why})
+        return
+    try:
+        out = _compute_swarm_fn()()
+    except Exception as exc:
+        logger.exception("sygnif/swarm compute_swarm failed")
+        handler._send_json(
+            500,
+            {"ok": False, "error": "compute_swarm_failed", "detail": str(exc)[:240]},
+        )
+        return
+    if persist:
+        try:
+            try:
+                from finance_agent import swarm_knowledge as sk
+            except ImportError:
+                import swarm_knowledge as sk  # type: ignore[no-redef]
+
+            dest = sk._prediction_agent_dir() / "swarm_knowledge_output.json"  # noqa: SLF001
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            logger.warning("sygnif/swarm persist failed: %s", exc)
+            handler._send_json(500, {"ok": False, "error": "persist_failed", "detail": str(exc)[:200]})
+            return
+    handler._send_json(200, {"ok": True, "persisted": bool(persist), "swarm": out})
+
+
 def sygnif_sentiment_http_handler(data: dict) -> dict:
     """POST /sygnif/sentiment — rule-based score for Freqtrade (no LLM / no Haiku)."""
     token = (data.get("token") or "").strip().upper()
@@ -3542,7 +3658,7 @@ def _briefing(symbols: list[str] | None = None) -> str:
         try:
             import ruleprediction_briefing as _rpb
 
-            extra = _rpb.extra_briefing_lines(max_chars=320).strip()
+            extra = _rpb.extra_briefing_lines(max_chars=480).strip()
         except Exception as e:
             logger.debug("briefing ruleprediction_briefing: %s", e)
         if pipe and extra:
@@ -3638,6 +3754,8 @@ class _BriefingHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif path in ("/sygnif/swarm", "/webhook/swarm"):
+            _handle_sygnif_swarm_http(self, persist=False)
         else:
             self.send_response(404)
             self.end_headers()
@@ -3666,6 +3784,13 @@ class _BriefingHandler(BaseHTTPRequestHandler):
                 return
             commentary = _build_local_overseer_commentary(prompt)
             self._send_json(200, {"ok": True, "commentary": commentary})
+            return
+
+        if path in ("/sygnif/swarm", "/webhook/swarm"):
+            persist = False
+            if isinstance(data, dict):
+                persist = bool(data.get("persist") or data.get("write_swarm_knowledge_output"))
+            _handle_sygnif_swarm_http(self, persist=persist)
             return
 
         self.send_response(404)

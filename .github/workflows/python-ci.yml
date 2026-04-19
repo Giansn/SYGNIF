@@ -39,5 +39,11 @@ jobs:
           python -m compileall -q SygnifStrategy.py notification_handler.py \
             tests dashboard_server.py dashboard_server_futures.py dashboard_cryptoapis.py
 
+      - name: Byte-compile (predict protocol scripts)
+        run: |
+          python -m compileall -q \
+            scripts/predict_protocol_gate_optimizer.py \
+            scripts/predict_protocol_offline_swarm_backtest.py
+
       - name: Test with pytest
         run: pytest tests/ -v

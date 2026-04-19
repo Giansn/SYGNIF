@@ -3,7 +3,9 @@
 **Scope:** optional **second** Freqtrade container — **BTC spot only**, same Sygnif stack (strategy, sentiment, notifications), lower RAM footprint than multi-pair spot.  
 **Not implemented** in root `docker-compose.yml` until you merge this design; copy fragments from §6.
 
-**btc_Trader_Docker:** dediziertes Image **`docker/Dockerfile.btc_trader`** (= `Dockerfile.custom` + **`yfinance`** + **`pybit`** im Container, kein PEP 668/`--break-system-packages` auf dem Host). Build/Rollout: **`letscrash/BTC_TRADER_DOCKER.md`**.
+> **2026-04:** Dedizierte BTC-Compose-Services und **`docker/Dockerfile.btc_trader`** sind aus **`docker-compose.yml`** entfernt — siehe **`letscrash/BTC_TRADER_DOCKER.md`** und **`archive/freqtrade-btc-dock-2026-04-13/`**.
+
+**btc_Trader_Docker (Referenz):** Image wie `Dockerfile.custom` + **`yfinance`** + **`pybit`**. Build/Rollout: **`letscrash/BTC_TRADER_DOCKER.md`**.
 
 **Naming (Cursor):**
 
