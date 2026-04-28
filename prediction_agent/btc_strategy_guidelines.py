@@ -7,6 +7,13 @@ Mirrors the intent of ``SygnifStrategy`` tags:
   (``ta_proxy >= split``; proxy from live 5m TA columns, not identical to strategy TA score).
 - **swing_failure**-only longs are **not** enough for the swing guideline (TA below split).
 - **orb_long**: session ORB first breakout (``market_sessions_orb.attach_orb_columns``) for BTC/ETH.
+- **orb_short**: mirror of ``orb_long`` (first close below ``orb_low`` after range formed).
+- **orb_sfp_long / orb_sfp_short**: ATR-scaled swing-failure pattern *at the session
+  range boundary* (wick beyond ``orb_low`` / ``orb_high`` then close back inside).
+- **orb_failed_long / orb_failed_short**: ACD B-failure / Turtle Soup — recent ORB break
+  reverses back into the session range within ``failed_break_bars``.
+- **orb_long_ok_clean / orb_short_ok_clean**: cross-gated by ``sf_*`` and the SFP/failed
+  flags — block an ORB break that coincides with opposite-side swing-failure context.
 
 ORB uses the same session math as ``user_data/strategies/market_sessions_orb.py`` (lowercase OHLCV names).
 """
@@ -104,6 +111,13 @@ def compute_strategy_guidelines(df: pd.DataFrame, *, linear_symbol: str = "BTCUS
             "sygnif_swing_long_ok": False,
             "sygnif_swing_short_ok": False,
             "orb_long_ok": False,
+            "orb_short_ok": False,
+            "orb_sfp_long_ok": False,
+            "orb_sfp_short_ok": False,
+            "orb_failed_long_ok": False,
+            "orb_failed_short_ok": False,
+            "orb_long_ok_clean": False,
+            "orb_short_ok_clean": False,
             "split_long": split_long,
             "split_short": split_short,
             "pair": pair_slash,
@@ -116,6 +130,11 @@ def compute_strategy_guidelines(df: pd.DataFrame, *, linear_symbol: str = "BTCUS
     sygnif_swing_short_ok = sf_short and ta <= split_short
 
     orb_long_ok = False
+    orb_short_ok = False
+    orb_sfp_long_ok = False
+    orb_sfp_short_ok = False
+    orb_failed_long_ok = False
+    orb_failed_short_ok = False
     try:
         mso = _import_market_sessions_orb()
         if mso.is_orb_pair(pair_slash):
@@ -136,7 +155,13 @@ def compute_strategy_guidelines(df: pd.DataFrame, *, linear_symbol: str = "BTCUS
                 orb_minutes=orb_minutes,
                 min_range_pct=orb_min_range,
             )
-            orb_long_ok = bool(odf.iloc[-1].get("orb_break_long", False))
+            last = odf.iloc[-1]
+            orb_long_ok = bool(last.get("orb_break_long", False))
+            orb_short_ok = bool(last.get("orb_break_short", False))
+            orb_sfp_long_ok = bool(last.get("orb_sfp_long", False))
+            orb_sfp_short_ok = bool(last.get("orb_sfp_short", False))
+            orb_failed_long_ok = bool(last.get("orb_failed_long", False))
+            orb_failed_short_ok = bool(last.get("orb_failed_short", False))
     except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,
@@ -147,10 +172,27 @@ def compute_strategy_guidelines(df: pd.DataFrame, *, linear_symbol: str = "BTCUS
             "sygnif_swing_long_ok": sygnif_swing_long_ok,
             "sygnif_swing_short_ok": sygnif_swing_short_ok,
             "orb_long_ok": False,
+            "orb_short_ok": False,
+            "orb_sfp_long_ok": False,
+            "orb_sfp_short_ok": False,
+            "orb_failed_long_ok": False,
+            "orb_failed_short_ok": False,
+            "orb_long_ok_clean": False,
+            "orb_short_ok_clean": False,
             "split_long": split_long,
             "split_short": split_short,
             "pair": pair_slash,
         }
+
+    # Cross-gate the session breakout with the swing-failure context: do not
+    # long an ORB break when last bar already prints a bearish SFP or the
+    # break itself just failed; mirror for shorts.
+    orb_long_ok_clean = bool(
+        orb_long_ok and not sf_short and not orb_sfp_short_ok and not orb_failed_long_ok
+    )
+    orb_short_ok_clean = bool(
+        orb_short_ok and not sf_long and not orb_sfp_long_ok and not orb_failed_short_ok
+    )
 
     return {
         "ok": True,
@@ -161,6 +203,13 @@ def compute_strategy_guidelines(df: pd.DataFrame, *, linear_symbol: str = "BTCUS
         "sygnif_swing_long_ok": sygnif_swing_long_ok,
         "sygnif_swing_short_ok": sygnif_swing_short_ok,
         "orb_long_ok": orb_long_ok,
+        "orb_short_ok": orb_short_ok,
+        "orb_sfp_long_ok": orb_sfp_long_ok,
+        "orb_sfp_short_ok": orb_sfp_short_ok,
+        "orb_failed_long_ok": orb_failed_long_ok,
+        "orb_failed_short_ok": orb_failed_short_ok,
+        "orb_long_ok_clean": orb_long_ok_clean,
+        "orb_short_ok_clean": orb_short_ok_clean,
         "split_long": split_long,
         "split_short": split_short,
         "pair": pair_slash,
