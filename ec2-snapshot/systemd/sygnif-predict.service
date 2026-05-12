@@ -1,0 +1,30 @@
+[Unit]
+Description=SYGNIF predict — BTC perp signal engine + online learning (oneshot, fired by timer)
+After=network-online.target sygnif-bybit-mcp.service
+Wants=sygnif-bybit-mcp.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+EnvironmentFile=/etc/sygnif/trader.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/sygnif-agent-mirror
+Environment=SWARM_KNOWLEDGE_DB=/var/lib/sygnif/swarm.db
+Environment=SYGNIF_AGENT_DIR=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_PREDICT_DRY_RUN=1
+Environment=SYGNIF_PREDICT_INTERVAL=300
+Environment=SYGNIF_VAULT_URL=http://100.97.226.116:9002/rpc
+Environment=SYGNIF_PREDICT_LEVERAGE=3
+Environment=SYGNIF_PREDICT_RISK_PCT=0.005
+ExecStart=/opt/sygnif/.venv/bin/python /home/ubuntu/sygnif-agent-mirror/sygnif_predict.py
+TimeoutStartSec=120
+Nice=5
+StandardOutput=append:/var/log/sygnif/predict.log
+StandardError=append:/var/log/sygnif/predict.log
+
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/var/log/sygnif /var/lib/sygnif /home/ubuntu/sygnif-agent-mirror

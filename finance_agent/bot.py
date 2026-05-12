@@ -23,6 +23,7 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 import feedparser
 import numpy as np
@@ -42,6 +43,29 @@ TG_TOKEN = os.environ.get("FINANCE_BOT_TOKEN", "")
 TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID", "")
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BYBIT = "https://api.bybit.com/v5"
+# Trade overseer HTTP (host:8090 when overseer publishes to localhost)
+_SYGNIF_OVERSEER_HTTP = os.environ.get("SYGNIF_OVERSEER_HTTP", "http://127.0.0.1:8090").rstrip("/")
+
+# Optional: FinancialData.net (query param key=) — see https://financialdata.net/documentation
+_FINANCIALDATA_API_KEY = (
+    os.environ.get("FINANCIALDATA_API_KEY", "").strip()
+    or os.environ.get("FINANCIAL_DATA_API_KEY", "").strip()
+)
+_FINANCIALDATA_API_BASE = os.environ.get(
+    "FINANCIALDATA_API_BASE", "https://financialdata.net/api/v1"
+).rstrip("/")
+
+# Repo layout on servers: finance_agent lives next to Freqtrade `user_data/strategies/`.
+_repo_root = Path(__file__).resolve().parents[1]
+_strategies_dir = _repo_root / "user_data" / "strategies"
+if not _strategies_dir.is_dir():
+    alt = Path("/home/ubuntu/xrp_claude_bot/user_data/strategies")
+    if alt.is_dir():
+        _strategies_dir = alt
+if _strategies_dir.is_dir() and str(_strategies_dir) not in sys.path:
+    sys.path.insert(0, str(_strategies_dir))
+
+from sygnif_ta_score import TA_SPEC_VERSION, ta_score_from_indicator_dict, ta_spec_fingerprint
 
 # Strategy constants (mirrors SygnifStrategy.py)
 MAJOR_PAIRS = {"BTC", "ETH", "SOL", "XRP"}
@@ -52,40 +76,79 @@ LEVERAGE_DEFAULT = 3.0
 # ---------------------------------------------------------------------------
 # Telegram helpers
 # ---------------------------------------------------------------------------
+def _tg_send_chunk(
+    chunk: str,
+    *,
+    parse_mode: str | None,
+    reply_markup: dict | None,
+) -> bool:
+    """Return True if Telegram accepted the message."""
+    payload: dict = {
+        "chat_id": TG_CHAT,
+        "text": chunk,
+        "disable_web_page_preview": True,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json=payload,
+            timeout=15,
+        )
+        data = r.json() if r.content else {}
+        if r.ok and data.get("ok"):
+            return True
+        logger.warning(
+            "telegram_send fail status=%s ok=%s desc=%r",
+            r.status_code,
+            data.get("ok"),
+            (data.get("description") or "")[:220],
+        )
+        return False
+    except Exception as e:
+        logger.error(f"tg_send error: {e}")
+        return False
+
+
 def tg_send(text: str, parse_mode: str = "Markdown", reply_markup: dict | None = None):
-    """Send a Telegram message, auto-split if too long."""
+    """Send a Telegram message, auto-split if too long.
+
+    Legacy Markdown breaks on many real-world strings (news, LLM output). If parsing fails,
+    retry the same chunk as plain text so users always get a reply.
+    """
     MAX = 4000
     chunks = [text[i : i + MAX] for i in range(0, len(text), MAX)]
     for i, chunk in enumerate(chunks):
-        payload = {
-            "chat_id": TG_CHAT,
-            "text": chunk,
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": True,
-        }
-        # Attach keyboard only to last chunk
-        if reply_markup and i == len(chunks) - 1:
-            payload["reply_markup"] = reply_markup
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                json=payload,
-                timeout=15,
-            )
-        except Exception as e:
-            logger.error(f"tg_send error: {e}")
+        last_kb = reply_markup if reply_markup and i == len(chunks) - 1 else None
+        if parse_mode:
+            if not _tg_send_chunk(chunk, parse_mode=parse_mode, reply_markup=last_kb):
+                _tg_send_chunk(chunk, parse_mode=None, reply_markup=last_kb)
+        else:
+            _tg_send_chunk(chunk, parse_mode=None, reply_markup=last_kb)
 
 
 # Persistent reply keyboard — shown at bottom of chat
 KEYBOARD = {
     "keyboard": [
-        ["/overview", "/tendency", "/signals"],
-        ["/scan", "/ta BTC", "/ta ETH"],
+        ["/sygnif", "/overview", "/tendency"],
+        ["/signals", "/scan", "/ta BTC"],
         ["/plays", "/market", "/movers"],
-        ["/news", "/evaluate", "/fa_help"],
+        ["/deduce", "/ask", "/fa_help"],
+        ["/news", "/evaluate", "/finance-agent"],
     ],
     "resize_keyboard": True,
     "one_time_keyboard": False,
+}
+
+
+# Slash aliases (same as Cursor / older keyboards) → canonical /command
+_COMMAND_ALIASES: dict[str, str] = {
+    "/finance": "/finance-agent",
+    "/sygnif": "/overview",
+    "/deduce": "/scan",
 }
 
 
@@ -235,10 +298,40 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series,
     return tr.ewm(span=period, adjust=False).mean()
 
 
+def _rsi14_last_on_resampled(df: pd.DataFrame, rule: str) -> float | None:
+    """RSI(14) on resampled OHLCV (Bybit rows with millisecond `ts`)."""
+    if df.empty or len(df) < 20 or "ts" not in df.columns:
+        return None
+    try:
+        work = pd.DataFrame({
+            "open": pd.to_numeric(df["open"], errors="coerce"),
+            "high": pd.to_numeric(df["high"], errors="coerce"),
+            "low": pd.to_numeric(df["low"], errors="coerce"),
+            "close": pd.to_numeric(df["close"], errors="coerce"),
+            "volume": pd.to_numeric(df["volume"], errors="coerce"),
+        })
+        work.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
+        work = work.sort_index()
+        agg = work.resample(rule).agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        }).dropna(subset=["close"])
+        if len(agg) < 15:
+            return None
+        rsi_s = _rsi(agg["close"], 14)
+        v = rsi_s.iloc[-1]
+        return float(v) if pd.notna(v) else None
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # TA: Calculate indicators from OHLCV DataFrame
 # ---------------------------------------------------------------------------
-def calc_indicators(df: pd.DataFrame) -> dict:
+def calc_indicators(df: pd.DataFrame, btc_df: pd.DataFrame | None = None) -> dict:
     """Calculate technical indicators matching SygnifStrategy. Returns dict."""
     if len(df) < 50:
         return {}
@@ -400,129 +493,28 @@ def calc_indicators(df: pd.DataFrame) -> dict:
     else:
         result["bb_position"] = "N/A"
 
+    # Multi-TF + BTC overlays (parity with SygnifStrategy informative merge)
+    result["rsi_14_1h"] = float(rsi14.iloc[-1])
+    r4 = _rsi14_last_on_resampled(df, "4h")
+    result["rsi_14_4h"] = r4 if r4 is not None else None
+
+    if btc_df is not None and not btc_df.empty and len(btc_df) >= 15:
+        bclose = pd.to_numeric(btc_df["close"], errors="coerce")
+        br = _rsi(bclose, 14)
+        bx = br.iloc[-1]
+        result["btc_rsi_14_1h"] = float(bx) if pd.notna(bx) else None
+    else:
+        result["btc_rsi_14_1h"] = None
+
     return result
 
 
 # ---------------------------------------------------------------------------
-# Strategy TA score — mirrors _calculate_ta_score_vectorized()
+# Strategy TA score — sygnif_ta_score.single source
 # ---------------------------------------------------------------------------
 def calc_ta_score(ind: dict) -> dict:
-    """Compute strategy TA score (0-100) from indicator dict.
-    Returns {"score": int, "components": {name: int, ...}}."""
-    if not ind:
-        return {"score": 50, "components": {}}
-
-    components = {}
-    score = 50.0
-
-    # RSI_14 component (-15 to +15)
-    rsi = ind.get("rsi", 50)
-    if rsi < 30:
-        c = 15
-    elif rsi < 40:
-        c = 8
-    elif rsi > 70:
-        c = -15
-    elif rsi > 60:
-        c = -8
-    else:
-        c = 0
-    components["rsi14"] = c
-    score += c
-
-    # RSI_3 momentum (-10 to +10)
-    rsi3 = ind.get("rsi3", 50)
-    if rsi3 < 10:
-        c = 10
-    elif rsi3 < 20:
-        c = 5
-    elif rsi3 > 90:
-        c = -10
-    elif rsi3 > 80:
-        c = -5
-    else:
-        c = 0
-    components["rsi3"] = c
-    score += c
-
-    # EMA crossover (-10 to +10)
-    if ind.get("ema_cross"):
-        c = 10
-    elif ind.get("ema_bull"):
-        c = 7
-    else:
-        c = -7
-    components["ema"] = c
-    score += c
-
-    # Bollinger (-8 to +8)
-    bb_lower = ind.get("bb_lower", 0)
-    bb_upper = ind.get("bb_upper", 0)
-    price = ind.get("price", 0)
-    if bb_lower and price <= bb_lower:
-        c = 8
-    elif bb_upper and price >= bb_upper:
-        c = -8
-    else:
-        c = 0
-    components["bb"] = c
-    score += c
-
-    # Aroon (-8 to +8)
-    aroonu = ind.get("aroonu", 50)
-    aroond = ind.get("aroond", 50)
-    if not np.isnan(aroonu) and not np.isnan(aroond):
-        if aroonu > 80 and aroond < 30:
-            c = 8
-        elif aroond > 80 and aroonu < 30:
-            c = -8
-        else:
-            c = 0
-    else:
-        c = 0
-    components["aroon"] = c
-    score += c
-
-    # StochRSI (-5 to +5)
-    stoch = ind.get("stochrsi_k", 50)
-    if not np.isnan(stoch):
-        if stoch < 20:
-            c = 5
-        elif stoch > 80:
-            c = -5
-        else:
-            c = 0
-    else:
-        c = 0
-    components["stochrsi"] = c
-    score += c
-
-    # CMF (-5 to +5)
-    cmf = ind.get("cmf", 0)
-    if not np.isnan(cmf):
-        if cmf > 0.15:
-            c = 5
-        elif cmf < -0.15:
-            c = -5
-        else:
-            c = 0
-    else:
-        c = 0
-    components["cmf"] = c
-    score += c
-
-    # Volume ratio (-3 to +3)
-    vol_ratio = ind.get("vol_ratio", 1.0)
-    if vol_ratio > 1.5 and score > 50:
-        c = 3
-    elif vol_ratio > 1.5 and score < 50:
-        c = -3
-    else:
-        c = 0
-    components["volume"] = c
-    score += c
-
-    return {"score": max(0, min(100, int(score))), "components": components}
+    """Compute strategy TA score (0-100) from indicator dict (spec-tagged)."""
+    return ta_score_from_indicator_dict(ind)
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +524,16 @@ def detect_signals(ind: dict, ticker: str = "") -> dict:
     """Detect active strategy entry/exit signals from indicators.
     Returns {"entries": [...], "exits": [...], "leverage": float, "atr_pct": float}."""
     if not ind:
-        return {"entries": [], "exits": [], "leverage": LEVERAGE_DEFAULT, "atr_pct": 0}
+        return {
+            "entries": [],
+            "exits": [],
+            "leverage": LEVERAGE_DEFAULT,
+            "atr_pct": 0,
+            "ta_score": 50,
+            "ta_components": {},
+            "ta_spec_version": TA_SPEC_VERSION,
+            "ta_spec_fingerprint": ta_spec_fingerprint(),
+        }
 
     ta = calc_ta_score(ind)
     score = ta["score"]
@@ -581,6 +582,8 @@ def detect_signals(ind: dict, ticker: str = "") -> dict:
         "atr_pct": atr_pct,
         "ta_score": score,
         "ta_components": ta["components"],
+        "ta_spec_version": ta["spec_version"],
+        "ta_spec_fingerprint": ta["spec_fingerprint"],
     }
 
 
@@ -600,9 +603,9 @@ def _format_score_label(score: int) -> str:
 # Claude Haiku — AI analysis
 # ---------------------------------------------------------------------------
 def claude_analyze(prompt: str, max_tokens: int = 1500) -> str:
-    """Call Claude Haiku for analysis."""
+    """Call Claude Haiku for analysis. Returns empty string if disabled or on failure (no Telegram markup)."""
     if not ANTHROPIC_KEY:
-        return "_Claude API key not configured._"
+        return ""
     try:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -621,10 +624,10 @@ def claude_analyze(prompt: str, max_tokens: int = 1500) -> str:
         if resp.ok:
             return resp.json()["content"][0]["text"]
         logger.error(f"Claude error: {resp.status_code}")
-        return "_Analysis unavailable._"
+        return ""
     except Exception as e:
         logger.error(f"Claude error: {e}")
-        return "_Analysis unavailable._"
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +667,117 @@ def _fmt_price(price: float) -> str:
         return f"${price:.5f}"
 
 
+def _fdn_daily_close_and_dod(rows: list | None) -> tuple[float | None, float | None, str | None]:
+    """From index-prices / crypto-prices JSON (newest bar first): close, prior-day % change, date."""
+    if not rows or not isinstance(rows, list):
+        return None, None, None
+    cur = rows[0]
+    if not isinstance(cur, dict):
+        return None, None, None
+    close = cur.get("close")
+    d = cur.get("date")
+    if close is None:
+        return None, None, str(d) if d else None
+    c0 = float(close)
+    pct = None
+    if len(rows) > 1 and isinstance(rows[1], dict):
+        prev = rows[1].get("close")
+        if prev is not None:
+            p = float(prev)
+            if p != 0:
+                pct = (c0 - p) / p * 100.0
+    return c0, pct, str(d) if d else None
+
+
+def fdn_tradfi_snapshot() -> str:
+    """TradFi + FDN crypto via Standard-tier daily endpoints only (index-prices, crypto-prices)."""
+    if not _FINANCIALDATA_API_KEY:
+        return ""
+    key = _FINANCIALDATA_API_KEY
+    base = _FINANCIALDATA_API_BASE
+    lines: list[str] = []
+
+    index_ids = [
+        ("^GSPC", "S&P 500"),
+        ("^DJI", "Dow"),
+        ("DX-Y.NYB", "USD Index"),
+    ]
+    idx_ok = False
+    for ident, label in index_ids:
+        try:
+            r = requests.get(
+                f"{base}/index-prices",
+                params={"identifier": ident, "offset": 0, "key": key},
+                timeout=15,
+            )
+            if not r.ok:
+                logger.warning("financialdata index-prices %s http=%s", ident, r.status_code)
+                continue
+            data = r.json()
+            if not isinstance(data, list) or not data:
+                continue
+            close, dod, bar_date = _fdn_daily_close_and_dod(data)
+            if close is None:
+                continue
+            if not idx_ok:
+                lines.append("*FDN indexes (daily close):*")
+                idx_ok = True
+            ch = f" ({dod:+.2f}% vs prior day)" if dod is not None else ""
+            lines.append(f"  `{ident}` {label}: `{close:,.2f}` · {bar_date}{ch}")
+        except Exception as e:
+            logger.warning("financialdata index-prices %s err=%s", ident, e)
+
+    crypto_ids = ["BTCUSD", "ETHUSD"]
+    cry_ok = False
+    for ident in crypto_ids:
+        try:
+            r = requests.get(
+                f"{base}/crypto-prices",
+                params={"identifier": ident, "offset": 0, "key": key},
+                timeout=15,
+            )
+            if not r.ok:
+                logger.warning("financialdata crypto-prices %s http=%s", ident, r.status_code)
+                continue
+            data = r.json()
+            if not isinstance(data, list) or not data:
+                continue
+            close, dod, bar_date = _fdn_daily_close_and_dod(data)
+            if close is None:
+                continue
+            if not cry_ok:
+                lines.append("*FDN crypto USD (daily close):*")
+                cry_ok = True
+            ch = f" ({dod:+.2f}% vs prior day)" if dod is not None else ""
+            lines.append(f"  `{ident}` `{close:,.2f}` · {bar_date}{ch}")
+        except Exception as e:
+            logger.warning("financialdata crypto-prices %s err=%s", ident, e)
+
+    if not lines:
+        return ""
+    lines.append(
+        f"_{datetime.now(timezone.utc).strftime('%H:%M UTC')} · financialdata.net (daily / Standard)_"
+    )
+    return "\n".join(lines)
+
+
+def cmd_tradfi() -> str:
+    """Explicit FinancialData.net macro snapshot (Standard daily prices only)."""
+    s = fdn_tradfi_snapshot()
+    if s:
+        return s
+    if not _FINANCIALDATA_API_KEY:
+        return (
+            "*FinancialData.net*\n"
+            "Set `FINANCIALDATA_API_KEY` in the bot environment. "
+            "Docs: https://financialdata.net/documentation"
+        )
+    return (
+        "*FinancialData.net*\n"
+        "Key is set but no daily price rows returned (check API status or symbol availability)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Command: /tendency — Market tendency (bull/bear)
 # ---------------------------------------------------------------------------
@@ -685,17 +799,20 @@ def cmd_tendency() -> str:
     total = 0
     lines = ["*Market Tendency*\n"]
     coin_data = []  # collect for Claude prompt
+    score_rows = []
+
+    btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_ref_df if not btc_ref_df.empty else None
 
     for sym in scan_syms:
         df = bybit_kline(sym, interval="60", limit=200)
         if df.empty:
             continue
-        ind = calc_indicators(df)
+        ind = calc_indicators(df, btc_df=btc_ref)
         if not ind:
             continue
-        ta = calc_ta_score(ind)
         sig = detect_signals(ind, sym.replace("USDT", ""))
-        score = ta["score"]
+        score = sig["ta_score"]
         total += 1
 
         name = sym.replace("USDT", "")
@@ -716,6 +833,17 @@ def cmd_tendency() -> str:
             icon = "\u26aa"
 
         lines.append(f"{icon} `{name:>5}` {pf} TA:`{score}` {trend} RSI:`{rsi:.0f}`")
+        score_rows.append(
+            {
+                "name": name,
+                "score": score,
+                "trend": trend,
+                "rsi": rsi,
+                "entry": entry,
+                "macd": macd,
+                "willr": willr,
+            }
+        )
         coin_data.append(
             f"{name}: ${ind['price']:.4g} {trend} TA:{score} RSI:{rsi:.0f} "
             f"WR:{willr:.0f} MACD:{macd} signal:{entry}"
@@ -737,6 +865,30 @@ def cmd_tendency() -> str:
     else:
         verdict = "\u26aa *NEUTRAL* — no clear direction"
     lines.append(verdict)
+
+    if score_rows:
+        avg_score = sum(r["score"] for r in score_rows) / len(score_rows)
+        strong_bull = [r for r in score_rows if r["score"] >= 65]
+        strong_bear = [r for r in score_rows if r["score"] <= 35]
+        leader = max(score_rows, key=lambda r: r["score"])
+        laggard = min(score_rows, key=lambda r: r["score"])
+        lines.append(
+            f"\n*Tendency Detail:* avg TA `{avg_score:.1f}` | strong bull `{len(strong_bull)}` | strong bear `{len(strong_bear)}`"
+        )
+        lines.append(
+            f"*Leader/Laggard:* `{leader['name']} ({leader['score']})` / `{laggard['name']} ({laggard['score']})`"
+        )
+
+        if avg_score >= 60 and bull_count >= max(1, bear_count + 1):
+            bias = "Risk-on tilt"
+            plan = "Prefer long setups with TA>=65; use pullbacks and keep risk tight."
+        elif avg_score <= 40 and bear_count >= max(1, bull_count + 1):
+            bias = "Risk-off tilt"
+            plan = "Stay defensive; favor short breakdowns and avoid weak long attempts."
+        else:
+            bias = "Mixed regime"
+            plan = "Trade selectively around strongest names and reduce size on ambiguous signals."
+        lines.append(f"\n*Finance-Agent Opinion:* {bias}. {plan}")
 
     # --- Claude AI insight ---
     headlines = fetch_news("", max_items=5)
@@ -760,7 +912,8 @@ Rules:
 - 3-4 sentences max, no disclaimers, be direct"""
 
     insight = claude_analyze(prompt, max_tokens=200)
-    lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
+    if (insight or "").strip():
+        lines.append(f"\n\U0001f9e0 *Agent Insight:*\n{insight}")
 
     lines.append(f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_")
     return "\n".join(lines)
@@ -824,7 +977,8 @@ def cmd_ta(ticker: str) -> str:
     if df.empty:
         return f"No data for `{ticker}`. Check ticker symbol."
 
-    ind = calc_indicators(df)
+    btc_df = bybit_kline("BTCUSDT", "60", 200)
+    ind = calc_indicators(df, btc_df=btc_df if not btc_df.empty else None)
     if not ind:
         return f"Not enough data for `{ticker}`."
 
@@ -898,7 +1052,12 @@ def cmd_research(ticker: str) -> str:
 
     # 1. Fetch market data
     df = bybit_kline(symbol, interval="60", limit=200)
-    ind = calc_indicators(df) if not df.empty else {}
+    btc_df = bybit_kline("BTCUSDT", "60", 200)
+    ind = (
+        calc_indicators(df, btc_df=btc_df if not btc_df.empty else None)
+        if not df.empty
+        else {}
+    )
     sig = detect_signals(ind, ticker)
 
     # 2. Fetch news
@@ -998,10 +1157,12 @@ def cmd_plays() -> str:
     top_losers = sorted(pairs, key=lambda x: x["change"])[:5]
 
     # Enrich top pairs with TA scores
+    btc_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_df if not btc_df.empty else None
     market_ctx = "Top by volume (with strategy TA score):\n"
     for p in top_by_vol:
         df = bybit_kline(f"{p['sym']}USDT", "60", 200)
-        ind = calc_indicators(df) if not df.empty else {}
+        ind = calc_indicators(df, btc_df=btc_ref) if not df.empty else {}
         sig = detect_signals(ind, p["sym"])
         signal_str = sig["entries"][0] if sig["entries"] else "no_signal"
         market_ctx += (
@@ -1016,9 +1177,8 @@ def cmd_plays() -> str:
     for p in top_losers:
         market_ctx += f"  {p['sym']}: {p['change']:.1f}%\n"
 
-    # Fetch BTC TA for macro context
-    btc_df = bybit_kline("BTCUSDT", "60", 200)
-    btc_ind = calc_indicators(btc_df) if not btc_df.empty else {}
+    # Fetch BTC TA for macro context (reuse klines fetched above when available)
+    btc_ind = calc_indicators(btc_df, btc_df=btc_df) if not btc_df.empty else {}
     btc_sig = detect_signals(btc_ind, "BTC")
     btc_ctx = ""
     if btc_ind:
@@ -1061,7 +1221,7 @@ Keep each play to 4-5 lines. Be specific with prices. No disclaimers. Total unde
     # Save plays for trade overseer
     try:
         requests.post(
-            "http://127.0.0.1:8090/plays",
+            f"{_SYGNIF_OVERSEER_HTTP}/plays",
             json={"raw_text": analysis, "market_context": market_ctx},
             timeout=3,
         )
@@ -1087,9 +1247,12 @@ def cmd_signals() -> str:
     shorts = []
     ambiguous = []
 
+    btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_ref_df if not btc_ref_df.empty else None
+
     for p in top:
         df = bybit_kline(f"{p['sym']}USDT", "60", 200)
-        ind = calc_indicators(df) if not df.empty else {}
+        ind = calc_indicators(df, btc_df=btc_ref) if not df.empty else {}
         if not ind:
             continue
         sig = detect_signals(ind, p["sym"])
@@ -1138,13 +1301,16 @@ def cmd_scan() -> str:
     pairs = _filter_pairs(tickers, min_turnover=2_000_000)
     top = sorted(pairs, key=lambda x: x["vol"], reverse=True)[:15]
 
+    btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_ref_df if not btc_ref_df.empty else None
+
     # 1. Compute TA + signals for all pairs
     signal_pairs = []
     for p in top:
         df = bybit_kline(f"{p['sym']}USDT", "60", 200)
         if df.empty:
             continue
-        ind = calc_indicators(df)
+        ind = calc_indicators(df, btc_df=btc_ref)
         if not ind:
             continue
         sig = detect_signals(ind, p["sym"])
@@ -1206,7 +1372,7 @@ Side is Long or Short. Skip weak opportunities. Max 6 lines. Be specific with nu
 # ---------------------------------------------------------------------------
 # Command: /overview — Full trade + market overview (consults overseer)
 # ---------------------------------------------------------------------------
-OVERSEER_TRADES = "http://127.0.0.1:8090/trades"
+OVERSEER_TRADES = f"{_SYGNIF_OVERSEER_HTTP}/trades"
 
 
 def _duration_str(seconds: float) -> str:
@@ -1247,11 +1413,13 @@ def cmd_overview() -> str:
             t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
             for t in trades
         })
+        btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+        btc_ref = btc_ref_df if not btc_ref_df.empty else None
         ta_map = {}
         for sym in trade_syms:
             df = bybit_kline(f"{sym}USDT", "60", 200)
             if not df.empty:
-                ind = calc_indicators(df)
+                ind = calc_indicators(df, btc_df=btc_ref)
                 if ind:
                     sig = detect_signals(ind, sym)
                     ta_map[sym] = {"ind": ind, "sig": sig}
@@ -1300,23 +1468,26 @@ def cmd_overview() -> str:
 
     # 4. Market tendency (BTC + ETH)
     lines.append("\n*Market:*")
+    btc_eth_ref = bybit_kline("BTCUSDT", "60", 200)
+    btc_eth = btc_eth_ref if not btc_eth_ref.empty else None
     for sym_name in ["BTC", "ETH"]:
         df = bybit_kline(f"{sym_name}USDT", "60", 200)
         if df.empty:
             continue
-        ind = calc_indicators(df)
+        ind = calc_indicators(df, btc_df=btc_eth)
         if not ind:
             continue
-        ta = calc_ta_score(ind)
+        sig_m = detect_signals(ind, sym_name)
+        ta_sc = sig_m["ta_score"]
         pf = _fmt_price(ind["price"])
         trend = ind["trend"]
-        if ta["score"] >= 55:
+        if ta_sc >= 55:
             icon = "\U0001f7e2"
-        elif ta["score"] <= 45:
+        elif ta_sc <= 45:
             icon = "\U0001f534"
         else:
             icon = "\u26aa"
-        lines.append(f"  {icon} {sym_name} {pf} TA:`{ta['score']}` {trend}")
+        lines.append(f"  {icon} {sym_name} {pf} TA:`{ta_sc}` {trend}")
 
     # 5. Bybit API health — check rate limits
     try:
@@ -1366,6 +1537,14 @@ def cmd_news(ticker: str = "") -> str:
 # ---------------------------------------------------------------------------
 # Command: /fa_help
 # ---------------------------------------------------------------------------
+def cmd_start() -> str:
+    return (
+        "*Sygnif Finance Agent*\n\n"
+        "Use the keyboard below or `/fa_help` for all commands.\n\n"
+        "_Shortcuts:_ `/finance` → `/finance-agent`, `/sygnif` → `/overview`, `/deduce` → `/scan`"
+    )
+
+
 def cmd_help() -> str:
     return (
         "*Sygnif Finance Agent*\n\n"
@@ -1383,7 +1562,24 @@ def cmd_help() -> str:
         "`/plays` — AI investment plays\n"
         "`/news` — Latest crypto headlines\n"
         "`/evaluate` — Force trade evaluation\n"
-        "`/fa_help` — This message"
+        "`/finance-agent tradfi` — FDN daily index + BTC/ETH closes (Standard API)\n"
+        "`/fa_help` — This message\n\n"
+        "*Shortcuts:* `/finance` → `/finance-agent`, `/sygnif` → `/overview`, "
+        "`/deduce` → `/scan`"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Command: /ask — quick research for a ticker (alias-friendly)
+# ---------------------------------------------------------------------------
+def cmd_ask(args: str) -> str:
+    tick = (args or "").strip()
+    if tick:
+        return cmd_research(tick)
+    return (
+        "*Ask*\n"
+        "Send `/ask BTC` (or any ticker) for a research snapshot.\n"
+        "Full report: `/research TICKER`"
     )
 
 
@@ -1414,7 +1610,7 @@ def cmd_macro() -> str:
     elif ta <= 35:
         regime = "Risk-off bias"
 
-    return (
+    core = (
         "*Macro-Crypto Context*\n"
         f"BTC: `{_fmt_price(btc_ind['price'])}` | `{btc_ind['trend']}` | TA `{ta}`\n"
         f"RSI `{btc_ind['rsi']:.0f}` | WR `{btc_ind['willr']:.0f}` | MACD `{btc_ind['macd_signal_text']}`\n"
@@ -1422,6 +1618,10 @@ def cmd_macro() -> str:
         f"Regime: *{regime}*\n"
         f"\n_{datetime.now(timezone.utc).strftime('%H:%M UTC')}_"
     )
+    fdn = fdn_tradfi_snapshot()
+    if fdn:
+        return core + "\n\n" + fdn
+    return core
 
 
 # ---------------------------------------------------------------------------
@@ -1448,6 +1648,8 @@ def cmd_finance_agent(args: str) -> str:
         lines.append("- BTC dependency gating for alts")
         lines.append("- Strategy comparison baseline: `claude_s0`")
         lines.append("- Futures shorts module with squeeze-risk filter")
+        if _FINANCIALDATA_API_KEY:
+            lines.append("- TradFi overlay: FDN daily index/crypto closes (Standard tier, in `/macro`)")
         return "\n".join(lines).strip()
 
     parts = raw.split(maxsplit=1)
@@ -1466,12 +1668,14 @@ def cmd_finance_agent(args: str) -> str:
         "help": lambda: cmd_help(),
         "ta": lambda: cmd_ta(tail or "BTC"),
         "research": lambda: cmd_research(tail or "BTC"),
+        "tradfi": lambda: cmd_tradfi(),
+        "fdn": lambda: cmd_tradfi(),
     }
     if sub in subcommands:
         return subcommands[sub]()
     if sub.isalpha() and 2 <= len(sub) <= 10:
         return cmd_research(sub.upper())
-    return "Unknown /finance-agent command. Use `market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro`"
+    return "Unknown /finance-agent command. Use `market|movers|ta <TICK>|signals|scan|research <TICK>|plays|tendency|macro|tradfi`"
 
 
 # ---------------------------------------------------------------------------
@@ -1479,7 +1683,7 @@ def cmd_finance_agent(args: str) -> str:
 # ---------------------------------------------------------------------------
 def cmd_overseer() -> str:
     try:
-        resp = requests.get("http://127.0.0.1:8090/overview", timeout=5)
+        resp = requests.get(f"{_SYGNIF_OVERSEER_HTTP}/overview", timeout=5)
         data = resp.json()
         commentary = data.get("last_commentary", "")
         if commentary:
@@ -1510,13 +1714,15 @@ def cmd_evaluate() -> str:
         t["pair"].replace("/USDT:USDT", "").replace("/USDT", "")
         for t in trades
     })
+    btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_ref_df if not btc_ref_df.empty else None
     ta_map = {}
     ta_context = []
     for sym in trade_syms:
         df = bybit_kline(f"{sym}USDT", "60", 200)
         if df.empty:
             continue
-        ind = calc_indicators(df)
+        ind = calc_indicators(df, btc_df=btc_ref)
         if not ind:
             continue
         sig = detect_signals(ind, sym)
@@ -1629,6 +1835,7 @@ FHE CUT RSI:26 broke support"""
 # Command dispatch — returns response string (matches sygnif_bot.py pattern)
 # ---------------------------------------------------------------------------
 COMMANDS = {
+    "/start": lambda args: cmd_start(),
     "/finance-agent": lambda args: cmd_finance_agent(args),
     "/overview": lambda args: cmd_overview(),
     "/tendency": lambda args: cmd_tendency(),
@@ -1642,12 +1849,27 @@ COMMANDS = {
     "/news":     lambda args: cmd_news(args),
     "/overseer": lambda args: cmd_overseer(),
     "/evaluate": lambda args: cmd_evaluate(),
+    "/macro":    lambda args: cmd_macro(),
+    "/tradfi":   lambda args: cmd_tradfi(),
+    "/fdn":      lambda args: cmd_tradfi(),
+    "/ask":      lambda args: cmd_ask(args),
     "/fa_help":  lambda args: cmd_help(),
 }
 
 
 # Commands that take a while — send a loading message first
-_SLOW_COMMANDS = {"/finance-agent", "/overview", "/tendency", "/signals", "/scan", "/research", "/plays", "/evaluate", "/macro"}
+_SLOW_COMMANDS = {
+    "/finance-agent",
+    "/overview",
+    "/tendency",
+    "/signals",
+    "/scan",
+    "/research",
+    "/plays",
+    "/evaluate",
+    "/macro",
+    "/ask",
+}
 
 # Loading messages per command
 _LOADING_MSG = {
@@ -1660,6 +1882,7 @@ _LOADING_MSG = {
     "/scan":      "\U0001f50e Scanning opportunities — TA + news + AI ranking...",
     "/macro":     "\U0001f30d Building macro-crypto context...",
     "/evaluate":  "\U0001f916 Evaluating positions...",
+    "/ask":       "\U0001f4ac Preparing answer...",
 }
 
 
@@ -1676,16 +1899,19 @@ def handle_command(text: str) -> str | tuple | None:
 
     parts = text.strip().split(maxsplit=1)
     cmd = parts[0].lower().split("@")[0]  # strip @botname suffix
+    cmd = _COMMAND_ALIASES.get(cmd, cmd)
     args = parts[1] if len(parts) > 1 else ""
 
     handler = COMMANDS.get(cmd)
     if handler is None:
-        return None
+        return "Unknown command. Try /fa_help"
 
     try:
         if cmd in _SLOW_COMMANDS:
             loading = _LOADING_MSG.get(cmd, "\u23f3 Working...")
             # Return loading msg + handler callable — dispatcher sends loading first
+            if cmd == "/ask" and not (args or "").strip():
+                return handler(args)
             return (loading, handler, args)
         return handler(args)
     except Exception as e:
@@ -1711,11 +1937,13 @@ def _briefing(symbols: list[str] | None = None) -> str:
     # Always include BTC + ETH
     core = ["BTCUSDT", "ETHUSDT"]
     extra = [f"{s}USDT" for s in (symbols or []) if f"{s}USDT" not in core]
+    btc_ref_df = bybit_kline("BTCUSDT", "60", 200)
+    btc_ref = btc_ref_df if not btc_ref_df.empty else None
     for sym in core + extra[:4]:  # max 6 total
         df = bybit_kline(sym, interval="60", limit=200)
         if df.empty:
             continue
-        ta = calc_indicators(df)
+        ta = calc_indicators(df, btc_df=btc_ref)
         if not ta:
             continue
         name = sym.replace("USDT", "")
@@ -1750,6 +1978,42 @@ def _briefing(symbols: list[str] | None = None) -> str:
     return "\n".join(lines) if lines else "No data"
 
 
+def _build_local_overseer_commentary(prompt: str) -> str:
+    """Deterministic local commentary for trade_overseer.
+
+    Produces one line per trade in parser-friendly format:
+      COINs +1.23%: HOLD — reason
+    """
+    import re
+
+    lines = []
+    seen = set()
+    for raw in (prompt or "").splitlines():
+        m = re.search(r"\b([A-Z0-9]+)\[([sf])\]\s+([+-]?\d+(?:\.\d+)?)%", raw)
+        if not m:
+            continue
+        sym, inst, pct_s = m.group(1), m.group(2), m.group(3)
+        key = (sym, inst)
+        if key in seen:
+            continue
+        seen.add(key)
+        pct = float(pct_s)
+        if pct <= -2.0:
+            action = "CUT"
+            reason = "loss beyond tolerance"
+        elif pct >= 3.0:
+            action = "TRAIL"
+            reason = "lock gains, trend extension"
+        else:
+            action = "HOLD"
+            reason = "no decisive trigger"
+        lines.append(f"{sym}{inst} {pct:+.2f}%: {action} — {reason}")
+
+    if not lines:
+        return "No actionable trades."
+    return "\n".join(lines[:12])
+
+
 class _BriefingHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -1776,12 +2040,37 @@ class _BriefingHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        if self.path == "/overseer/commentary":
+            try:
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                raw = self.rfile.read(length) if length else b"{}"
+                payload = json.loads(raw.decode("utf-8", errors="ignore"))
+                prompt = str(payload.get("prompt", "") or "")
+                commentary = _build_local_overseer_commentary(prompt)
+                body = json.dumps({"commentary": commentary})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body.encode())
+            except Exception as e:
+                body = json.dumps({"commentary": "", "error": str(e)})
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body.encode())
+            return
+        self.send_response(404)
+        self.end_headers()
+
 
 def _start_http():
-    server = HTTPServer(("127.0.0.1", 8091), _BriefingHandler)
+    http_host = os.environ.get("FINANCE_AGENT_HTTP_HOST", "127.0.0.1")
+    http_port = int(os.environ.get("FINANCE_AGENT_HTTP_PORT", "8091"))
+    server = HTTPServer((http_host, http_port), _BriefingHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info("Briefing HTTP server on :8091")
+    logger.info("Briefing HTTP server on %s:%s", http_host, http_port)
 
 
 def main():
@@ -1805,22 +2094,42 @@ def main():
                 msg = update.get("message", {})
                 text = msg.get("text", "")
                 chat_id = str(msg.get("chat", {}).get("id", ""))
+                user = msg.get("from", {}) or {}
+                username = user.get("username") or "-"
+                user_id = user.get("id") or "-"
+                stripped = (text or "").strip()
+                if stripped:
+                    cmd_name = stripped.split(maxsplit=1)[0] if stripped.startswith("/") else "<text>"
+                    logger.info(
+                        "telegram_in chat=%s user=%s(%s) cmd=%s text=%r",
+                        chat_id,
+                        username,
+                        user_id,
+                        cmd_name,
+                        stripped[:120],
+                    )
                 if text and str(chat_id) == str(TG_CHAT):
                     reply = handle_command(text)
                     if reply is None:
+                        logger.info("telegram_dispatch cmd=unknown chat=%s", chat_id)
                         continue
                     if isinstance(reply, tuple):
                         # Slow command: (loading_msg, handler, args)
                         loading, handler_fn, handler_args = reply
+                        logger.info("telegram_dispatch cmd=slow loading=%r chat=%s", loading, chat_id)
                         tg_send(loading)
                         try:
                             result = handler_fn(handler_args)
+                            logger.info("telegram_result kind=slow chars=%s chat=%s", len(result or ""), chat_id)
                             tg_send(result, reply_markup=KEYBOARD)
                         except Exception as e:
                             logger.error(f"Slow command error: {traceback.format_exc()}")
                             tg_send(f"Error: {e}", reply_markup=KEYBOARD)
                     else:
+                        logger.info("telegram_result kind=fast chars=%s chat=%s", len(reply or ""), chat_id)
                         tg_send(reply, reply_markup=KEYBOARD)
+                elif stripped:
+                    logger.warning("telegram_reject unauthorized_chat=%s allowed_chat=%s", chat_id, TG_CHAT)
         except KeyboardInterrupt:
             logger.info("Shutting down.")
             break

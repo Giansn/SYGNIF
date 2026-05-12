@@ -1,0 +1,32 @@
+[Unit]
+Description=SYGNIF Bybit Daemon — realtime trading spine (private WS + R-ladder)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+ExecStart=/opt/sygnif/.venv/bin/python -m bybit_daemon.daemon
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/sygnif/bybit-daemon.log
+StandardError=append:/var/log/sygnif/bybit-daemon.log
+TimeoutStopSec=15
+
+# Environment — adapt paths for EC2
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_AGENT_DIR=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_ORDERS_MODE=demo
+Environment=SYGNIF_MAX_DAILY_TRADES=60
+
+# Bybit credentials — sourced from same env file the trader uses
+EnvironmentFile=/etc/sygnif/bybit-mcp.env
+
+# State file directory needs write access
+ReadWritePaths=/home/ubuntu/.sygnif /var/log/sygnif
+
+[Install]
+WantedBy=multi-user.target

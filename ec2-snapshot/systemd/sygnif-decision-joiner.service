@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF decision-joiner (Phase 2.3 — joins snapshot ⨝ executed ⨝ outcome)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_decision_joiner.py
+StandardOutput=append:/var/log/sygnif/decision-joiner.log
+StandardError=append:/var/log/sygnif/decision-joiner.log
+
+[Install]
+WantedBy=multi-user.target

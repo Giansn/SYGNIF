@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF drift monitor (Phase 3.3 — KL divergence on training pairs)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_drift_monitor.py
+StandardOutput=append:/var/log/sygnif/drift-monitor.log
+StandardError=append:/var/log/sygnif/drift-monitor.log
+
+[Install]
+WantedBy=multi-user.target

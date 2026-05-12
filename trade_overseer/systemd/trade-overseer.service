@@ -1,7 +1,6 @@
 [Unit]
 Description=Sygnif Trade Overseer (Plutus-3B)
-After=docker.service ollama.service
-Wants=ollama.service
+After=docker.service
 
 [Service]
 Type=simple

@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF tier-audit (champion/challenger for Phase 1 tier promotion)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_tier_audit.py
+StandardOutput=append:/var/log/sygnif/tier-audit.log
+StandardError=append:/var/log/sygnif/tier-audit.log
+
+[Install]
+WantedBy=multi-user.target

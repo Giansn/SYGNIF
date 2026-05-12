@@ -1,0 +1,16 @@
+[Unit]
+Description=SYGNIF gate optimizer (Phase 3.2 — sweep thresholds, propose challenger)
+After=network-online.target sygnif-decision-joiner.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_gate_optimizer.py
+StandardOutput=append:/var/log/sygnif/gate-optimizer.log
+StandardError=append:/var/log/sygnif/gate-optimizer.log
+
+[Install]
+WantedBy=multi-user.target

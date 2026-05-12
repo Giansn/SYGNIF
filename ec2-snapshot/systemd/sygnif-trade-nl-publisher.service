@@ -1,0 +1,29 @@
+[Unit]
+Description=SYGNIF trade → NeuroLinked publisher (closes the learning loop)
+After=network-online.target sygnif-neurolinked.service sygnif-bybit-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif-trade-nl-publisher.py
+Restart=on-failure
+RestartSec=10s
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_AGENT_DIR=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_NL_URL=http://127.0.0.1:8889
+Environment=SYGNIF_NL_INTERVAL=30
+Environment=SYGNIF_NL_WATERMARK=/var/lib/sygnif/nl-published.json
+
+# state file dir needs write
+ReadWritePaths=/var/lib/sygnif
+
+StandardOutput=append:/var/log/sygnif/trade-nl-publisher.log
+StandardError=append:/var/log/sygnif/trade-nl-publisher.log
+
+[Install]
+WantedBy=multi-user.target

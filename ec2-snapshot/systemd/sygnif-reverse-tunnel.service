@@ -1,0 +1,19 @@
+[Unit]
+Description=Sygnif reverse SSH tunnel (stable remote endpoint → local HTTP)
+After=network-online.target
+Wants=network-online.target
+# Skip entirely unless explicitly enabled in ~/SYGNIF/.env (avoids “start then exit 0” loop).
+ConditionEnvironment=SYGNIF_REVERSE_TUNNEL_ENABLE=1
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/SYGNIF
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+# Requires SYGNIF_REVERSE_TUNNEL_GATEWAY (and SSH key) in .env — see INSTANCE_SETUP.md
+ExecStart=/home/ubuntu/SYGNIF/scripts/sygnif_reverse_tunnel.sh
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

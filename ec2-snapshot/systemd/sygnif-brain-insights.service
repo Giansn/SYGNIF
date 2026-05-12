@@ -1,0 +1,24 @@
+[Unit]
+Description=SYGNIF NeuroLinked read-only insights HTTP (port 8890, no GIL contention)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=PYTHONUNBUFFERED=1
+Environment=SYGNIF_BRAIN_STATE=/home/ubuntu/SYGNIF/third_party/neurolinked/brain_state
+Environment=SYGNIF_BRAIN_INSIGHTS_PORT=8890
+ExecStart=/usr/bin/python3 /opt/sygnif-services/brain_insights.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/sygnif/brain-insights.log
+StandardError=append:/var/log/sygnif/brain-insights.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadOnlyPaths=/home/ubuntu/SYGNIF/third_party/neurolinked/brain_state
+ReadWritePaths=/var/log/sygnif
+
+[Install]
+WantedBy=multi-user.target

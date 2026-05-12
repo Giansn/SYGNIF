@@ -1,0 +1,18 @@
+[Unit]
+Description=SYGNIF journal daily-report → NeuroLinked
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+Environment=SYGNIF_NEUROLINKED_HOST_URL=http://127.0.0.1:8889
+Environment=SYGNIF_JOURNAL_DIR=/home/ubuntu/.sygnif/journal
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_journal_daily_report.py --days 1
+StandardOutput=append:/var/log/sygnif/journal-daily.log
+StandardError=append:/var/log/sygnif/journal-daily.log
+
+[Install]
+WantedBy=multi-user.target

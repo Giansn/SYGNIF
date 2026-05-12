@@ -1,0 +1,19 @@
+[Unit]
+Description=Sygnif BTC 0.1 + Nautilus Grid MM Dashboard
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=docker
+WorkingDirectory=/home/ubuntu/SYGNIF
+# Same order as compose ``x-sygnif-env-files``: secrets first, then repo ``.env`` (later overrides).
+EnvironmentFile=-/home/ubuntu/xrp_claude_bot/.env
+EnvironmentFile=-/home/ubuntu/SYGNIF/.env
+ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/dashboard_server_btc01_grid.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

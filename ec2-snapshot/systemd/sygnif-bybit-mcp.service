@@ -1,0 +1,30 @@
+[Unit]
+Description=SYGNIF Bybit + orders MCP (HTTP, Tailscale-only, EC2 vault)
+Documentation=https://github.com/g2thek/sygnif-agent
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=/etc/sygnif/bybit-mcp.env
+WorkingDirectory=/opt/sygnif/sygnif-agent
+Environment=SYGNIF_AGENT_DIR=/opt/sygnif/sygnif-agent
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif/sygnif-agent/mcp_servers/sygnif-bybit/server.py
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/sygnif/bybit-mcp.log
+StandardError=append:/var/log/sygnif/bybit-mcp.log
+
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/sygnif /opt/sygnif/sygnif-agent/order /opt/sygnif/sygnif-agent/paper
+PrivateTmp=true
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

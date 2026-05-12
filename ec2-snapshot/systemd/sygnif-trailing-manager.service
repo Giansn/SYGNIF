@@ -1,0 +1,18 @@
+[Unit]
+Description=SYGNIF trailing-stop manager — ratchet SL up behind price
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=SYGNIF_TRAIL_SYMBOL=BTCUSDT
+Environment=SYGNIF_TRAIL_ACTIVATION_PCT=0.5
+Environment=SYGNIF_TRAIL_DISTANCE_PCT=0.4
+Environment=SYGNIF_TRAIL_INITIAL_SL_PCT=0.30
+Environment=SYGNIF_TRAIL_PREFIXES=sygSTND,sygBNCE,sygFAST
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_trailing_manager.py
+StandardOutput=append:/var/log/sygnif/trailing-manager.log
+StandardError=append:/var/log/sygnif/trailing-manager.log

@@ -1,0 +1,25 @@
+[Unit]
+Description=SYGNIF microstructure → NeuroLinked (orderbook / insurance / funding-pred)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/microstructure-feed.env
+Environment=SYGNIF_NEUROLINKED_HOST_URL=http://127.0.0.1:8889
+Environment=ORDERBOOK_POLL_SEC=30
+Environment=INSURANCE_POLL_SEC=300
+Environment=FUNDING_PRED_POLL_SEC=60
+Environment=MICRO_SYMBOLS=BTCUSDT
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_microstructure_feed.py
+Restart=on-failure
+RestartSec=15
+
+StandardOutput=append:/var/log/sygnif/microstructure-feed.log
+StandardError=append:/var/log/sygnif/microstructure-feed.log
+
+[Install]
+WantedBy=multi-user.target

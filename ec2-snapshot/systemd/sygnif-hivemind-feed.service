@@ -1,0 +1,27 @@
+[Unit]
+Description=SYGNIF option-implied "hivemind" probabilities → NeuroLinked
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/hivemind-feed.env
+Environment=SYGNIF_NEUROLINKED_HOST_URL=http://127.0.0.1:8889
+Environment=HIVEMIND_POLL_SEC=300
+Environment=HIVEMIND_POST_TIMEOUT_SEC=30
+Environment=HIVEMIND_HTTP_TIMEOUT_SEC=15
+Environment=HIVEMIND_MAX_DTE_D=30
+Environment=HIVEMIND_MAX_EXPIRIES=4
+Environment=HIVEMIND_BASE_COIN=BTC
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_hivemind_options.py
+Restart=on-failure
+RestartSec=15
+
+StandardOutput=append:/var/log/sygnif/hivemind-feed.log
+StandardError=append:/var/log/sygnif/hivemind-feed.log
+
+[Install]
+WantedBy=multi-user.target

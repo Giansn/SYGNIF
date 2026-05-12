@@ -1,0 +1,24 @@
+[Unit]
+Description=Swarm-gated BTC predict-protocol loop (Bybit API demo; sygnif-swarm bundle)
+Documentation=https://github.com/Giansn/sygnif-swarm
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=400
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-swarm/BTC_Prediction
+EnvironmentFile=-/home/ubuntu/sygnif-swarm/BTC_Prediction/.env
+EnvironmentFile=-/home/ubuntu/sygnif-swarm/BTC_Prediction/swarm_operator.env
+Environment=SYGNIF_SWARM_RUNTIME_HINTS_APPLY=1
+ExecStart=/bin/bash /home/ubuntu/sygnif-swarm/BTC_Prediction/scripts/sygnif_swarm_predict_loop_locked.sh
+Restart=on-failure
+RestartSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

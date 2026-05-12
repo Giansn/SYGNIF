@@ -1,0 +1,24 @@
+[Unit]
+Description=SYGNIF on-chain oversight (BTC blockchain whale watcher)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+Environment=PYTHONUNBUFFERED=1
+Environment=SYGNIF_ONCHAIN_THRESHOLD_BTC=50
+Environment=SYGNIF_ONCHAIN_POLL_S=60
+Environment=SYGNIF_ONCHAIN_COLD_TX_MAX=50
+Environment=SYGNIF_ONCHAIN_HOT_TX_MIN=1000
+Environment=SYGNIF_ONCHAIN_ADDR_DELAY_S=1.5
+ExecStart=/opt/sygnif/.venv/bin/python -u /opt/sygnif-services/sygnif_onchain_watcher.py
+StandardOutput=append:/var/log/sygnif/onchain-watcher.log
+StandardError=append:/var/log/sygnif/onchain-watcher.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

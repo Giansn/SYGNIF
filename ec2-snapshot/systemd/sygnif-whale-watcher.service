@@ -1,0 +1,23 @@
+[Unit]
+Description=SYGNIF whale-flow watcher (Bybit V5 publicTrade WS, large-trade aggregator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+Environment=SYGNIF_WHALE_SYMBOL=BTCUSDT
+Environment=SYGNIF_WHALE_NOTIONAL_USD=250000
+Environment=SYGNIF_WHALE_WINDOW_MIN=15
+Environment=SYGNIF_WHALE_FLUSH_S=5
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_whale_watcher.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/sygnif/whale-watcher.log
+StandardError=append:/var/log/sygnif/whale-watcher.log
+
+[Install]
+WantedBy=multi-user.target

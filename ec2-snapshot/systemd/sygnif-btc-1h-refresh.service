@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh btc_1h_ohlcv.json from Bybit kline V5 — keeps the predict runner from churning on stale data
+Documentation=file:///home/ubuntu/SYGNIF/finance_agent/btc_specialist/scripts/refresh_1h_ohlcv.py
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/SYGNIF/finance_agent/btc_specialist/scripts/refresh_1h_ohlcv.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=60

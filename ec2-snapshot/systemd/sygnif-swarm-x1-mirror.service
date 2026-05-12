@@ -1,0 +1,18 @@
+[Unit]
+Description=SYGNIF swarm.db -> X1 swarm-master mirror (EC2 rows shipped via X1 MCP)
+After=network-online.target sygnif-bybit-mcp.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=/etc/sygnif/x1-mcp.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/sygnif-services/swarm_x1_mirror.py
+TimeoutStartSec=300
+StandardOutput=append:/var/log/sygnif/x1-mirror.log
+StandardError=append:/var/log/sygnif/x1-mirror.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/sygnif /var/lib/sygnif

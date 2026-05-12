@@ -1,0 +1,14 @@
+[Unit]
+Description=SYGNIF Bybit-mainnet discovery pass (regime/IV/GEX/max-pain snapshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+ExecStart=/usr/bin/bash /home/ubuntu/sygnif-agent-mirror/discovery/run.sh
+StandardOutput=append:/home/ubuntu/.sygnif/discovery.log
+StandardError=append:/home/ubuntu/.sygnif/discovery.log
+TimeoutStartSec=120

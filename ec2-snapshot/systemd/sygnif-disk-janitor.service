@@ -1,0 +1,21 @@
+[Unit]
+Description=SYGNIF disk janitor — maintain disk usage ≤ 80%
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/sygnif-services
+Environment=SYGNIF_DISK_TARGET_PCT=80
+Environment=SYGNIF_DISK_ALERT_PCT=85
+Environment=SYGNIF_DISK_EMERGENCY_PCT=90
+Environment=SYGNIF_DISK_MAX_JOURNAL_MB=500
+Environment=SYGNIF_DISK_MAX_LOG_MB=10
+Environment=SYGNIF_DISK_STALE_ZIP_HOURS=6
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_disk_janitor.py
+StandardOutput=append:/var/log/sygnif/disk-janitor.log
+StandardError=append:/var/log/sygnif/disk-janitor.log
+
+[Install]
+WantedBy=multi-user.target

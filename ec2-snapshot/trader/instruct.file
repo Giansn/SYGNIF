@@ -1,0 +1,659 @@
+storage:
+  primary: /var/lib/sygnif/swarm.db
+  engine: sqlite-wal
+  schema:
+    columns:
+    - id_TEXT_PK
+    - swarm_id
+    - agent_id
+    - topic
+    - content
+    - tags
+    - meta
+    - created_REAL
+    id_required: str(uuid.uuid4())
+    write: INSERT_only_never_UPDATE
+  topics:
+  - forecast
+  - trade.open
+  - trade.close
+  - regime
+  - lesson
+  - gap
+  - proposal
+  - postmortem
+  - observation
+  - plan
+  - hypothesis
+  - bee.reference
+  - trader.heartbeat
+  swarm_ids:
+  - default
+  - btc_demo
+  - self_knowledge
+  - self_improvement
+  - session_log
+  - trading
+  permanence:
+    backend: bee_mainnet
+    upload: bee.upload(text)->bzz_ref
+    backlink: insert_swarm_row_topic_bee.reference
+    batch_ttl_days: 30
+    bee_local_health: http://127.0.0.1:1633/health
+    bee_write_host: ubuntu@3.64.28.14
+  feeds: one_per_topic_head_moves_consumers_read_latest
+  metrics:
+    local_write_ms: 5
+    bee_upload_s:
+    - 2
+    - 8
+  antipatterns:
+  - UPDATE_existing_rows
+  - INSERT_without_id
+  - trust_paper.json_across_versions
+compute:
+  model_split_2026-04-28:
+    voice_second_opinion_postmortem_shadow_planner: qwen3.5_9B_sygnif-lora-v3_via_llm.advise_neuron_runpod_pod
+    routing_structured_json_background: gemma_family_local_devices_x1_ollama_x1_openvino_yoga_NPU_GPU_CPU
+    deterministic: pure_python_no_llm
+    legacy_deprecated_2026-04-28: sygnif_ask_chat_9011_gemma1b_channeler_paths_remain_but_not_voice
+  voice:
+    model: qwen3.5_9B_sygnif-lora-v3
+    serving: llama.cpp_on_runpod_gpu_pod
+    tunnel: ssh_localhost_8080
+    neuron: llm.advise
+    cost_usd_per_hour_running: 0.69
+    default_posture: pod_down
+    lifecycle_up: sygnif-llamapod-up_or_/llama_up_in_TUI
+    lifecycle_down: sygnif-llamapod-down_or_/llama_down
+    failure_mode: reason=pod_down_caller_falls_back_to_rule_based_path
+    shadow_planner:
+      env: SYGNIF_LLM_SHADOW=1
+      unit: sygnif-trader.service
+      persistence_topic: trade.plan.shadow
+      persistence_swarm_id: trading
+      phase: 1_observation_only_no_execution_change_2_to_4_weeks_then_decide_veto_or_primary
+  npu_quant: channel_wise_int4_sym_group_size_neg1
+  x1_num_gpu: 0
+  ollama_idle_unload_min: 10
+  tier_routing:
+    deterministic:
+      device: pure_python
+      throughput: ms
+      use: sizing_dedup_review_pnl_math
+    structured_json:
+      device: gemma-sygnif-mini@x1_ollama
+      params: 1B_q4_cpu
+      ttft_s: 6
+      use: routing_swarm_schema
+    interactive_chat:
+      device: yoga_gpu_arc_140v
+      via: sygnif-yoga_mcp_9003
+      throughput_tok_s: 54.8
+      ttft_ms_warm: 67
+      use: foreground_chat
+    background_loops:
+      device: yoga_npu_lunar_lake
+      via: sygnif-yoga_mcp_9003
+      throughput_tok_s: 41.6
+      power_w: 2
+      ttft_s_cold: 24
+      use: low_power_background
+    heavy_reasoning:
+      device: x1_ollama_gemma-sygnif
+      params: 7.5B_q4_cpu
+      throughput_tok_s:
+      - 5
+      - 15
+      ttft_s_cold:
+      - 30
+      - 60
+      use: queue_patiently
+    voice_runpod:
+      device: runpod_gpu_pod
+      model: qwen3.5_9B_sygnif-lora-v3
+      serving: llama.cpp_via_ssh_tunnel_localhost_8080
+      neuron: llm.advise
+      cost_usd_per_hour: 0.69
+      use: second_opinions_articulations_postmortems_shadow_planner_concur
+  antipatterns:
+  - call_7.5B_for_routing
+  - call_1B_for_trading_decisions
+  - load_model_per_call
+  - x1_igpu_inference
+  - leave_runpod_pod_up_when_idle_burns_0.69_per_hour
+  - claim_qwen_forbidden_per_stale_single_model_rule
+network_internal:
+  primary: tailscale_magicdns
+  hosts:
+  - x1
+  - sygnif-ec2
+  - gtaura
+  - yoga
+  fallback: lan_mdns
+  fallback_examples:
+    x1: thinkx1.local -> 10.93.202.35
+    ec2: ec2-eu1 -> 3.64.28.14_ssh_alias
+  mcp_endpoints:
+    x1_mcp: 100.71.122.115:9001/rpc
+    bybit_mcp: 100.71.122.115:9002/rpc
+    dashboard_prod: 100.71.122.115:8088
+    dashboard_v2: 100.71.122.115:8090
+  protocol: http_jsonrpc_2.0_bearer_token
+  tailnet_acl: gate
+  swarm_master: x1_only_ec2_writes_via_mcp
+  metrics:
+    x1_ec2_rtt_ms: 18
+    lan_mdns_resolve_ms: 14
+    mcp_call_p50_ms: 50
+  antipatterns:
+  - hardcode_tailscale_ip
+  - bind_0.0.0.0_outside_lan
+  - skip_mdns_fallback
+network_external:
+  bybit_mainnet:
+    url: https://api.bybit.com
+    use: market_truth_chains_klines_ticker_max_pain
+    auth_public: none
+    auth_private: hmac
+  bybit_demo:
+    url: https://api-demo.bybit.com
+    env: BYBIT_OPTION_USE_DEMO=1
+    keys: BYBIT_DEMO_*
+    use: paper_orders
+  bybit_demo_quirks:
+    demo_apply_money_adjusttype_0: deposits_full_per_coin_allotment_regardless_of_amountstr
+    demo_apply_money_adjusttype_1: DOES_execute_as_withdrawal_settles_asynchronously_retCode_0_at_submission_balance_updates_over_seconds_to_minutes_rate_limited_retCode_10006_on_rapid_retries
+    max_per_call:
+      usdt: 50000
+      usdc: 50000
+      btc: 1
+      eth: 1
+    option_taker_fee_pct: 0.03
+  ec2_ssh:
+    address: ubuntu@3.64.28.14
+    eip_alloc: eipalloc-07c3927e571711ec5
+    auth_persistent: id_ed25519
+    auth_ondemand: ec2-instance-connect_60s_window
+    iam: sygnif-agent_scoped
+  bybit_rest_p50_ms: 280
+  rules:
+    live_clearance_phrase: clear for live
+    leverage_max_default: 10
+  antipatterns:
+  - live_orders_without_clearance
+  - trade_on_stale_snapshot_ticker_gt_10min_chain_gt_30min
+  - bypass_mcp_gate_loses_dedup_audit_equity_cap
+waiaas_daemon:
+  role: self_custodied_multi_chain_wallet_for_non-bybit_positioning_added_2026-04-26
+  host: 127.0.0.1:3100
+  container_name: waiaas-daemon
+  image: ghcr.io/minhoyoo-iotrust/waiaas:latest
+  version_observed: 2.16.0
+  chains:
+  - solana_mainnet
+  - ethereum_mainnet
+  - polygon_mainnet
+  - arbitrum_mainnet
+  - optimism_mainnet
+  - base_mainnet
+  - hyperevm_mainnet
+  - xrpl_mainnet
+  master_password_location: /data/recovery.key_inside_container_volume_NEVER_in_host_shell_or_env
+  session_env_file: ~/.sygnif/waiaas.env_chmod_600
+  encrypted_backup_path: ~/sygnif-backups/backup-20260425-232955322.waiaas-backup
+  operator_cli: ~/.local/bin/sygnif-wallet
+  cli_modes:
+  - sol
+  - eth
+  - xrp
+  - all
+  - raw
+  - evm_<network>
+  programmatic_neurons_read:
+  - chain.balance
+  - chain.connect_info
+  - chain.history
+  - chain.actions.list
+  - chain.swap.quote
+  programmatic_neurons_mutating_triple_gate:
+  - chain.send_native
+  - chain.swap.execute
+  - chain.jito.stake
+  - chain.jito.unstake
+  - chain.kamino.supply
+  - chain.kamino.withdraw
+  - chain.drift.open
+  - chain.drift.close
+  triple_gate:
+    confirm: 'True'
+    i_understand_real_money: "'yes'"
+    NEVER_skip_for_convenience: true
+  policy_gates:
+  - SPENDING_LIMIT
+  - WHITELIST
+  - ALLOWED_TOKENS
+  - CONTRACT_WHITELIST
+  default_policy: deny
+  action_providers:
+  - jupiter_swap
+  - zerox_swap
+  - lifi
+  - lido_staking
+  - jito_staking
+  - aave_v3
+  - kamino
+  - pendle_yield
+  - drift_perp
+  - hyperliquid_spot
+  - hyperliquid_perp
+  - hyperliquid_sub
+  - polymarket_order
+  - polymarket_ctf
+  - dcent_swap
+  - across_bridge
+  - xrpl_dex
+  - erc8004_agent
+  quirks:
+    dryrun_v2.16.0_ignored: every_api_call_is_real_verified_2026-04-25_with_1000_lamport_loss
+  telegram:
+    bot_username: '@Sygnif_Agent_Bot'
+    chat_id: '1134139785'
+    chat_role_for_user: ADMIN
+    alert_topics:
+    - TX_SUBMITTED
+    - TX_INCOMING
+    - POLICY_VIOLATION
+    - KILL_SWITCH
+    security_broadcasts_bypass_filters: true
+  rules:
+    no_master_password_in_host_shell_or_env: docker_compose_exec_T_with_inline_PW_only
+    no_dryrun_trust: every_call_real_v2.16.0
+    whitelist_recipients_first: caught_address_poisoning_attack
+    no_copy_addresses_from_tx_history: scammer_defense_lessons
+  antipatterns:
+  - bypass_triple_gate
+  - export_master_password_to_host_shell
+  - echo_session_token
+  - head_c_response_with_token
+  - blanket_allow_new_recipient_without_whitelist_review
+  - trust_dryrun_field
+hardware:
+  x1:
+    name: ThinkX1
+    cpu: intel_core_ultra_meteor_lake_u
+    igpu: uhd_620_whiskeylake_u
+    igpu_status: BROKEN_for_inference_vulkan_hangs_opencl_fails
+    role:
+    - decisions
+    - swarm_master
+    - mcp_host
+    - dashboard_host
+    tailscale_ip: 100.71.122.115
+    lan_ip: 10.93.202.35
+    mdns: thinkx1.local
+  yoga:
+    name: yoga_lunar_lake
+    cpu: core_ultra_7_258v
+    cpu_throughput_tok_s: 62.9
+    cpu_warmup_s: 2.4
+    gpu: arc_140v
+    gpu_memory_gb: 16
+    gpu_throughput_tok_s: 54.8
+    gpu_ttft_ms_warm: 67
+    npu: lunar_lake
+    npu_throughput_tok_s: 41.6
+    npu_power_w: 2
+    npu_ttft_s_cold: 24
+    mcp_endpoint: :9003
+    idle_unload_min: 10
+    idle_baseline_mb: 30
+  ec2_eu1:
+    instance_id: i-0cd5389584d70a7fc
+    class: m7i-flex.large
+    region: eu-central-1
+    permanent_ip: 3.64.28.14
+    eip_alloc: eipalloc-07c3927e571711ec5
+    public_dns: ec2-3-64-28-14.eu-central-1.compute.amazonaws.com
+    user: ubuntu
+    services:
+    - bybit-stream-monitor
+    - btc_prediction_agent_cron_60min
+    - sygnif-bybit-mcp_backup
+    - cursor-agent-worker
+  antipatterns:
+  - heavy_llm_on_ec2_no_gpu
+  - npu_for_interactive_24s_cold
+  - x1_igpu_for_compute
+efficiency:
+  caching_seconds:
+    balance: 15
+    chart: 30
+    orders: 8
+    perf: 30
+  multi_leg_orders: combo_one_fill_or_none_one_fee
+  leg_ordering_fallback: sells_first_on_net_credit_premium_funds_buys
+  closes:
+    perp: pre_armed_tp_sl_at_open
+    perp_trailing:
+      activate_when_mark_gt_entry_plus_1R: true
+      trail_distance: 1_5x_atr_14_1h
+      mechanism: bybit_v5_trading_stop_trailingStop_param
+    options:
+      short_premium:
+        applies_to: [iron_condor, bull_put_credit_spread, bear_call_credit_spread, short_strangle, short_straddle]
+        profit_take: 50pct_of_max_credit
+        loss_stop: 200pct_of_credit_received
+        time_stop: 25pct_of_dte_remaining
+      long_premium:
+        applies_to: [long_call, long_put, long_strangle, long_straddle, bull_call_spread, bear_put_spread, calendar_call_spread, broken_wing_butterfly_call, broken_wing_butterfly_put]
+        profit_take: trailing_50pct_of_HWM_premium
+        loss_stop: 30pct_of_premium_paid
+        time_stop: 50pct_of_dte_remaining
+      always:
+        regime_flip_subscriber: close_when_regime_changes_against_thesis
+        intraday_theta_guard: block_entry_if_dte_lt_8h_AND_premium_gt_2pct_equity
+        sub4h_acceleration_rule: in_last_4h_to_settle_decay_rate_2x_to_5x_per_hour_review_every_15min_emergency_close_at_50pct_loss_not_30
+    research_basis:
+      iron_condor_50pct_management: tastytrade_4872_SPY_trades_2005_2019_winrate_64_to_82_pct_time_27d_to_14d
+      sub_day_theta_acceleration: optionalpha_0dte_research_morning_slow_2pm_2x_3_30pm_4_to_5x_atm_5_to_2_50_to_0_50_zero_spot_move
+      cross_asset_caveat: research_on_SPY_SPX_0dte_BTC_8utc_settle_equivalent_ramp_window_04_00_08_00_utc
+  number_sourcing: cite_source_plus_age_dash_for_missing_never_NA_never_guess
+  implementation_shortfall_observed_pct:
+  - 30
+  - 72
+  pre_armed_close_savings_pct_estimate:
+  - 60
+  - 80
+  antipatterns:
+  - poll_balance_under_5s
+  - sequential_legs_no_margin_awareness
+  - reactive_market_cross_close
+  - apply_3DTE_theta_budget_to_sub_day_options
+  - scale_long_position_against_5m_TREND_DOWN_even_if_4h_lean_long
+  - asymmetric_exits_perp_armed_options_unarmed
+  - trail_stop_before_1R_captured
+  - iron_condor_partial_fill_left_naked_long_strangle_2026-04-30
+  - autonomous_trader_qty_1_0_btc_options_when_meant_0_01
+  - sell_premium_when_iv_rv_lt_0_8_negative_local_VRP
+  - long_puts_when_RR_already_stretched_paying_for_priced_fear
+  - 0dte_entry_lt_4h_with_premium_gt_2pct_equity
+  - long_premium_with_no_HWM_trailing_lets_winners_round_trip
+market_doctrine:
+  baseline_swarm_ref: 'self_improvement/doctrine.market_analysis id fd323429-9f98-4114-85f2-629b1c2a63fd'
+  baseline_date_utc: '2026-05-01T12:00:00Z'
+  iv_regime_now: short_term_compressed_below_30d_RV
+  rv_cone_pct:
+    24h: 20.7
+    30d: 36.5
+    90d: 58.1
+    180d: 50.7
+  term_structure: contango_1_65x_back_over_front
+  rr_skew_persistent_put_richer: true
+  preferred_structures_now:
+  - iron_condor_2MAY_pin_centered_77k
+  - bull_put_credit_spread_8MAY_capture_put_skew
+  - bear_call_credit_spread_29MAY_sell_83k_ceiling
+  current_market_pin: 77000
+  current_market_resistance: 78000_then_83000_29MAY
+  current_market_support_cluster: 70000_to_74000_26JUN
+  invalidation_requires_2_of:
+  - funding_gt_plus_0_005pct_3_consecutive_stamps
+  - atm_front_iv_gt_40pct
+  - rr_25_8may_gt_minus_1pct
+  - spot_break_80000_4h_hold
+  - spot_break_74000_4h_hold
+qualitative_speed:
+  loop_cadences:
+    trader_adaptive_s:
+    - 60
+    - 1800
+    discovery_refresh_min: 30
+    reflect_min: 30
+    dashboard_poll_s: 10
+    btc_predict_cron_min: 60
+  decision_to_action_target_s: 60
+  observed_2026_04_29_14_33Z:
+    gap_minutes: 8
+    paper_upl: 40.7
+    realized: 11.3
+    bleed_usd: -29.4
+    bleed_pct: 0.722
+  bleed_decomposition_pct:
+    spread: 50
+    fees: 40
+    theta_3dte: 10
+  implementation_tax_per_trade_usd:
+  - 15
+  - 30
+  implementation_tax_26_trades_usd:
+  - 390
+  - 780
+  rules:
+  - paper_upl_is_provisional_realized_pnl_is_truth
+  - never_report_unrealized_as_proof_of_edge
+  - latent_pause_honest_panic_cross_expensive
+  - pre_arm_exits_at_entry_decide_once_fill_many
+  - when_in_doubt_shrink_size_and_observe
+ssh_topology:
+  identities:
+    windows_gtaura:
+      private_key: C:/Users/giank/.ssh/id_ed25519
+      public_key_authorized_on:
+      - x1
+      - ec2_eu1
+    x1_g2thek:
+      private_key: /home/g2thek/.ssh/id_ed25519
+      public_key_authorized_on:
+      - ec2_eu1
+    ec2_ubuntu:
+      private_key: n/a_target_only
+  windows_ssh_config_aliases:
+    primary_x1:
+      aliases:
+      - x1
+      - thinkx1
+      - ThinkX1
+      hostname: thinkx1.tailff64b5.ts.net
+      user: g2thek
+      via: tailscale_magicdns
+    fallback_x1_ip:
+      aliases:
+      - x1-ip
+      hostname: 100.71.122.115
+      user: g2thek
+      via: tailscale_ip
+    primary_ec2:
+      aliases:
+      - ec2-eu1
+      - ec2-eu
+      - freqtrade
+      hostname: 3.64.28.14
+      user: ubuntu
+      via: eip_public
+  ec2_inbound_paths:
+    direct_via_eip: ssh_ubuntu@3.64.28.14_id_ed25519_already_in_authorized_keys
+    push_key_60s_window: aws_ec2-instance-connect_send-ssh-public-key
+    aws_ssm_session_manager: see_docs/AWS_SSM_SESSION_MANAGER.md
+  required_env_x1:
+    file: ~/.sygnif/bybit-mcp.env
+    keys:
+    - BYBIT_API_KEY_BYBIT_API_SECRET_perp_demo
+    - BYBIT_DEMO_OPTION_API_KEY_BYBIT_DEMO_OPTION_API_SECRET
+    - BYBIT_LIVE_API_KEY_BYBIT_LIVE_API_SECRET_gated
+    - BYBIT_LIVE_OPTION_API_KEY_BYBIT_LIVE_OPTION_API_SECRET
+    - SYGNIF_BEE_WRITE_HOST=ubuntu@3.64.28.14
+tailscale_bypass:
+  trigger_observed: 2026-04-29_control-key_fetch_cancelled_logged_out_locally
+  detection:
+    cmd_status: tailscale status -> NoState_or_logged_out
+    cmd_ping: ping 100.x.x.x -> 100pct_packet_loss
+  reauth_preferred:
+    cli: tailscale login (opens_browser)
+    gui: system_tray_icon_sign_in
+  bypass_paths_no_reauth:
+    x1_ssh_via_mdns:
+      cmd: ssh -4 g2thek@thinkx1.local
+      mechanism: mdns_lan_resolves_to_current_ip
+      lan_ip: 192.168.1.109
+      note: force_ipv4_mdns_returns_only_ipv6_on_this_lan
+    x1_ssh_via_lan_ip:
+      cmd: ssh g2thek@192.168.1.109
+      mechanism: direct_lan_layer2
+    x1_dashboard_browser:
+      url: http://thinkx1.local:8090/
+      requires: SYGNIF_DASHBOARD_BIND=0.0.0.0_on_v2
+    x1_mcp_via_tunnel:
+      cmd: ssh -L 9001:100.71.122.115:9001 g2thek@thinkx1.local -N
+      mechanism: ssh_local_port_forward_through_lan
+    ec2_no_tailscale_needed:
+      cmd: ssh ec2-eu1
+      mechanism: public_eip_routes_via_internet
+  lan_bind_pattern_for_tailscale_only_service:
+    example: SYGNIF_DASHBOARD_BIND=0.0.0.0 SYGNIF_DASHBOARD_PORT=8090 nohup ~/sygnif/dashboard-v2/run-v2.sh
+    constraint: same_lan_only_no_public_internet
+  why_works:
+    mdns: udp_multicast_discovery_independent_of_tailscale_dns_control_plane
+    lan: layer_2_l2_only_tailscale_is_overlay_not_underlay
+    eip: public_ip_no_vpn_required
+    mcp_security: tailnet_bound_for_security_lan_gated_by_physical_presence
+  gotchas:
+  - ssh_config_aliases_resolve_to_tailscale_hostname_break_when_down
+  - claude_code_ssh_dialog_skips_ssh_config_use_literal_user@ip
+  - sygnif_bee_write_host_hardcoded_old_ip_use_env_override
+provenance:
+  implementation_shortfall_options:
+    swarm_id: self_improvement
+    topic: lesson
+    row_id: c70224c8-9d67-4923-9d19-26bfd755789c
+    bee_ref: bzz://2cad327f96142b72fc83856ae619772a72128896f46ed2695e8f9059af4561f0
+    observed: 2026-04-29T14:33Z
+    applies_to:
+    - efficiency
+    - qualitative_speed
+  iron_condor_leg_ordering_fix:
+    patch_file: ~/sygnif/sygnif-agent/order/option.py
+    patch_date: 2026-04-29
+    fix: sells_first_stable_sort_in_place_option_strategy_demo_live_branch
+    audit_tag: exec_order=sells-first
+    applies_to:
+    - efficiency
+  ec2_eip_attached:
+    allocation_id: eipalloc-07c3927e571711ec5
+    ip: 3.64.28.14
+    date: 2026-04-29
+    applies_to:
+    - network_external
+    - hardware
+  bybit_demo_apply_money_one_way:
+    observed: '2026-04-29'
+    detail: INITIAL_CLAIM_WRONG_adjustType_1_DOES_work_with_settlement_delay_corrected_2026_04_29_after_user_observed_full_reduction
+    applies_to:
+    - network_external
+  x1_uhd_620_inference_broken:
+    observed: 2026-04-25
+    detail: vulkan_hangs_opencl_fails_on_transformer_ops
+    applies_to:
+    - compute
+    - hardware
+  identity_files_backup_topology:
+    observed: '2026-04-29'
+    detail: instruct_files_were_single_point_x1_disk_now_4_layer_x1_github_bee_ec2_mirror
+    applies_to:
+    - storage
+    - backup_topology
+  security_audit_and_intrusion_watch:
+    observed: '2026-04-29'
+    detail: first_full_audit_x1_then_intrusion_watch_tool_built_systemd_timer_5min
+    applies_to:
+    - hardware
+    - security_observability
+    - backup_automation
+  llm_voice_qwen_migration:
+    observed: '2026-04-28'
+    detail: gemma1b_channeler_9011_deprecated_replaced_by_qwen3.5_9B_sygnif-lora-v3_on_runpod_gpu_pod_via_llm.advise_neuron
+    source: ~/sygnif/sygnif-agent/AGENT.md_LLM_voice_section
+    applies_to:
+    - compute
+    - storage
+  waiaas_daemon_added:
+    observed: '2026-04-26'
+    detail: self_hosted_multi_chain_wallet_daemon_solana_evm_xrpl_mainnet_default_deny_policies_added_to_x1_docker
+    source: ~/sygnif/sygnif-agent/AGENT.md_on_chain_wallet_section
+    applies_to:
+    - waiaas_daemon
+    - network_external
+backup_topology:
+  identity_files:
+    files:
+    - instruct.file
+    - instruct.md
+    - AGENT.md
+    critical_note: instruct.file_is_the_only_canonical_machine_readable_spec_replicate_aggressively
+    layers:
+      1_canonical_x1: /home/g2thek/sygnif/sygnif-agent/{instruct.file,instruct.md,AGENT.md}
+      2_git: github.com/Giansn/sygnif-agent_commit_49f4227_and_forward_push_after_every_identity_edit
+      3_bee_mainnet:
+        instruct_file_bzz: de2a85e1ada6bfe9eea4fdb9...
+        instruct_md_bzz: 240d1cfbae10a8c40e42b1ce...
+        agent_md_bzz: 8030bacb0812b398c8b7862d...
+        sha256_first_12:
+          instruct.file: 8306ff2d6d97
+          instruct.md: 1188dadf01a5
+          AGENT.md: 59fef3d3292b
+      4_warm_replica_ec2: ec2-eu1:~/sygnif-agent-mirror/  rsync_on_demand_from_x1
+    after_edit_routine: git_commit_push__bee_upload_each__rsync_to_ec2_mirror
+  swarm_db:
+    canonical: /var/lib/sygnif/swarm.db_on_x1_only
+    size_mb: 17.6
+    replication: NONE_no_ec2_no_bee_full_snapshot
+    per_row_durability: selected_lessons_uploaded_to_bee_individually_topic_bee.reference
+    risk: x1_disk_failure_loses_unuploaded_rows
+  code_repo:
+    canonical: ~/sygnif/sygnif-agent_x1_git_working_tree
+    off_box: github.com/Giansn/sygnif-agent_https_push_works
+    stale_dir: ~/sygnif-agent_legacy_gutted_backup.py_defaults_still_point_here_broken
+    backup_script: backup.py_exists_NOT_wired_to_systemd_or_cron_defaults_stale
+  gaps:
+  - swarm.db_no_whole_file_off_box_copy_needs_nightly_rsync_to_ec2
+  - backup.py_defaults_point_to_legacy_~/sygnif-agent_needs_SYGNIF_AGENT_DIR_update
+  - no_systemd_timer_for_periodic_backup_currently_all_manual
+backup_automation:
+  script: ~/sygnif/sygnif-agent/scripts/sygnif-backup.sh
+  service: sygnif-backup.service
+  timer: sygnif-backup.timer_nightly_0330_UTC_jitter_10min
+  covers: swarm.db_sqlite_backup_snapshot__identity_file_rsync__agent_zip_via_backup.py
+  retention_ec2: last_7_swarm.db_snapshots_last_4_agent_zips
+  first_run_ok: 2026-04-29T14:27:38Z_swarm_db_sha_96250c4339ab9ad5
+security_observability:
+  tool: ~/sygnif/sygnif-agent/security/intrusion-watch.py
+  service: sygnif-intrusion-watch.service
+  timer: sygnif-intrusion-watch.timer_every_5min_OnBootSec_2min
+  state: /var/lib/sygnif/intrusion-watch.state
+  output_topics:
+  - security.heartbeat_every_cycle
+  - security.alert_on_trigger
+  detectors:
+    new_ssh_session: diff_who_aH_vs_baseline_severity_warn
+    failed_sshd_auth_spike: journalctl_sshd_filtered_5_in_5min_severity_critical
+    new_listening_port: diff_ss_tln_vs_baseline_severity_warn
+    new_tailscale_peer: diff_tailscale_status_peers_severity_info
+    file_integrity_drift: sha256_of_10_critical_paths_severity_warn
+  limitations:
+  - user_scope_journalctl_does_not_see_full_auth_log_without_adm_or_systemd_journal_group
+  - no_notification_dispatcher_yet_alerts_only_in_swarm_db
+  - file_list_static_extend_if_new_sensitive_paths_added
+audit_findings_2026_04_29:
+  good:
+  - ufw_active_ssh_restricted_to_lan_and_tailscale
+  - env_files_mode_600
+  - mcp_services_tailscale_bound_only
+  - ollama_yoga_bee_api_localhost_only
+  - auto_unattended_upgrades_on
+  warnings:
+  - bee_libp2p_1634_intentionally_0_0_0_0_peer_discovery
+  - dashboard_v2_8090_lan_bound_since_tailscale_outage_restore_when_convenient
+  - systemd_units_lack_NoNewPrivileges_ProtectSystem_PrivateTmp_hardening
+  - sygnif_channeler_and_llamacpp_tunnel_crash_looping_pollutes_journal
+  - stale_outbound_syn_attempts_to_old_ec2_ip_54_93_232_126_grep_configs
+  verified_legitimate: 100_68_115_95_root_session_is_tailscale_ssh_console_giansn_github_operator

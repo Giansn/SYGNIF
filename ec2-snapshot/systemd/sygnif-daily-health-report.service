@@ -1,0 +1,16 @@
+[Unit]
+Description=SYGNIF daily health report (PnL + learning + bleedings + market + system)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_daily_health_report.py
+StandardOutput=append:/var/log/sygnif/daily-health-report.log
+StandardError=append:/var/log/sygnif/daily-health-report.log
+
+[Install]
+WantedBy=multi-user.target

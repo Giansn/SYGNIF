@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF challenger diff report (Phase 3.4 — what optimizer proposes)
+After=network-online.target sygnif-gate-optimizer.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_challenger_report.py
+StandardOutput=append:/var/log/sygnif/challenger-report.log
+StandardError=append:/var/log/sygnif/challenger-report.log
+
+[Install]
+WantedBy=multi-user.target

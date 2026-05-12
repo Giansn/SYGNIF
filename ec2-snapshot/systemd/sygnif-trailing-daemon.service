@@ -1,0 +1,29 @@
+[Unit]
+Description=SYGNIF real-time trailing-stop daemon (WebSocket-driven)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=PYTHONUNBUFFERED=1
+Environment=SYGNIF_TRAIL_SYMBOL=BTCUSDT
+Environment=SYGNIF_TRAIL_ACTIVATION_PCT=0.1
+Environment=SYGNIF_TRAIL_DISTANCE_PCT=0.1
+Environment=SYGNIF_TRAIL_INITIAL_SL_PCT=0.30
+Environment=SYGNIF_TRAIL_PREFIXES=sygSTND,sygBNCE,sygFAST
+Environment=SYGNIF_TRAIL_COOLDOWN_S=0.5
+Environment=SYGNIF_TRAIL_POSITION_POLL_S=3
+ExecStart=/opt/sygnif/.venv/bin/python -u /opt/sygnif-services/sygnif_trailing_daemon.py
+StandardOutput=append:/var/log/sygnif/trailing-daemon.log
+StandardError=append:/var/log/sygnif/trailing-daemon.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

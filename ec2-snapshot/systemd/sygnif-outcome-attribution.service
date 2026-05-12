@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF outcome-attribution worker (closes the learning loop)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=SYGNIF_ATTRIBUTION_DAYS=7
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_outcome_attribution.py
+StandardOutput=append:/home/ubuntu/.sygnif/outcome-attribution.log
+StandardError=append:/home/ubuntu/.sygnif/outcome-attribution.log
+TimeoutStartSec=300

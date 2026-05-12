@@ -1,0 +1,22 @@
+[Unit]
+Description=SYGNIF funding-rate harvest scanner (skeleton — DRY_RUN only)
+After=network-online.target sygnif-neurolinked.service
+Wants=sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=SYGNIF_FUNDING_HARVEST_DRY_RUN=1
+Environment=SYGNIF_FUNDING_HARVEST_THRESHOLD_PER_8H=0.01
+Environment=SYGNIF_FUNDING_HARVEST_INTERVAL=300
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_funding_harvester.py
+Restart=on-failure
+RestartSec=15
+StandardOutput=append:/home/ubuntu/.sygnif/funding-harvester.log
+StandardError=append:/home/ubuntu/.sygnif/funding-harvester.log
+
+[Install]
+WantedBy=multi-user.target

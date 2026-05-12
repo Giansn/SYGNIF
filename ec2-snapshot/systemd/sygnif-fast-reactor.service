@@ -1,0 +1,21 @@
+[Unit]
+Description=SYGNIF fast reactor — WS-driven sub-second trade trigger
+After=network-online.target sygnif-bybit-daemon.service sygnif-bounce-watcher.service sygnif-whale-watcher.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+EnvironmentFile=-/etc/sygnif/fast-reactor.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_fast_reactor.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/sygnif/fast-reactor.log
+StandardError=append:/var/log/sygnif/fast-reactor.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+[Unit]
+Description=SYGNIF Polymarket prediction-markets → NeuroLinked (real crowd-sourced hivemind)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/polymarket-feed.env
+Environment=SYGNIF_NEUROLINKED_HOST_URL=http://127.0.0.1:8889
+Environment=POLYMARKET_POLL_SEC=300
+Environment=POLYMARKET_POST_TIMEOUT_SEC=30
+Environment=POLYMARKET_HTTP_TIMEOUT_SEC=20
+Environment=POLYMARKET_MAX_MARKETS=30
+Environment=POLYMARKET_MIN_LIQ_USD=5000
+Environment=POLYMARKET_PAGE_SIZE=100
+Environment=POLYMARKET_PAGES=3
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_polymarket_feed.py
+Restart=on-failure
+RestartSec=15
+
+StandardOutput=append:/var/log/sygnif/polymarket-feed.log
+StandardError=append:/var/log/sygnif/polymarket-feed.log
+
+[Install]
+WantedBy=multi-user.target

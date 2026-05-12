@@ -516,14 +516,17 @@ def main():
     start_http_server()
 
     # Check dependencies
-    claude_ok = llm_client.is_available()
-    logger.info(f"LLM backend: {'OK' if claude_ok else 'UNAVAILABLE (will use rules-only fallback)'}")
+    commentary_ok = llm_client.is_available()
+    logger.info(
+        "Commentary backend: %s",
+        "OK" if commentary_ok else "UNAVAILABLE (will use rules-only fallback)",
+    )
 
     for inst in config.FT_INSTANCES:
         ok = ft_client.is_available(inst)
         logger.info(f"Freqtrade {inst['name']}: {'OK' if ok else 'UNAVAILABLE'}")
 
-    tg_send("*Overseer online* | Claude Haiku trade monitor active")
+    tg_send("*Overseer online* | trade monitor active")
 
     # Offset from candle boundary by 30s
     time.sleep(30)

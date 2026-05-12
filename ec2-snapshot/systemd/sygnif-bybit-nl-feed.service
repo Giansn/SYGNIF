@@ -1,0 +1,20 @@
+[Unit]
+Description=Bybit market data to NeuroLinked (sygnif-swarm bundle)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-swarm/BTC_Prediction
+EnvironmentFile=-/home/ubuntu/sygnif-swarm/BTC_Prediction/.env
+EnvironmentFile=-/home/ubuntu/sygnif-swarm/BTC_Prediction/swarm_operator.env
+Environment=SYGNIF_SWARM_BYBIT_MAINNET=1
+Environment=BYBIT_NL_INCLUDE_SWARM=1
+ExecStart=/home/ubuntu/sygnif-swarm/.venv/bin/python3 /home/ubuntu/sygnif-swarm/BTC_Prediction/scripts/bybit_nl_market_feed.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

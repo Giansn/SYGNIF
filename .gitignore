@@ -38,6 +38,18 @@ dist/
 outputs/
 .tracking_baseline.txt
 SYGNIF/
+CLAUDE.md.pre-sync
+.tmp-patches/
+.gitnexus/
+
+# Old snapshot tarballs and scratch patches at repo root (the canonical
+# third-party code now lives under ec2-snapshot/neurolinked/)
+third_party/
 
 # Root-level scratch scripts (not part of shipped tree)
 /scripts/
+
+# Inside ec2-snapshot — never include caches or per-host backups
+ec2-snapshot/**/__pycache__/
+ec2-snapshot/**/*.pyc
+ec2-snapshot/**/*.pre-*

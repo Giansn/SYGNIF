@@ -1,0 +1,29 @@
+[Unit]
+Description=SYGNIF bounce watcher V2 (confluence-scored swings + strategy_claim)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=SYGNIF_BOUNCE_SYMBOL=BTCUSDT
+Environment=SYGNIF_BOUNCE_INTERVAL=1
+Environment=SYGNIF_BOUNCE_MIN_SCORE=5
+Environment=SYGNIF_BOUNCE_RISK_USD=15
+Environment=SYGNIF_BOUNCE_LEVERAGE=10
+Environment=SYGNIF_BOUNCE_DRY_RUN=0
+Environment=SYGNIF_BOUNCE_CLAIM_TTL_MIN=60
+Environment=SYGNIF_BOUNCE_DETECT_EVERY_S=10
+Environment=SYGNIF_BOUNCE_FLUSH_S=5
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_bounce_watcher.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/sygnif/bounce-watcher.log
+StandardError=append:/var/log/sygnif/bounce-watcher.log
+
+[Install]
+WantedBy=multi-user.target

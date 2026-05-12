@@ -1,0 +1,31 @@
+[Unit]
+Description=SYGNIF autonomous trader (EC2 — perp + options daemon)
+Documentation=https://github.com/Giansn/sygnif-agent
+After=network-online.target tailscaled.service sygnif-bybit-mcp.service
+Wants=network-online.target tailscaled.service sygnif-bybit-mcp.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+EnvironmentFile=/etc/sygnif/trader.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/sygnif-agent-mirror
+Environment=SWARM_KNOWLEDGE_DB=/var/lib/sygnif/swarm.db
+Environment=SYGNIF_AGENT_DIR=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_ORDERS_MODE=demo
+ExecStart=/opt/sygnif/.venv/bin/python -m agent.loop --daemon
+Restart=on-failure
+RestartSec=15s
+StandardOutput=append:/var/log/sygnif/trader.log
+StandardError=append:/var/log/sygnif/trader.log
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=no
+PrivateTmp=true
+ReadWritePaths=/var/log/sygnif /var/lib/sygnif /home/ubuntu/sygnif-agent-mirror
+
+[Install]
+WantedBy=multi-user.target

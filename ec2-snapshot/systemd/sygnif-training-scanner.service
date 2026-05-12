@@ -1,0 +1,20 @@
+[Unit]
+Description=SYGNIF training scanner — continuous BTCUSDT autopilot for training data
+After=network-online.target sygnif-bybit-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+EnvironmentFile=-/etc/sygnif/training-scanner.env
+Environment=PYTHONPATH=/home/ubuntu/sygnif-agent-mirror
+Environment=SYGNIF_TRAINING_LIVE_BLOCK=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_training_scanner.py
+StandardOutput=append:/var/log/sygnif/training-scanner.log
+StandardError=append:/var/log/sygnif/training-scanner.log
+
+[Install]
+WantedBy=multi-user.target

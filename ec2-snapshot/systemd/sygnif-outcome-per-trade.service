@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF outcome-per-trade attribution (Phase 2.2 — single-leg + correlation_id)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_outcome_per_trade.py
+StandardOutput=append:/var/log/sygnif/outcome-per-trade.log
+StandardError=append:/var/log/sygnif/outcome-per-trade.log
+
+[Install]
+WantedBy=multi-user.target

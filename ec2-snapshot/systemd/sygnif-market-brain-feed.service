@@ -1,0 +1,26 @@
+[Unit]
+Description=SYGNIF market intelligence → NeuroLinked brain feed (synth-driven)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+Requires=sygnif-neurolinked.service
+StartLimitIntervalSec=120
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+Environment=PYTHONUNBUFFERED=1
+Environment=SYGNIF_NL_URL=http://localhost:8889
+Environment=SYGNIF_SYNTH_SCRIPT=/opt/sygnif-services/sygnif_market_synth.py
+Environment=SYGNIF_PYTHON_BIN=/opt/sygnif/.venv/bin/python
+Environment=SYGNIF_BRAIN_FEED_S=900
+ExecStart=/opt/sygnif/.venv/bin/python -u /opt/sygnif-services/sygnif_market_brain_feed.py
+StandardOutput=append:/var/log/sygnif/market-brain-feed.log
+StandardError=append:/var/log/sygnif/market-brain-feed.log
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

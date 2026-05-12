@@ -10,6 +10,7 @@ import logging
 import os
 
 import requests
+from urllib.parse import urlparse, urljoin
 
 logger = logging.getLogger("overseer.llm")
 
@@ -17,12 +18,49 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = "claude-haiku-4-5-20251001"
 AGENT_URL = os.environ.get("OVERSEER_AGENT_URL", "").strip()
 AGENT_TOKEN = os.environ.get("OVERSEER_AGENT_TOKEN", "").strip()
+LOCAL_AGENT_ONLY = os.environ.get("SYGNIF_LOCAL_AGENT_ONLY", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 
 _LLM_BACKENDS_NPU = frozenset({"npu", "openvino", "local_npu"})
 
 
 def _llm_backend() -> str:
     return os.environ.get("SYGNIF_LLM_BACKEND", "anthropic").strip().lower()
+
+
+def _llm_disabled() -> bool:
+    """Hard-disable all LLM backends (Anthropic/NPU) when explicitly requested."""
+    for key in ("SYGNIF_LLM_BACKEND", "LLM_BACKEND"):
+        if os.environ.get(key, "").strip().lower() == "none":
+            return True
+    return False
+
+
+def _is_local_agent_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    # Docker Desktop + Linux host-gateway mapping use host.docker.internal to reach the host.
+    return host in {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+
+
+def _looks_like_cloud_misconfig_error(text: str) -> bool:
+    t = (text or "").lower()
+    if not t:
+        return False
+    return (
+        "kein llm" in t
+        and "cursor_api_key" in t
+        and "cursor_agent_repository" in t
+    ) or ("cloud agent" in t and "local model" in t)
 
 
 SYSTEM_PROMPT = """Freqtrade bot monitor (spot [s] + futures [f], Bybit).
@@ -43,25 +81,41 @@ FART[f] -2.4% (was -2.1%): CUT — TA:31 RSI 38 weak, no support."""
 
 def evaluate(prompt: str, timeout: int = 30) -> str | None:
     """Send prompt to configured overseer backends in priority order."""
+    if _llm_disabled():
+        # Still allow OVERSEER_AGENT_URL (local finance-agent / cursor worker), but never cloud LLMs.
+        pass
     if AGENT_URL:
-        try:
-            headers = {"content-type": "application/json"}
-            if AGENT_TOKEN:
-                headers["authorization"] = f"Bearer {AGENT_TOKEN}"
-            resp = requests.post(
-                AGENT_URL,
-                headers=headers,
-                json={"prompt": prompt, "source": "trade_overseer"},
-                timeout=timeout,
-            )
-            if resp.ok:
-                data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
-                text = data.get("commentary") or data.get("text") or (resp.text or "").strip()
-                if text:
-                    return text.strip()
-            logger.error("Agent endpoint error: %s %s", resp.status_code, resp.text[:120])
-        except Exception as e:
-            logger.error("Agent endpoint failure: %s", e)
+        if LOCAL_AGENT_ONLY and not _is_local_agent_url(AGENT_URL):
+            logger.warning("Ignoring non-local OVERSEER_AGENT_URL because SYGNIF_LOCAL_AGENT_ONLY=1")
+        else:
+            try:
+                headers = {"content-type": "application/json"}
+                if AGENT_TOKEN:
+                    headers["authorization"] = f"Bearer {AGENT_TOKEN}"
+                resp = requests.post(
+                    AGENT_URL,
+                    headers=headers,
+                    json={"prompt": prompt, "source": "trade_overseer"},
+                    timeout=timeout,
+                )
+                if resp.ok:
+                    data = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
+                    text = data.get("commentary") or data.get("text") or (resp.text or "").strip()
+                    if text:
+                        text = text.strip()
+                        if _looks_like_cloud_misconfig_error(text):
+                            logger.warning(
+                                "Local agent returned cloud-misconfig hint; suppressing and falling back."
+                            )
+                        else:
+                            return text
+                logger.error("Agent endpoint error: %s %s", resp.status_code, resp.text[:120])
+            except Exception as e:
+                logger.error("Agent endpoint failure: %s", e)
+
+    if _llm_disabled():
+        logger.warning("LLM backends disabled (SYGNIF_LLM_BACKEND/LLM_BACKEND=none); skipping Anthropic/NPU")
+        return None
 
     if _llm_backend() in _LLM_BACKENDS_NPU:
         import npu_genai_client
@@ -115,15 +169,24 @@ def evaluate(prompt: str, timeout: int = 30) -> str | None:
 def is_available() -> bool:
     """True if any commentary backend is likely usable."""
     if AGENT_URL:
-        try:
-            headers = {}
-            if AGENT_TOKEN:
-                headers["authorization"] = f"Bearer {AGENT_TOKEN}"
-            resp = requests.get(AGENT_URL, headers=headers, timeout=5)
-            if resp.status_code < 500:
-                return True
-        except Exception:
-            pass
+        if LOCAL_AGENT_ONLY and not _is_local_agent_url(AGENT_URL):
+            logger.warning("Non-local OVERSEER_AGENT_URL configured while local-only mode is active.")
+        else:
+            try:
+                headers = {}
+                if AGENT_TOKEN:
+                    headers["authorization"] = f"Bearer {AGENT_TOKEN}"
+                # OVERSEER_AGENT_URL is a POST JSON endpoint; probe /health on same host:port instead.
+                parsed = urlparse(AGENT_URL)
+                health_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", "/health")
+                resp = requests.get(health_url, headers=headers, timeout=5)
+                if resp.status_code < 500:
+                    return True
+            except Exception:
+                pass
+
+    if _llm_disabled():
+        return False
 
     if _llm_backend() in _LLM_BACKENDS_NPU:
         try:

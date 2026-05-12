@@ -1,0 +1,20 @@
+[Unit]
+Description=SYGNIF brain context publisher — structured trading-state + outcome reward to NeuroLinked
+After=network-online.target sygnif-neurolinked.service sygnif-microstructure-feed.service
+Wants=sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sygnif-agent-mirror
+EnvironmentFile=-/etc/sygnif/trader.env
+Environment=SYGNIF_BRAIN_CONTEXT_INTERVAL=60
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_brain_context_publisher.py
+Restart=on-failure
+RestartSec=15
+StandardOutput=append:/home/ubuntu/.sygnif/brain-context.log
+StandardError=append:/home/ubuntu/.sygnif/brain-context.log
+
+[Install]
+WantedBy=multi-user.target

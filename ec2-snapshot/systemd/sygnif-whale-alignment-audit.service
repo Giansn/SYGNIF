@@ -1,0 +1,15 @@
+[Unit]
+Description=SYGNIF whale-alignment audit (compare SYGNIF dir vs whale dir, bucket outcomes)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_whale_alignment_audit.py
+StandardOutput=append:/var/log/sygnif/whale-alignment-audit.log
+StandardError=append:/var/log/sygnif/whale-alignment-audit.log
+
+[Install]
+WantedBy=multi-user.target

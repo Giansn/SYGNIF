@@ -1,0 +1,27 @@
+[Unit]
+Description=SYGNIF foundational-news → NeuroLinked feed (macro/geopol/crypto headlines)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target sygnif-neurolinked.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/news-feed.env
+Environment=SYGNIF_NEUROLINKED_HOST_URL=http://127.0.0.1:8889
+Environment=NEWS_POLL_SEC=300
+Environment=NEWS_POST_TIMEOUT_SEC=30
+Environment=NEWS_HTTP_TIMEOUT_SEC=12
+Environment=NEWS_CACHE_DIR=/var/cache/sygnif-news
+Environment=NEWS_SEEN_CAP=5000
+ExecStart=/usr/bin/python3 /opt/sygnif-services/sygnif_news_feed.py
+Restart=on-failure
+RestartSec=15
+
+# Logging — go to dedicated file via journald drop-in
+StandardOutput=append:/var/log/sygnif/news-feed.log
+StandardError=append:/var/log/sygnif/news-feed.log
+
+[Install]
+WantedBy=multi-user.target
