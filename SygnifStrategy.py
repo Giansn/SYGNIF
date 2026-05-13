@@ -328,9 +328,54 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
             return None
 
 
+
+# ---------------------------------------------------------------------------
+# SYGNIF Toolkit Indicators (Fibonacci, Support/Resistance, SFP)
+# ---------------------------------------------------------------------------
+
+def compute_fibonacci_levels(high, low):
+    """Compute standard Fibonacci retracement levels."""
+    diff = high - low
+    return {
+        'fib_0.0': low,
+        'fib_0.236': low + 0.236 * diff,
+        'fib_0.382': low + 0.382 * diff,
+        'fib_0.5': low + 0.5 * diff,
+        'fib_0.618': low + 0.618 * diff,
+        'fib_0.786': low + 0.786 * diff,
+        'fib_1.0': high,
+    }
+
+def detect_support_resistance(df, window=20):
+    """Detect basic rolling support and resistance levels."""
+    df['rolling_high'] = df['high'].rolling(window=window).max()
+    df['rolling_low'] = df['low'].rolling(window=window).min()
+
+    # Identify local peaks and troughs
+    df['resistance'] = df['high'] == df['rolling_high']
+    df['support'] = df['low'] == df['rolling_low']
+
+    # Forward fill to keep the last known level
+    df['last_resistance'] = df['high'].where(df['resistance']).ffill()
+    df['last_support'] = df['low'].where(df['support']).ffill()
+    return df
+
+def detect_swing_failure(df, lookback=50):
+    """Detect swing failure patterns (SFP)."""
+    # SFP long: Price sweeps below a key low but closes above it.
+    # SFP short: Price sweeps above a key high but closes below it.
+    df['key_low'] = df['low'].rolling(window=lookback).min().shift(1)
+    df['key_high'] = df['high'].rolling(window=lookback).max().shift(1)
+
+    # Note: Named 'fib_sfp_long/short' to distinct from existing 48-bar 'fs_*' markers
+    df['fib_sfp_long'] = (df['low'] < df['key_low']) & (df['close'] > df['key_low'])
+    df['fib_sfp_short'] = (df['high'] > df['key_high']) & (df['close'] < df['key_high'])
+    return df
+
 # ---------------------------------------------------------------------------
 # Strategy
 # ---------------------------------------------------------------------------
+
 
 class SygnifStrategy(IStrategy):
     """
@@ -679,6 +724,17 @@ class SygnifStrategy(IStrategy):
             return df
 
     def _populate_indicators_inner(self, df: DataFrame, metadata: dict) -> DataFrame:
+        # --- SYGNIF Toolkit Math ---
+        recent_high = df['high'].rolling(288).max()
+        recent_low = df['low'].rolling(288).min()
+        diff = recent_high - recent_low
+        df['fib_0.618'] = recent_low + 0.618 * diff
+        df['fib_0.382'] = recent_low + 0.382 * diff
+
+        df = detect_support_resistance(df, window=20)
+        df = detect_swing_failure(df, lookback=50)
+        # ---------------------------
+
         tik = time.perf_counter()
 
         # --- BTC informative (all timeframes) ---
@@ -1173,6 +1229,20 @@ class SygnifStrategy(IStrategy):
                     if final_score >= self.sentiment_threshold_buy:
                         df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                         df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
+
+        # --- Fib Bounce Long (guarded by SYGNIF_FIB_BOUNCE) ---
+        if os.environ.get("SYGNIF_FIB_BOUNCE", "0") == "1":
+            # Close within 0.5% of fib_0.618, RSI is oversold, fib_sfp_long is True
+            fib_cond = (
+                (df['close'] <= df['fib_0.618'] * 1.005) &
+                (df['close'] >= df['fib_0.618'] * 0.995)
+            )
+            rsi_cond = df.get("RSI_14", pd.Series(50, index=df.index)) < 30
+            sfp_cond = df.get("fib_sfp_long", pd.Series(False, index=df.index))
+
+            fib_bounce = prot & empty_ok & fib_cond & rsi_cond & sfp_cond
+            df.loc[fib_bounce & (df["enter_long"] == 0), "enter_tag"] = "fib_bounce_long"
+            df.loc[fib_bounce & (df["enter_long"] == 0), "enter_long"] = 1
 
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
