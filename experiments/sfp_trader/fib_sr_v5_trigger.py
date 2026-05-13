@@ -254,3 +254,184 @@ class FibSrV5State:
                 "sl_dist_pct": round(self.fixed_sl, 4),
             },
         }
+
+
+class FibSrV5StateShort:
+    """SHORT mirror of FibSrV5State — NOT BACKTESTED.
+
+    Mirror logic:
+      - Bear SFP: high > 50-bar key_high AND close < key_high
+      - Close within fib_tol of fib_0.382 (= low_w + 0.382 * diff, lower-mid)
+      - RSI > rsi_min (mirror of < rsi_max)
+      - RSRS z > rsrs_threshold (same — beta is direction-agnostic)
+      - Dynamic TP: nearest unfilled BULL FVG below entry (pulls price down)
+      - SL fixed % above entry
+
+    CAVEAT: this is a structural mirror, NOT validated by backtest. Use
+    with smaller size or skip entirely until short-side backtest exists.
+    """
+
+    def __init__(
+        self,
+        fib_window: int = 240,
+        sfp_lookback: int = 50,
+        rsi_period: int = 14,
+        rsi_min: float = 65.0,
+        fib_tol_pct: float = 0.005,
+        rsrs_threshold: float = 0.0,
+        rsrs_n: int = 18,
+        rsrs_m: int = 600,
+        fvg_displacement_atr: float = 0.5,
+        fvg_atr_period: int = 14,
+        fvg_max_active: int = 100,
+        fvg_max_age_bars: int = 500,
+        fvg_max_tp_dist_pct: float = 0.010,
+        fallback_tp_pct: float = 0.004,
+        fixed_sl_pct: float = 0.0025,
+    ):
+        self.fib_window      = fib_window
+        self.sfp_lookback    = sfp_lookback
+        self.rsi_period      = rsi_period
+        self.rsi_min         = rsi_min
+        self.fib_tol_pct     = fib_tol_pct
+        self.rsrs_threshold  = rsrs_threshold
+        self.rsrs_n          = rsrs_n
+        self.rsrs_m          = rsrs_m
+        self.fvg_disp        = fvg_displacement_atr
+        self.fvg_atr_p       = fvg_atr_period
+        self.fvg_max_active  = fvg_max_active
+        self.fvg_max_age     = fvg_max_age_bars
+        self.fvg_max_tp_dist = fvg_max_tp_dist_pct
+        self.fallback_tp     = fallback_tp_pct
+        self.fixed_sl        = fixed_sl_pct
+
+        buf = max(fib_window, sfp_lookback + 1, rsi_period + 1,
+                  rsrs_m + rsrs_n, fvg_atr_period + 3)
+        self.bars: collections.deque[dict] = collections.deque(maxlen=buf)
+        self.bull_fvgs: list[dict] = []
+        self._bar_count = 0
+        self._rsrs_betas: collections.deque[float] = collections.deque(maxlen=rsrs_m)
+        self._last_fire_ts = 0
+
+    def _rsrs_update(self):
+        if len(self.bars) < self.rsrs_n: return
+        beta = rsrs_beta(list(self.bars)[-self.rsrs_n:])
+        if beta is not None: self._rsrs_betas.append(beta)
+
+    def _rsrs_z(self) -> Optional[float]:
+        if len(self._rsrs_betas) < min(self.rsrs_m, 50): return None
+        betas = list(self._rsrs_betas)
+        mu = sum(betas) / len(betas)
+        sd = math.sqrt(sum((b - mu) ** 2 for b in betas) / len(betas))
+        return (betas[-1] - mu) / sd if sd > 0 else None
+
+    def _update_fvgs(self, bar):
+        # Mark filled
+        for f in self.bull_fvgs:
+            if f["filled"]: continue
+            if bar["low"] <= f["high"] and bar["high"] >= f["low"]:
+                f["filled"] = True
+        # Detect new bullish FVG (used as TP target for shorts)
+        if len(self.bars) < 3: return
+        bars = list(self.bars)
+        c1, c2, c3 = bars[-3], bars[-2], bars[-1]
+        atr = atr_simple(bars, self.fvg_atr_p)
+        if atr is None or atr <= 0: return
+        if abs(c2["close"] - c2["open"]) < self.fvg_disp * atr: return
+        if c1["high"] < c3["low"]:
+            self.bull_fvgs.append({
+                "low":     c1["high"],
+                "high":    c3["low"],
+                "ce":      (c1["high"] + c3["low"]) / 2,
+                "bar_idx": self._bar_count - 1,
+                "filled":  False,
+            })
+        if len(self.bull_fvgs) > self.fvg_max_active:
+            self.bull_fvgs = [f for f in self.bull_fvgs if not f["filled"]][-self.fvg_max_active:]
+
+    def _nearest_bull_fvg_below(self, price: float) -> Optional[dict]:
+        """For shorts: find nearest unfilled bull FVG BELOW current price."""
+        best = None
+        for f in self.bull_fvgs:
+            if f["filled"] or f["high"] >= price: continue
+            age = self._bar_count - f["bar_idx"]
+            if age > self.fvg_max_age: continue
+            dist = (price - f["high"]) / price
+            if dist > self.fvg_max_tp_dist: continue
+            if best is None or f["high"] > best["high"]: best = f
+        return best
+
+    def evaluate(self, bar: dict) -> Optional[dict]:
+        if not bar.get("confirm"): return None
+        ts = int(bar.get("ts_ms_open", 0))
+        self._bar_count += 1
+        bar_norm = {
+            "ts_ms_open": ts,
+            "open":   float(bar["open"]),
+            "high":   float(bar["high"]),
+            "low":    float(bar["low"]),
+            "close":  float(bar["close"]),
+            "volume": float(bar["volume"]),
+        }
+        self.bars.append(bar_norm)
+        self._rsrs_update()
+        self._update_fvgs(bar_norm)
+
+        if len(self.bars) < max(self.fib_window, self.sfp_lookback + 1, self.rsi_period + 1):
+            return None
+        bars_list = list(self.bars)
+        cur = bars_list[-1]
+        close = cur["close"]
+
+        # Bear SFP — mirror of v5 long
+        window = bars_list[-self.sfp_lookback - 1:-1]
+        key_high = max(b["high"] for b in window)
+        if not (cur["high"] > key_high and cur["close"] < key_high):
+            return None
+        # Fib_0.382 (= low_w + 0.382 * diff) — the lower-mid level (mirror axis of 0.618)
+        fwin = bars_list[-self.fib_window:]
+        hi = max(b["high"] for b in fwin)
+        lo = min(b["low"]  for b in fwin)
+        if hi <= lo: return None
+        fib_382 = compute_fib_levels(hi, lo)["fib_0.382"]
+        if not (fib_382 * (1 - self.fib_tol_pct) <= close <= fib_382 * (1 + self.fib_tol_pct)):
+            return None
+        closes = [b["close"] for b in bars_list]
+        rsi = rsi_wilder(closes, self.rsi_period)
+        if rsi is None or rsi <= self.rsi_min: return None
+
+        z = self._rsrs_z()
+        if z is None or z < self.rsrs_threshold:
+            return None
+
+        if ts <= self._last_fire_ts: return None
+        self._last_fire_ts = ts
+
+        # Dynamic TP from nearest bull FVG BELOW
+        fvg_tp = self._nearest_bull_fvg_below(close)
+        if fvg_tp:
+            tp_px = fvg_tp["high"]
+            tp_type = "fvg_high"
+            tp_dist_pct = (close - tp_px) / close
+        else:
+            tp_px = close * (1 - self.fallback_tp)
+            tp_type = "fallback_fixed"
+            tp_dist_pct = self.fallback_tp
+
+        sl_px = close * (1 + self.fixed_sl)
+        return {
+            "direction": "short",
+            "trigger":   "fib_sr_v5_short_mirror",
+            "mid":       close,
+            "tp":        tp_px,
+            "sl":        sl_px,
+            "meta": {
+                "fib_382":  round(fib_382, 2),
+                "rsi":      round(rsi, 2),
+                "rsrs_z":   round(z, 3),
+                "tp_type":  tp_type,
+                "tp_dist_pct": round(tp_dist_pct, 4),
+                "sl_dist_pct": round(self.fixed_sl, 4),
+                "note":     "SHORT MIRROR — not backtested",
+            },
+        }

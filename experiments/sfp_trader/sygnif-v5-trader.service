@@ -1,0 +1,24 @@
+[Unit]
+Description=Sygnif v5 Fib-SR Trader (sole perp opener, 5m bars, FVG dynamic TP)
+After=network-online.target sygnif-neurolinked.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/sygnif-services
+EnvironmentFile=-/etc/sygnif/trader.env
+EnvironmentFile=-/etc/sygnif/v5-trader.env
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_v5_trader.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Soft resource limits — daemon should be lightweight
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target
