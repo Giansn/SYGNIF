@@ -4,6 +4,14 @@ Architectural separation of the SFP signal from fast-reactor, per the
 2026-05-13 decision: "SFP gets priority when it fires, fast-reactor handles
 casual market movement."
 
+> **Status (2026-05-13)**: architecture validated, **signal failed** the
+> 30-day backtest gates across 38 variant configs. See
+> [`variants/BACKTEST_RESULTS.md`](variants/BACKTEST_RESULTS.md). The
+> daemon stays scaffolded but disabled (kill-switch armed). The
+> `fast_reactor_coordination.patch` (mutex + fib-zone veto) is the
+> independently useful piece — apply that even if SFP-trader never
+> enables.
+
 ## What's here
 
 ```
@@ -13,6 +21,8 @@ experiments/sfp_trader/
 ├── sygnif-sfp-trader.service         systemd unit (disabled by default)
 ├── fast_reactor_coordination.patch   small patch to live fast-reactor:
 │                                     (1) respect SFP mutex, (2) fib-zone veto
+├── variants/                         backtest harness + 5 variant configs
+│   └── BACKTEST_RESULTS.md           final 38-config sweep result (all FAIL)
 └── README.md                         this file
 ```
 
