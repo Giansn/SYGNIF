@@ -247,16 +247,21 @@ first — they were stopped for a reason.
 5. **PRs, not direct pushes to main.** Always feature branch + PR.
    Main is the deployed reference. The recent `force-push to main`
    for the 2026-05-13 snapshot was a one-off; don't make a habit.
-6. **OrderLinkID prefix discipline.** Every order-placing daemon stamps
-   a stable prefix so post-trade attribution works. Known prefixes:
+6. **OrderLinkID prefix discipline + entry/exit ownership.** As of
+   2026-05-13 there is exactly ONE authorized opener per asset class
+   and ONE authorized exit manager. See "Trading mechanics" below for
+   the full lifecycle. Prefix map:
 
-   | Prefix | Source | Status |
+   | Prefix | Source | Status (2026-05-13) |
    |---|---|---|
-   | `sygFAST` | fast-reactor | active (current authorized perp opener) |
-   | `sygSTND` | standing-orders | inactive |
-   | `sygTRN` | training-scanner | inactive |
-   | `sygOL` / `sygCS` | option.py — open / close-stop | active |
-   | `perpRun` | perp-runner | active |
+   | `sygFAST` | fast-reactor | **active** — sole authorized perp opener |
+   | `sygOL` / `sygCS` | option.py — open / close-stop | **active** (agent.loop) |
+   | `sygSTND` | standing-orders | **disabled** (timer killed, bracket noise) |
+   | `sygTRN` | training-scanner | **disabled** |
+   | `perpRun` | perp-runner | **disabled** (overlap with fast-reactor) |
+   | `sygPL` | btc-predict-runner | **disabled** — legacy bleeder, −$253 over 7d, see §3 |
+   | `sygRT` | bybit-daemon | **disabled** |
+   | `sygBNCE` | bounce-watcher | **disabled** |
    | `sygRT` | bybit_daemon action_executor | inactive |
    | `sygPL` | **legacy bleeder** — old `btc_predict_protocol_loop.py` from `sygnif-swarm/BTC_Prediction`. **Stopped.** Do not reuse this prefix. |
 
@@ -281,6 +286,92 @@ first — they were stopped for a reason.
     The actual GitNexus instructions live in
     `.claude/skills/gitnexus/*/SKILL.md` for the Claude Code agents that
     can use them; `AGENTS.md` / `CLAUDE.md` should stay self-contained.
+
+---
+
+## Trading mechanics — single source of truth
+
+The system has accumulated many trade-placing daemons over time. Every
+new one introduces ambiguity in attribution and risk of conflicting
+orders. **As of 2026-05-13 the canonical state is enforced:**
+
+### Authorized lifecycle paths
+
+| Asset class | Open | Manage / Close | Prefix |
+|---|---|---|---|
+| BTC perpetual | `sygnif-fast-reactor` | `sygnif-trailing-daemon` | `sygFAST` |
+| Options (theta + directional) | `sygnif-trader` (`agent.loop`) | `sygnif-trader` | `sygOL` / `sygCS` |
+
+**Nothing else may open positions.** If a new daemon needs to place an
+order, route it through the bybit-mcp vault as a new RPC method, with
+a fresh `orderLinkId` prefix registered in §6 and added below.
+
+### Explicitly disabled (and why)
+
+| Service / timer | Prefix | Reason |
+|---|---|---|
+| `btc-predict-runner.timer` | `sygPL` | Bled $253 over 7d at 50× lev / $100k notional / 1-min ticks, 14% win rate. Stopped 2026-05-13 00:42 UTC. |
+| `sygnif-standing-orders.timer` | `sygSTND` | Bracket conditional pairs placed every 5 min, never filled in normal regime, polluted order book. Timer stopped 2026-05-13 12:29 UTC. |
+| `sygnif-perp-runner.service` | `perpRun` | Scanner-driven perp executor — overlapping responsibility with fast-reactor. Disabled 2026-05-13. |
+| `sygnif-funding-harvester.service` | (TBD) | Funding-rate arbitrage — held until a `strategy_claim` slot is built so it can't fight fast-reactor for the perp book. |
+| `sygnif-bounce-watcher.service` | `sygBNCE` | Replaced by fast-reactor's intel-gated path. |
+| `sygnif-training-scanner.timer` | `sygTRN` | Training-mode scanner not actively in use. |
+| `sygnif-bybit-daemon.service` | `sygRT` | Old action-executor pattern, replaced by fast-reactor. |
+| `sygnif-trailing-manager.service` | n/a | Replaced by `sygnif-trailing-daemon`. |
+
+### Perp lifecycle (the only currently active perp path)
+
+```
+1. PRE-FLIGHT GATES (fast-reactor, before every fire_trade)
+   - intel_summary.json fresh (< 5 min)
+   - No conflicting strategy_claim entry on same symbol+side
+   - M5 momentum veto not active (block long if m5 ≤ -1.5%, short if ≥ +1.5%)
+   - Funding blackout window check (±5 min around 0/8/16 UTC)
+   - Daily-trade cap not hit (default 60)
+   - Equity > $100
+
+2. INTEL CHECK (check_intel_for_direction)
+   - vetoes_<direction> non-empty → REJECT, log intel_veto reason
+   - boosts_<direction> present → confidence multiplier (cap 1.5×)
+   - Otherwise neutral, conf_modifier = 1.0
+
+3. OPEN (fire_trade)
+   - place market order via bybit-mcp vault
+   - link = "sygFAST" + cid[:14].replace("-", "")
+   - record strategy_claim entry with (owner=fast-reactor, kind, entry, intended_tp, intended_sl)
+
+4. MANAGE (sygnif-trailing-daemon)
+   - watches every open perp position
+   - 0.1% activation distance, 0.1% trail distance
+   - reduce-only market close on trigger
+
+5. CLOSE
+   - trail fires (most common)
+   - OR M5 reversal triggers manual exit
+   - OR position holds → trail rides
+
+6. ATTRIBUTE (sygnif-outcome-per-trade)
+   - reads orderLinkId, computes signal / entry_slip / exit_slip / fee / funding / adverse_selection
+   - residual ≤ $0.01 gate (per the toolkit in experiments/sygnif_toolkit/)
+   - emits trade.close + outcome.attributed to swarm.db
+```
+
+### Adding a new order-placing daemon — protocol
+
+If a future strategy needs its own opener:
+
+1. Pick a fresh prefix (must be unique, not in §6's table).
+2. Add it to the prefix table here AND in `SYGNIF.md` §3.
+3. Implement `strategy_claim` integration — call `acquire()` before
+   any order, `release()` on close. Mutex prevents stomping on
+   fast-reactor's positions.
+4. Pipe through the bybit-mcp vault (do NOT call Bybit V5 directly).
+5. Gate with the same pre-flight checks as fast-reactor (intel,
+   funding blackout, daily-trade cap).
+6. Pull request with backtest evidence: minimum 30d, ≥ 40% win rate,
+   ≥ 5 fires per week, expectancy > $0.
+
+Until that protocol is met, the daemon stays disabled.
 
 ---
 

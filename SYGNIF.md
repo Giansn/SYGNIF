@@ -141,7 +141,110 @@ into `paper.portfolio()` shape. `n_order_paper_portfolio` and the 9 other
 paper neurons remain registered for legacy callers but the trader-loop
 no longer depends on a journal file.
 
-## 4. Brain (NeuroLinked, EC2)
+## 4. Trading mechanics — entry & exit ownership
+
+Doctrine (§3) is about *when* to trade. This section is about *who*
+trades. The system has accumulated many trade-placing daemons over
+time; each new one introduces attribution ambiguity and risk of
+conflicting orders against the same blended Bybit UTA position.
+**As of 2026-05-13 the canonical state is enforced:**
+
+### 4.1 Authorized lifecycle paths
+
+| Asset class | Open | Manage / Close | orderLinkId prefix |
+|---|---|---|---|
+| BTC perpetual | `sygnif-fast-reactor.service` | `sygnif-trailing-daemon.service` | `sygFAST<cid14>` |
+| Options (theta + directional) | `sygnif-trader.service` (`agent.loop`) | `sygnif-trader.service` | `sygOL` / `sygCS` |
+
+Nothing else may open positions. Adding a new opener requires the
+protocol in §4.4.
+
+### 4.2 Explicitly disabled openers (and why)
+
+| Service / timer | Prefix | Reason disabled |
+|---|---|---|
+| `btc-predict-runner.timer` | `sygPL` | Bled **$253 over 7 days** at 50× leverage / $100k notional / 1-min ticks, 14% win rate. Stopped 2026-05-13 00:42 UTC. See `postmortem` topic in `swarm.db`. |
+| `sygnif-standing-orders.timer` | `sygSTND` | Bracket conditional pairs every 5 min, never filled in normal regime, polluted order book + closed-pnl record. Timer stopped 2026-05-13 12:29 UTC. |
+| `sygnif-perp-runner.service` | `perpRun` | Scanner-driven perp executor — overlapping responsibility with fast-reactor. Disabled 2026-05-13. |
+| `sygnif-funding-harvester.service` | (TBD) | Funding-rate arbitrage strategy — held until a `strategy_claim` slot is built so it can't fight fast-reactor for the same symbol+side. |
+| `sygnif-bounce-watcher.service` | `sygBNCE` | Replaced by fast-reactor's intel-gated path. |
+| `sygnif-training-scanner.timer` | `sygTRN` | Training-mode scanner not actively in use. |
+| `sygnif-bybit-daemon.service` | `sygRT` | Old action-executor pattern, replaced by fast-reactor. |
+| `sygnif-trailing-manager.service` | n/a | Replaced by `sygnif-trailing-daemon`. |
+
+### 4.3 Perp lifecycle (the only active perp path)
+
+```
+1. PRE-FLIGHT GATES — checked by fast-reactor before every fire_trade()
+   • intel_summary.json fresh (< 5 min)        (read_intel mtime cache)
+   • No conflicting strategy_claim entry on (symbol, side)
+   • M5 momentum veto not active
+       block long  if m5 ≤ -1.5 %  (catching-falling-knife)
+       block short if m5 ≥ +1.5 %  (chasing pump)
+   • Funding blackout: ±5 min around 0/8/16 UTC
+   • Daily-trade cap (default 60)
+   • Equity > $100
+
+2. INTEL CHECK — check_intel_for_direction(direction)
+   • vetoes_<direction> non-empty  →  REJECT, log intel_veto reason
+   • boosts_<direction> present    →  conf_modifier = 1 + 0.1 × n  (cap 1.5)
+   • Otherwise                     →  conf_modifier = 1.0
+
+3. OPEN — fire_trade()
+   • bybit-mcp vault places Market order
+   • orderLinkId = "sygFAST" + cid[:14].replace("-", "")
+   • strategy_claim.acquire(owner="fast-reactor", kind, entry, tp, sl, olid)
+
+4. MANAGE — sygnif-trailing-daemon
+   • watches every fast-reactor opened position
+   • 0.1 % activation distance, 0.1 % trail distance
+   • reduce-only market close on trigger
+   • emit trade.close + outcome.attributed to swarm.db
+
+5. CLOSE paths
+   • trail fires           (most common, ~80 % of exits)
+   • M5 reversal           (manual fast-reactor exit, ~15 %)
+   • position rides        (~5 %, trail never triggered)
+
+6. ATTRIBUTE — sygnif-outcome-per-trade
+   • reads orderLinkId
+   • decomposes realised PnL into 7 components (signal, entry_slip,
+     exit_slip, fee, funding, adverse_selection, residual ≤ $0.01)
+   • toolkit lives in experiments/sygnif_toolkit/edge_attrib/
+```
+
+### 4.4 Adding a new order-placing daemon — protocol
+
+If a future strategy needs its own opener (e.g. funding harvester,
+mean-reversion scanner):
+
+1. **Fresh prefix** — must be unique. Add to §4.1 + §3 + AGENTS.md.
+2. **`strategy_claim` integration** — call `acquire()` before any
+   order; `release()` on close. Mutex prevents stomping on
+   fast-reactor's positions on the same symbol+side.
+3. **Route through bybit-mcp vault** — do NOT call Bybit V5 directly.
+4. **Same pre-flight gates** as fast-reactor: intel, funding blackout,
+   daily-trade cap, M5 veto.
+5. **Backtest evidence** in PR: ≥ 30 d window, ≥ 40 % win rate,
+   ≥ 5 fires/week, expectancy > $0/trade.
+6. **Until merged, the daemon stays disabled.**
+
+### 4.5 What ran recently (2026-05-13 audit window)
+
+| Period | Source | Trades | Net |
+|---|---|---|---|
+| 7d before kill | `sygPL` (btc-predict-runner) | 98 | **−$238.67** (the bleeder) |
+| 7d before kill | other | 0 | $0 |
+| Post-kill (12h) | `sygFAST` (fast-reactor) | 2 | **−$23.27** (both losing longs at $82k as BTC fell to $80.2k) |
+| Post-kill (12h) | `sygSTND` (standing-orders) | 0 fills | placed/cancelled 5+ bracket pairs/h until timer killed |
+
+Fast-reactor's recent fires lost money — not because of intel
+(intel was correctly bullish), but because the entries were placed
+at a local high right before a $2k pullback. This is signal-noise,
+not architectural; the intel-veto path successfully rejected the
+shorts that would have been ratio'd by the same pullback.
+
+## 5. Brain (NeuroLinked, EC2)
 
 3000-neuron Izhikevich spiking network with STDP synaptic plasticity.
 Region distribution at the running config (`brain/regions.py`):
@@ -151,7 +254,7 @@ Region distribution at the running config (`brain/regions.py`):
 | 0–1000 | vision | unused for trading |
 | 1000–2000 | audio | unused for trading |
 | 2000–3000 | touch | text input encodes here today |
-| (planned) 3000–4000 | language | reserved for Phase 2 of language plan, see §6 |
+| (planned) 3000–4000 | language | reserved for Phase 2 of language plan, see §7 |
 
 11 logical regions overlay this layout: sensory_cortex / motor_cortex /
 association / hippocampus / prefrontal / cerebellum / brainstem /
@@ -169,7 +272,7 @@ concept_layer / feature_layer / predictive / reflex_arc.
 - `:8890/` — read-only insights (this session's v2: 3D Three.js + live BTC tape + Hz)
 - `:8890/original/` — GitHub master Developer Portal UI proxied through the same service (WS bypass for the GIL-locked port 8889)
 
-## 5. Communication / sync
+## 6. Communication / sync
 
 **EC2 → X1 master swarm** — `sygnif-swarm-x1-mirror.timer` ships rows every 2 min
 via `swarm_write` JSON-RPC to X1's `:9001/rpc`. Cursor at `/var/lib/sygnif/x1-mirror.cursor`.
@@ -185,9 +288,9 @@ overlap window. Run on demand (`sygnif-letscrash sync` or as part of bootup/refr
 - `forecast` — predict_loop signal (every 5 min, agent_id `sygnif-predict`)
 - `regime` — discovery snapshot tagged
 - `agent.review.ec2_trades` — letscrash daily digest of EC2 activity for X1 to ingest
-- `agent.commentary` — (planned, §6.3) brain-narrated market state
+- `agent.commentary` — (planned, §7.3) brain-narrated market state
 
-## 6. Language commentary plan (in flight)
+## 7. Language commentary plan (in flight)
 
 Goal: SYGNIF narrates trades + market state without an LLM dependency. Brain
 provides salience + association; templated layer provides voice. Future-proof
@@ -295,7 +398,7 @@ Symlink the latter to the former (or vice versa) before adding
 `neurolinked_language_channel.json` so consumers don't have to learn two
 paths. Decide canonical = `~/SYGNIF/prediction_agent/`.
 
-## 7. Operations
+## 8. Operations
 
 ### 7.1 SSH topology (verified 2026-05-05)
 
@@ -366,7 +469,7 @@ change, restore the backup file and `systemctl restart` the affected service.
 | `sygnif-bybit-mcp.service` (EC2, X1) | MCP code |
 | `sygnif-discovery.timer` (EC2) | sygnif_predict.py + discovery_pass.py |
 
-## 8. Important rules (apply to every agent / change)
+## 9. Important rules (apply to every agent / change)
 
 1. **Real data only.** Never fabricate prices, indicators, equity values, or P&L. Pull from Bybit / discovery / portfolio.demo.
 2. **Timestamp everything.** Reports lead with UTC timestamp.
@@ -376,10 +479,10 @@ change, restore the backup file and `systemctl restart` the affected service.
 6. **Edits to brain code go to `~/SYGNIF/third_party/neurolinked/`** — both deployment paths symlink there. Restarting `sygnif-neurolinked.service` picks them up.
 7. **Edits to trader code on EC2** go to `/home/ubuntu/sygnif-agent-mirror/`. X1's canonical agent at `~/sygnif/sygnif-agent/` should mirror — if they diverge, the mirror is wrong and needs sync.
 8. **Implementation tax is real.** 2026-04-29 lesson: 8-min decision-to-action on a 2-leg orphan strangle bled −$29.40 (~72% of paper UPL). Pre-arm close brackets at open, mid-cross limits not panic-cross, combo orders for multi-leg, track per-trade slip as a first-class KPI.
-9. **GitNexus pre-edit checks apply** — before modifying a function, run `gitnexus_impact({target})`. See §9.
+9. **GitNexus pre-edit checks apply** — before modifying a function, run `gitnexus_impact({target})`. See §10.
 10. **Sync this doc.** Editing AGENT.md / CLAUDE.md directly will be overwritten on next `bin/sync-docs.sh` run. Edit `SYGNIF.md` (this file).
 
-## 9. Code-intelligence contract (GitNexus)
+## 10. Code-intelligence contract (GitNexus)
 
 Index name: **sygnif** (~589 symbols, ~1421 relationships, ~47 execution flows).
 Stale after commits — re-run `npx gitnexus analyze` (PostToolUse hook handles
@@ -397,7 +500,7 @@ Risk ladder: d=1 WILL BREAK, d=2 LIKELY AFFECTED, d=3 MAY NEED TESTING.
 Never edit without impact analysis. Never ignore HIGH/CRITICAL warnings.
 Never rename via find-and-replace — use `gitnexus_rename`.
 
-## 10. References
+## 11. References
 
 ```
 Trading reference        ~/sygnif/sygnif-agent/reference/{ta-indicators,
