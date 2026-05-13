@@ -1,0 +1,9 @@
+render_sdk>=0.6.0
+# Deps below are pulled from the SYGNIF repo at runtime (sweep/proofread shell out
+# to scripts/predict_protocol_*.py which import from prediction_agent + finance_agent).
+# Listed explicitly so the workflow container can run them without the rest of SYGNIF.
+numpy
+pandas
+requests
+optuna  # used by predict_protocol_gate_optimizer.py default engine (TPE)
+scikit-learn
