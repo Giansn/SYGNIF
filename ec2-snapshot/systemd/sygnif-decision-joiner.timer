@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF decision-joiner every hour
+Requires=sygnif-decision-joiner.service
+
+[Timer]
+OnBootSec=300
+OnUnitActiveSec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

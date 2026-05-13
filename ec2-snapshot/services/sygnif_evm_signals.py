@@ -26,7 +26,7 @@ API usage:
   - Alchemy (free 300M CU/month) — fallback / Enhanced API for asset transfers
 
 State file: /var/lib/sygnif/evm_state.json
-Log:        /var/lib/log/sygnif/evm-signals.log
+Log:        stdout
 """
 from __future__ import annotations
 
@@ -42,6 +42,11 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections import defaultdict
+
+try:
+    import sygnif_common as common
+except ImportError:
+    from . import sygnif_common as common
 
 # ============================================================================
 # Config
@@ -99,6 +104,7 @@ TRACKED_TOKENS = {
 _running = True
 _metrics = defaultdict(int)
 _metrics["started_at"] = time.time()
+_btc_price = 81850.0
 
 
 # ============================================================================
@@ -155,6 +161,15 @@ def alchemy_rpc(method: str, params: list) -> dict | None:
     return _http_post_json(ALCHEMY_RPC, {
         "jsonrpc": "2.0", "id": 1, "method": method, "params": params,
     })
+
+
+def fetch_prices():
+    """Fetch latest BTC price from common utility."""
+    global _btc_price
+    p = common.fetch_ticker_price("BTCUSDT")
+    if p:
+        _btc_price = p
+        _metrics["price_updates"] += 1
 
 
 # ============================================================================
@@ -351,14 +366,14 @@ def scan_wbtc_flows(state: dict) -> int:
             "block":      blk,
             "direction":  direction,
             "value_btc":  value_btc,
-            "value_usd":  round(value_btc * 81850, 0),
+            "value_usd":  round(value_btc * _btc_price, 0),
             "tx_hash":    tx.get("hash"),
             "counterparty": to_a if is_mint else from_a,
         }
         state["recent_wbtc"].append(ev)
         new_events += 1
         _metrics[f"wbtc_{direction.lower()}_seen"] += 1
-        head = (f"WBTC_{direction}  {value_btc:,.2f} BTC (~${value_btc*81850/1e6:.1f}M)  "
+        head = (f"WBTC_{direction}  {value_btc:,.2f} BTC (~${value_btc*_btc_price/1e6:.1f}M)  "
                 f"counterparty={ev['counterparty'][:14]}...  block={blk}")
         emit_swarm("evm.wbtc_flow", head, {
             **ev,
@@ -408,8 +423,8 @@ def snapshot_exchange_reserves(state: dict) -> int:
                 delta = balance - prev_bal
                 delta_pct = (delta / max(prev_bal, 1)) * 100
                 # Emit on significant deltas: >$5M absolute or >3% relative
-                usd_value = balance * (81850 if token_sym == "WBTC" else 1)
-                delta_usd = delta * (81850 if token_sym == "WBTC" else 1)
+                usd_value = balance * (_btc_price if token_sym == "WBTC" else 1)
+                delta_usd = delta * (_btc_price if token_sym == "WBTC" else 1)
                 if abs(delta_usd) >= 5_000_000 or abs(delta_pct) >= 3.0:
                     head = (f"{exch_name} {token_sym} balance Δ "
                             f"{delta:+,.0f} ({delta_pct:+.1f}%)  "
@@ -477,9 +492,15 @@ def main() -> int:
     last_mint_poll = 0.0
     last_reserve_poll = 0.0
     last_save = 0.0
+    last_price_poll = 0.0
 
     while _running:
         now = time.time()
+
+        # Update prices every 5 min
+        if now - last_price_poll >= 300:
+            fetch_prices()
+            last_price_poll = now
 
         if now - last_mint_poll >= MINT_POLL_S:
             try:

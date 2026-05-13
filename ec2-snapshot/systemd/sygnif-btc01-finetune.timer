@@ -1,0 +1,13 @@
+[Unit]
+Description=Run BTC 0.1 finetune tick periodically (pairs with cursor-agent-worker for Cloud-side edits)
+
+[Timer]
+OnBootSec=3min
+# Default: every 5 minutes while the host is up. Override: copy unit to /etc, edit, daemon-reload.
+OnUnitInactiveSec=5min
+AccuracySec=1min
+Persistent=true
+Unit=sygnif-btc01-finetune.service
+
+[Install]
+WantedBy=timers.target

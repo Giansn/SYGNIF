@@ -39,6 +39,11 @@ import urllib.request
 import uuid
 from collections import defaultdict
 
+try:
+    import sygnif_common as common
+except ImportError:
+    from . import sygnif_common as common
+
 ETHERSCAN_KEY  = os.environ.get("SYGNIF_ETHERSCAN_KEY", "")
 ALCHEMY_KEY    = os.environ.get("SYGNIF_ALCHEMY_KEY", "")
 
@@ -80,6 +85,8 @@ BRIDGE_ROUTERS = {
 _running = True
 _metrics = defaultdict(int)
 _metrics["started_at"] = time.time()
+_btc_price = 81850.0
+_eth_price = 3000.0
 
 
 def _http_get_json(url, timeout=15):
@@ -109,6 +116,18 @@ def alchemy_rpc(method, params):
     return _http_post_json(ALCHEMY_RPC, {
         "jsonrpc": "2.0", "id": 1, "method": method, "params": params,
     })
+
+
+def fetch_prices():
+    """Fetch latest BTC and ETH prices from common utility."""
+    global _btc_price, _eth_price
+    prices = common.fetch_prices_multi(["BTCUSDT", "ETHUSDT"])
+    if "BTCUSDT" in prices:
+        _btc_price = prices["BTCUSDT"]
+    if "ETHUSDT" in prices:
+        _eth_price = prices["ETHUSDT"]
+    if prices:
+        _metrics["price_updates"] += 1
 
 
 def emit_swarm(topic, content, meta, tags):
@@ -215,9 +234,9 @@ def scan_dex_swaps(state):
             if asset in ("USDC", "USDT", "DAI"):
                 value_usd = value
             elif asset == "WBTC":
-                value_usd = value * 81850
+                value_usd = value * _btc_price
             elif asset == "WETH":
-                value_usd = value * 3000   # rough; should look up but ok for filter
+                value_usd = value * _eth_price
             else:
                 continue
 
@@ -307,7 +326,7 @@ def scan_bridge_flows(state):
                     continue
                 value_native = raw_value / 10**token_decimals
                 if token_symbol == "WBTC":
-                    value_usd = value_native * 81850
+                    value_usd = value_native * _btc_price
                 else:
                     value_usd = value_native
                 if value_usd < BRIDGE_FLOW_THRESHOLD_USD:
@@ -377,8 +396,15 @@ def main():
 
     last_poll = 0.0
     last_save = 0.0
+    last_price_poll = 0.0
     while _running:
         now = time.time()
+
+        # Update prices every 5 min
+        if now - last_price_poll >= 300:
+            fetch_prices()
+            last_price_poll = now
+
         if now - last_poll >= POLL_S:
             try:
                 if ALCHEMY_KEY:

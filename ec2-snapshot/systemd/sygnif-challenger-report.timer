@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF challenger report daily at 09:00 UTC
+Requires=sygnif-challenger-report.service
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

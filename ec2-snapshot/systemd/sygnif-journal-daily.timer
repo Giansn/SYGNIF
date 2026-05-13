@@ -1,0 +1,12 @@
+[Unit]
+Description=SYGNIF journal daily-report timer (00:05 UTC nightly)
+
+[Timer]
+# Fire 5 minutes past midnight UTC every day. The 5-min offset gives the
+# day's last cycle a chance to finalize before we aggregate.
+OnCalendar=*-*-* 00:05:00 UTC
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

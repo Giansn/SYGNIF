@@ -1,0 +1,38 @@
+[Unit]
+Description=SYGNIF read-only API (bearer-auth, allowlist-only) for remote agents
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=sygnif-read
+Group=sygnif-read
+WorkingDirectory=/opt/sygnif-read-api
+EnvironmentFile=/etc/sygnif/read-api.env
+ExecStart=/opt/sygnif-read-api/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8765 --log-level info --no-access-log
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening — read-only API has no business writing anywhere
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/sygnif /opt/sygnif
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

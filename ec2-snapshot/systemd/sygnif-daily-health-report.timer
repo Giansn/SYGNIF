@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF daily health report at 06:55 UTC (08:55 MESZ)
+Requires=sygnif-daily-health-report.service
+
+[Timer]
+OnCalendar=*-*-* 06:55:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

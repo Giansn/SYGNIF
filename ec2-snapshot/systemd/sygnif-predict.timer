@@ -1,0 +1,12 @@
+[Unit]
+Description=Run sygnif-predict every 5 minutes (5m bar cadence)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Unit=sygnif-predict.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

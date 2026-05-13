@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF trailing-stop manager every 20 seconds
+Requires=sygnif-trailing-manager.service
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=20
+Persistent=true
+
+[Install]
+WantedBy=timers.target

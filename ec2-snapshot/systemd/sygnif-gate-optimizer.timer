@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF gate optimizer daily at 03:00 UTC
+Requires=sygnif-gate-optimizer.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

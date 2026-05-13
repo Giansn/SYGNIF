@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF outcome-per-trade attribution every 15 minutes
+Requires=sygnif-outcome-per-trade.service
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

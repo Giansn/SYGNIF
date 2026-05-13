@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF training scanner V2 every 5 minutes (experimental)
+Requires=sygnif-training-scanner.service
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

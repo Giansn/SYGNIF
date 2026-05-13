@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF drift monitor every hour
+Requires=sygnif-drift-monitor.service
+
+[Timer]
+OnBootSec=600
+OnUnitActiveSec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

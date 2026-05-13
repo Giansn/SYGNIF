@@ -1,0 +1,12 @@
+[Unit]
+Description=Ship EC2 swarm rows to X1 swarm-master every 2 minutes
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=sygnif-swarm-x1-mirror.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SYGNIF tier audit daily at 02:30 UTC
+Requires=sygnif-tier-audit.service
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

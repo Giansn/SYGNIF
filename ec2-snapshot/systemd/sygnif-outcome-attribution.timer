@@ -1,0 +1,11 @@
+[Unit]
+Description=Run outcome-attribution nightly at 23:00 UTC
+Requires=sygnif-outcome-attribution.service
+
+[Timer]
+OnCalendar=*-*-* 23:00:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh SYGNIF standing-orders ladder every 5 minutes
+Requires=sygnif-standing-orders.service
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
