@@ -1,0 +1,5 @@
+# Backtest-scratch — recreated on demand by the backtest scripts.
+# Don't commit; they're big and easy to refetch from Bybit public API.
+data/
+__pycache__/
+*.pyc

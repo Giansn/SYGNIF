@@ -1,0 +1,40 @@
+{
+  "backtest_date_utc": "2026-05-13T13:04:19Z",
+  "symbol": "BTCUSDT",
+  "interval": "1m",
+  "bars": 11000,
+  "span_days": 7.64,
+  "design": "fib_sfp_confluence v1 (SFP + 0.3% fib + 5-bar dedup + intel_boost gate)",
+  "params": {
+    "LOOKBACK_SFP": 50,
+    "FIB_RANGE": 240,
+    "FIB_PROXIMITY_PCT": 0.003,
+    "COOLDOWN_BARS": 5,
+    "TP_PCT": 0.004,
+    "SL_PCT": 0.0025,
+    "MAX_HOLD": 60,
+    "FEE_PCT": 0.001
+  },
+  "intel_surrogate": "60-bar return > +0.5% (proxy for real intel boosts_long)",
+  "fires": 33,
+  "fires_per_week": 30.24,
+  "trades": 33,
+  "wins": 15,
+  "losses": 18,
+  "win_rate_pct": 45.45,
+  "avg_hold_min": 49.3,
+  "ev_gross_pct": -0.04113,
+  "ev_net_pct": -0.14113,
+  "exit_reasons": {
+    "sl": 10,
+    "timeout": 22,
+    "tp": 1
+  },
+  "gates": {
+    "win_rate \u2265 50%": false,
+    "fires/week \u2265 5": true,
+    "fires/week \u2264 30": false,
+    "EV net > 0": false
+  },
+  "verdict": "FAIL"
+}

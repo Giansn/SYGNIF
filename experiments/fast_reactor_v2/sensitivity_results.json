@@ -1,0 +1,96 @@
+{
+  "signals": 33,
+  "per_week": 30.24,
+  "fee_pct": 0.1,
+  "param_grid": [
+    {
+      "tp_pct": 0.004,
+      "sl_pct": 0.0025,
+      "max_hold": 60,
+      "trades": 33,
+      "win_rate": 45.45454545454545,
+      "ev_gross": -0.04113150264157114,
+      "ev_net": -0.14113150264157115,
+      "timeouts": 22,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.006,
+      "sl_pct": 0.0025,
+      "max_hold": 60,
+      "trades": 33,
+      "win_rate": 45.45454545454545,
+      "ev_gross": -0.048938108631965925,
+      "ev_net": -0.14893810863196594,
+      "timeouts": 23,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.006,
+      "sl_pct": 0.003,
+      "max_hold": 90,
+      "trades": 33,
+      "win_rate": 27.27272727272727,
+      "ev_gross": -0.10490003728402082,
+      "ev_net": -0.20490003728402084,
+      "timeouts": 23,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.008,
+      "sl_pct": 0.003,
+      "max_hold": 120,
+      "trades": 33,
+      "win_rate": 15.151515151515152,
+      "ev_gross": -0.1513828728858963,
+      "ev_net": -0.25138287288589634,
+      "timeouts": 19,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.005,
+      "sl_pct": 0.0015,
+      "max_hold": 90,
+      "trades": 33,
+      "win_rate": 21.21212121212121,
+      "ev_gross": -0.08274472837813479,
+      "ev_net": -0.1827447283781348,
+      "timeouts": 14,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.004,
+      "sl_pct": 0.002,
+      "max_hold": 90,
+      "trades": 33,
+      "win_rate": 27.27272727272727,
+      "ev_gross": -0.07432745513560826,
+      "ev_net": -0.17432745513560827,
+      "timeouts": 18,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.003,
+      "sl_pct": 0.002,
+      "max_hold": 30,
+      "trades": 33,
+      "win_rate": 57.57575757575758,
+      "ev_gross": -0.006573409945857706,
+      "ev_net": -0.1065734099458577,
+      "timeouts": 25,
+      "gate_pass": false
+    },
+    {
+      "tp_pct": 0.01,
+      "sl_pct": 0.004,
+      "max_hold": 240,
+      "trades": 33,
+      "win_rate": 33.33333333333333,
+      "ev_gross": -0.17336959643303507,
+      "ev_net": -0.27336959643303504,
+      "timeouts": 16,
+      "gate_pass": false
+    }
+  ],
+  "any_passing": false
+}

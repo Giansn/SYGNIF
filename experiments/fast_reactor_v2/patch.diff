@@ -1,0 +1,78 @@
+# SYGNIF fast-reactor: fib_sfp_confluence trigger + bounce deprecation
+#
+# Apply on EC2 with:
+#   sudo cp /opt/sygnif-services/sygnif_fast_reactor.py \
+#       /opt/sygnif-services/sygnif_fast_reactor.py.pre-fib-sfp-$(date +%Y%m%d)
+#   sudo cp /home/ubuntu/sygnif/experiments/fast_reactor_v2/fib_sfp_trigger.py \
+#       /opt/sygnif-services/fib_sfp_trigger.py
+#   sudo patch /opt/sygnif-services/sygnif_fast_reactor.py < patch.diff
+#   sudo cp /home/ubuntu/sygnif/ec2-snapshot/systemd/sygnif-fast-reactor.service.d/momentum-tighten.conf \
+#       /etc/systemd/system/sygnif-fast-reactor.service.d/momentum-tighten.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart sygnif-fast-reactor.service
+#
+# Reverse (rollback):
+#   sudo cp /opt/sygnif-services/sygnif_fast_reactor.py.pre-fib-sfp-<ts> \
+#       /opt/sygnif-services/sygnif_fast_reactor.py
+#   sudo rm /opt/sygnif-services/fib_sfp_trigger.py
+#   sudo rm /etc/systemd/system/sygnif-fast-reactor.service.d/momentum-tighten.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart sygnif-fast-reactor.service
+
+--- a/sygnif_fast_reactor.py
++++ b/sygnif_fast_reactor.py
+@@ -55,6 +55,7 @@
+ import urllib.parse
+ import urllib.request
+ import uuid
++from fib_sfp_trigger import eval_trigger_fib_sfp_confluence
+ from typing import Any
+
+ try:
+@@ -149,6 +150,7 @@
+     "last_close_price":  0.0,
+     "recent_closes":     collections.deque(maxlen=10),
+     "recent_bars":       collections.deque(maxlen=30),  # last 30 1m closed bars
++    "fib_sfp_state":     None,  # lazily initialised by fib_sfp_trigger module
+ }
+
+
+@@ -456,7 +458,11 @@ def _read_json(p: pathlib.Path) -> dict:
+
+
+ def eval_trigger_bounce(mid: float) -> None:
+-    """Fire when bounce_setup just activated."""
++    """[DEPRECATED — feeder disabled] Fire when bounce_setup just activated.
++
++    The feeder daemon sygnif-bounce-watcher.service is currently disabled
++    (see SYGNIF.md §4.2). Function kept for graceful re-enablement; no
++    longer called from on_message."""
+     bs = _read_json(BOUNCE_FILE)
+     active = bool(bs.get("active"))
+     direction = bs.get("direction")
+@@ -580,9 +586,13 @@ def on_message(ws, message):
+             if bar.get("close"):
+                 state["recent_closes"].append(float(bar["close"]))
+             # Bounce eval on every kline tick (lightweight)
+-            try: eval_trigger_bounce(bar["close"])
+-            except Exception as e:
+-                print(f"  bounce-eval err: {e}", file=sys.stderr)
++            # [DEPRECATED 2026-05-13] bounce-watcher feeder disabled; the
++            # trigger reads a stale bounce_setup.json so calling it is a
++            # waste. Function preserved for graceful re-enablement.
++            #
++            # try: eval_trigger_bounce(bar["close"])
++            # except Exception as e:
++            #     print(f"  bounce-eval err: {e}", file=sys.stderr)
+             # Momentum eval on closed bars only
+             if bar["confirm"]:
+                 try: eval_trigger_momentum(bar)
+                 except Exception as e:
+                     print(f"  momentum-eval err: {e}", file=sys.stderr)
++                # fib_sfp_confluence eval (cold-start: silent first ~240 min)
++                try: eval_trigger_fib_sfp_confluence(
++                        bar, state, check_intel_for_direction, fire_trade)
++                except Exception as e:
++                    print(f"  fib-sfp-eval err: {e}", file=sys.stderr)
+
+     elif topic.startswith("publicTrade."):

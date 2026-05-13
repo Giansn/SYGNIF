@@ -1,0 +1,13 @@
+{
+  "params": {
+    "move_pct": 0.2,
+    "vol_x": 1.2,
+    "tp_pct": 0.004,
+    "sl_pct": 0.0025
+  },
+  "signals": 29,
+  "per_week": 26.6,
+  "win_rate_pct": 27.59,
+  "ev_gross_pct": -0.09084,
+  "ev_net_pct": -0.19084
+}

@@ -244,6 +244,41 @@ at a local high right before a $2k pullback. This is signal-noise,
 not architectural; the intel-veto path successfully rejected the
 shorts that would have been ratio'd by the same pullback.
 
+### 4.6 fast-reactor enhancement attempt (2026-05-13, FAILED)
+
+A design study proposed adding two new signal sources to fast-reactor:
+
+1. **`fib_sfp_confluence` trigger** — bull SFP at fib_0.618 + 12 h trend
+   intel boost + 5-bar dedup, intended to replace the dead `bounce`
+   trigger.
+2. **Lowered momentum thresholds** — drop `TRIGGER_MOMENTUM_PCT` 0.4 → 0.2
+   and `TRIGGER_MOMENTUM_VOLX` 1.5 → 1.2, since current defaults fired
+   0 times in 7 d.
+
+Wet backtest on 7-day BTCUSDT 1 m data **failed acceptance gates** on
+both proposals:
+
+| Design | Fires/wk | WR | EV gross | EV net (0.10% fees) | Pass? |
+|---|---|---|---|---|---|
+| fib_sfp_confluence | 30.2 | 45.5% | −0.041% | **−0.141%** | ✗ |
+| Lowered momentum (0.2% / 1.2×) | 27 | 27.6% | −0.091% | **−0.191%** | ✗ |
+| TP/SL sensitivity sweep (8 combos) | — | best 57.6% | best 0.007% | best −0.093% | ✗ |
+
+**Root cause**: round-trip taker fees of 0.10 % swamp the raw SFP edge
+(+0.017 % EV pre-fees) by 6 ×. No parameter combo recovers positive
+net-EV. Also, SFP fires at the end of pullbacks where short-term trend
+filters reject it, and longer-term trend filters fail to discriminate
+good SFPs from bad.
+
+Code, tests, backtests and alternatives in
+`experiments/fast_reactor_v2/`. **No changes deployed to EC2.**
+Alternatives to revisit: limit-order entries (drops fee to 0.02 %),
+SFP as confirmation-inside-whale-trigger, or 5 m bar timeframe.
+
+The current state stands: `bounce` trigger remains in code (dead but
+preserved for re-enablement), `momentum` trigger remains at 0.4 % /
+vol×1.5 defaults, `whale` trigger active, intel-veto wired in.
+
 ## 5. Brain (NeuroLinked, EC2)
 
 3000-neuron Izhikevich spiking network with STDP synaptic plasticity.
