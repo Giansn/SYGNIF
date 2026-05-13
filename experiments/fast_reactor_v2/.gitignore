@@ -1,0 +1,4 @@
+# cached kline data — re-fetchable, large
+data/btc_1m_klines.jsonl
+__pycache__/
+*.pyc
