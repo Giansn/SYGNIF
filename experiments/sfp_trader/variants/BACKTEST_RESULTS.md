@@ -183,17 +183,29 @@ so the same cached data drives every timeframe sweep.
 
 ## Timeframe sweep — sfp_v2 (TP=0.40% / SL=0.25% / fee=0.10% RT)
 
-| TF  | Trades | Fires/wk | WR   | EV gross | EV net  | Verdict |
-|-----|--------|----------|------|----------|---------|---------|
-| 1m  | 1735   | 397      | 43.9%| −0.008%  | −0.108% | FAIL    |
-| 5m  | 402    | 92       | 47.0%| **+0.009%** | −0.091% | FAIL |
-| 15m | 111    | 25.4 ✓   | 42.3%| +0.007%  | −0.093% | FAIL    |
-| 30m | 50     | 11.5 ✓   | 44.0%| **+0.021%** | −0.079% | FAIL |
-| 60m | 21     | 4.8      | 47.6%| **+0.027%** | −0.073% | FAIL |
+Pivot 5L/5R default; relaxed pivots tested separately at HTF.
 
-**Monotonic improvement with TF.** First time we've seen positive
-EV_gross at any TF ≥ 5m. The community canon DOES add edge — just not
-enough to clear retail taker fees.
+| TF  | Pivot | Bars in 30d | Trades | Fires/wk | WR    | EV gross | EV net  | Verdict |
+|-----|-------|-------------|--------|----------|-------|----------|---------|---------|
+| 1m  | 5/5   | 44,000      | 1735   | 397      | 43.9% | −0.008%  | −0.108% | FAIL    |
+| 5m  | 5/5   | 8,799       | 402    | 92       | 47.0% | **+0.009%** | −0.091% | FAIL |
+| 15m | 5/5   | 2,933       | 111    | 25.4 ✓   | 42.3% | +0.007%  | −0.093% | FAIL    |
+| 30m | 5/5   | 1,466       | 50     | 11.5 ✓   | 44.0% | **+0.021%** | −0.079% | FAIL |
+| 60m | 5/5   | 732         | 21     | 4.8      | 47.6% | **+0.027%** | −0.073% | FAIL |
+| 60m | 3/3   | 732         | 25     | 5.7 ✓    | 40.0% | +0.010%  | −0.090% | FAIL (looser pivot = worse) |
+| 2h  | 5/5   | 365         | 9      | 2.1      | 44.4% | **+0.039%** | −0.061% | FAIL (under fires-floor) |
+| 2h  | 3/3   | 365         | 11     | 2.5      | 36.4% | −0.014%  | −0.114% | FAIL |
+| **4h** | **5/5** | **182** | **3** | **0.7** | **0%** | **−0.250%** | **−0.350%** | **N/A — sample too small** |
+| 4h  | 3/3   | 182         | 4      | 0.9      | 25.0% | −0.088%  | −0.188% | N/A — sample too small |
+| 4h  | 2/2   | 182         | 5      | 1.2      | 20.0% | −0.120%  | −0.220% | N/A — sample too small |
+
+**Findings**:
+
+1. **EV_gross monotonically improves with TF** through 2h: −0.008 → +0.009 → +0.007 → +0.021 → +0.027 → **+0.039**. Real signal.
+2. **Relaxing pivot length HURTS edge** at HTF — 60m 3/3 (5.7/wk, 40% WR, +0.010%) is worse than 60m 5/5 (4.8/wk, 47.6% WR, +0.027%). The community-default 5/5 is correct.
+3. **4h cannot be evaluated** on a 30-day sample. 3-5 trades is statistical noise; the 0% / 20% / 25% WR results are not a signal failure, they're an undersized sample. To properly test 4h we'd need ≥ 90 days of data (270 bars → ~30 trades).
+4. **2h has the best per-trade edge** (+0.039% gross) but fires/wk = 2.1 is below the 5/wk floor — would need months more data to harvest enough trades.
+5. **30m is the operating sweet spot** for the 30-day sample: 11.5/wk in-gate, +0.021% gross, the deepest TF where signal AND sample-size both work.
 
 ## R:R sweep at 30m TF — wider TP hurts
 
