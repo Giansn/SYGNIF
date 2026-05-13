@@ -1,0 +1,21 @@
+docs:exist:
+  stage: test
+  script:
+    - echo "Checking docs..."
+
+build:backtest-image:
+  stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - experiments/sygnif_toolkit/Dockerfile.backtest
+        - experiments/sygnif_toolkit/requirements-backtest.txt
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - cd experiments/sygnif_toolkit
+    - docker build -t $CI_REGISTRY_IMAGE/backtest-deps:latest -t $CI_REGISTRY_IMAGE/backtest-deps:$CI_COMMIT_SHORT_SHA -f Dockerfile.backtest .
+    - docker push $CI_REGISTRY_IMAGE/backtest-deps:latest
+    - docker push $CI_REGISTRY_IMAGE/backtest-deps:$CI_COMMIT_SHORT_SHA

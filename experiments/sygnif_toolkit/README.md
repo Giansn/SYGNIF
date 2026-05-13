@@ -11,3 +11,20 @@ This project is managed by `poetry`. Run `poetry install` to install the depende
 ## Usage
 
 See the documentation in each phase for more details on usage.
+
+## Backtest Docker Image
+
+To ensure consistent environments across all CI backtest jobs, we maintain a minimal base Docker image containing explicitly pinned dependencies.
+
+**Included Packages:**
+- `pandas==2.2.*`
+- `numpy==1.26.*`
+- `requests==2.32.*`
+- `ccxt==4.4.*`
+- `pytest==8.3.*`
+
+**Pulling Locally:**
+You can pull the latest image locally with the following command:
+```bash
+docker pull registry.gitlab.com/giansn1/sygnif/backtest-deps:latest
+```
