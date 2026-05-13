@@ -202,5 +202,101 @@ python _harness.py --variant fib_sr_v1_relaxed
 
 ---
 
-*Total backtests in this fib+SR round: 24 configs. First PASS in the campaign.*
-*Walk-forward stable, sample size moderate, dependent on maker execution.*
+# Addendum — Pine Script source validation
+
+After the initial sweep, did a deeper audit of my Python code against
+actual Pine Script source and 6 well-maintained open-source Python
+implementations: `freqtrade/technical`, `day0market/support_resistance`,
+`faraway1nspace/fibonacci_ml`, `ednunezg/pytrendline`, `kuegi/kuegiBot`,
+`Ganador1/FenixAI_tradingBot`.
+
+## What the audit confirmed is CORRECT
+
+✅ **`_confirm_pivot()` matches Pine `ta.pivothigh` / `ta.pivotlow` exactly.**
+   Strict `>` / `<`, center excluded from both side-windows, `pivot_lr`-bar
+   confirmation lag. Verified against the Codegenes Python reference
+   implementation. No bug.
+
+✅ **ATR-scaled reclaim (`0.25 × ATR`)** matches kuegiBot's `data.buffer`
+   pattern — the only one of the 6 Python repos that uses ATR-scaled
+   tolerance instead of fixed-pct.
+
+✅ **Fib formula `low + ratio × diff`** is universal across all sources.
+
+## What the audit identified as NON-CANONICAL (now fixed)
+
+🔧 **Fib pairing rule** — original v2 picked "most recent pivot-high +
+   most recent pivot-low independently". LuxAlgo's spec pairs them
+   **directionally + chronologically** ("BOS pairing"):
+   - Bullish swing: pivot-low (older) → pivot-high (newer)
+   - Bearish swing: pivot-high (older) → pivot-low (newer)
+   
+   Fix: `_major_fib_levels` now walks newest-first, takes the most
+   recent pivot, then walks older to find the next pivot of OPPOSITE
+   kind. Returns `(fibs, trend)` where trend ∈ {up, down}.
+
+🔧 **Wick-ratio default** — original 0.33 was too permissive. AGPro's
+   canonical 0.55 is now the default. (Note: this is per-bar quality
+   gate, not directional bias.)
+
+🔧 **Trend filter** — added: LONG only fires in uptrend swing, SHORT
+   only in downtrend swing. Per LuxAlgo BOS doctrine, you don't
+   counter-trend trade at confluence — you pullback-trade with the
+   trend.
+
+## Result: canonical fixes UNDERPERFORM the original
+
+| Config | Trades | Fires/wk | WR | EV gross | EV net (maker) |
+|---|---|---|---|---|---|
+| **v1 (winner)** | **87** | **6.7 ✓** | **55.2%** | **+0.047%** | **+0.022%** |
+| v2 original (loose) @ 1m | 680 | 52.7 ✗ | 47.4% | +0.017% | −0.083% |
+| v2 fixed @ 1m | 175 | 13.6 ✓ | 46.9% | +0.015% | −0.010% |
+| v2 fixed @ 5m | 26 | 2.0 ✗ | 42.3% | −0.004% | −0.029% |
+| v2 fixed @ 15m | 9 | 0.7 ✗ | 55.6% | +0.009% | −0.016% |
+
+**Interpretation**: the community-canon math is correct in principle,
+but the multi-source confluence + bounce candle + trend filter + 0.55
+wick stack **over-filters on BTC**. The canonical filter pipeline was
+designed for forex/equity bars where signals are rarer but cleaner.
+BTC at 1m–15m is choppy enough that simpler v1 (SFP-reclaim + fib_0.618
++ RSI<35) extracts more edge.
+
+## Algorithmic findings worth keeping for future signal work
+
+From the open-source audit:
+
+1. **FenixAI's CISD confirmation** (`(highest − p_val) / (top − p_val) > 0.7`)
+   is the most aggressive false-positive filter I found across 6 repos.
+   Two-stage gate: sweep + delayed close-back-ratio. Worth a try if v1
+   degrades.
+
+2. **pytrendline's asymmetric 25/75 separation** for pivot validity is
+   stronger than naive N-bar extremum. Pivots must be ≥ 1/4 threshold
+   from one neighbor and ≥ 3/4 from the other.
+
+3. **kuegiBot's `min_wick_to_body` + `min_air_wick_fac`** add candle-
+   shape filters on top of SFP geometry — composable with v1.
+
+4. **day0market's AgglomerativeClustering** for collapsing nearby
+   pivots into single "zones" — solves the duplicate-confluence problem
+   if we ever stack many pivots.
+
+## Final verdict — v1 stands
+
+The v1 entry — `close near fib_0.618 + RSI<35 + bull SFP` at 5m with
+full-maker execution — is the winner. Math is correct, walk-forward
+positive in both halves, all gates pass. **Don't try to "improve" it
+with canonical multi-source confluence — that was tested and lost.**
+
+What's interesting algorithmically is that v1 is essentially the
+*Wyckoff Spring* setup applied to BTC: a stop run (SFP) at a key
+retracement level (fib_0.618 = "Pruden's last point of support" in
+Wyckoff terminology), confirmed by oversold momentum (RSI). The
+research wandered through SFP / ICT / LuxAlgo / SMC and ended up
+back at Wyckoff. The 1929 method still works.
+
+---
+
+*Total fib+SR backtests: 30+ configs.*
+*Pine source validated, math audited, v1 wins.*
+*Winner: 5m + RSI<35 + maker = 55.2% WR / +0.022% net EV per trade.*

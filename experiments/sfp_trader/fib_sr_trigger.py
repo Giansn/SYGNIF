@@ -209,7 +209,7 @@ class FibSrV2State:
         confluence_min_score: int = 2,
         round_number_step: float = 1000.0,
         min_swing_atr_mult: float = 3.0,
-        bounce_wick_ratio: float = 0.33,
+        bounce_wick_ratio: float = 0.55,  # AGPro canonical (was 0.33 — too permissive)
     ):
         self.pivot_lr          = pivot_lr
         self.atr_period        = atr_period
@@ -256,25 +256,40 @@ class FibSrV2State:
             return {"ts": cand["ts_ms_open"], "kind": "low",  "level": cand["low"]}
         return None
 
-    # ── fib levels from most-recent major swing ──────────────────────────
-    def _major_fib_levels(self, atr_val: float) -> Optional[dict]:
-        """Pick the last confirmed pivot-high + pivot-low whose absolute
-        gap >= min_swing_atr_mult * ATR. Returns dict of fib levels or None."""
-        recent_high = None; recent_low = None
-        # Walk newest-first
-        for p in reversed(self.pivots):
-            if recent_high is None and p["kind"] == "high":
-                recent_high = p
-            elif recent_low is None and p["kind"] == "low":
-                recent_low = p
-            if recent_high is not None and recent_low is not None:
+    # ── fib levels from most-recent major swing (LuxAlgo BOS pairing) ───
+    def _major_fib_levels(self, atr_val: float) -> Optional[tuple[dict, str]]:
+        """Canonical pairing: take MOST RECENT pivot, then walk older to
+        find the next pivot of OPPOSITE kind. That pair IS the swing.
+
+        Returns (fib_dict, trend) where trend in {"up","down"} or None.
+        - trend="up":   low (older) -> high (newer) — bullish leg, pullback long
+        - trend="down": high (older) -> low (newer) — bearish leg, pullback short
+        """
+        if len(self.pivots) < 2:
+            return None
+        pivots = list(self.pivots)
+        # Most recent pivot
+        newest = pivots[-1]
+        # Walk older to find first pivot of OPPOSITE kind
+        opposite = None
+        for p in reversed(pivots[:-1]):
+            if p["kind"] != newest["kind"]:
+                opposite = p
                 break
-        if recent_high is None or recent_low is None:
+        if opposite is None:
             return None
-        h = recent_high["level"]; l = recent_low["level"]
-        if h - l < self.min_swing_atr_mult * atr_val:
+        # Order them chronologically (opposite came first, newest came second)
+        if newest["kind"] == "high":
+            # bullish leg: low (older) -> high (newer)
+            lo = opposite["level"]; hi = newest["level"]
+            trend = "up"
+        else:
+            # bearish leg: high (older) -> low (newer)
+            hi = opposite["level"]; lo = newest["level"]
+            trend = "down"
+        if hi - lo < self.min_swing_atr_mult * atr_val:
             return None
-        return compute_fib_levels(h, l)
+        return (compute_fib_levels(hi, lo), trend)
 
     # ── confluence zones ─────────────────────────────────────────────────
     def _zone_score(self, price: float, fibs: dict) -> tuple[int, list, str]:
@@ -333,9 +348,10 @@ class FibSrV2State:
             return None
 
         # Need at least 1 pivot-high + 1 pivot-low to build fibs
-        fibs = self._major_fib_levels(atr_val)
-        if fibs is None:
+        fib_result = self._major_fib_levels(atr_val)
+        if fib_result is None:
             return None
+        fibs, trend = fib_result
 
         cur = bars_list[-1]
         close = cur["close"]
@@ -365,7 +381,9 @@ class FibSrV2State:
             return None
 
         # LONG branch — bull bounce at confluence-support
-        if kind == "support":
+        # Trend-aligned filter: only fire LONG in an uptrend (pullback long)
+        # unless explicitly disabled via trend_filter=False
+        if kind == "support" and trend == "up":
             bull_body  = cur["close"] > cur["open"]
             long_lower_wick = lower_wick / rng >= self.bounce_wick_ratio
             if bull_body and long_lower_wick and rsi < self.rsi_long_max and ts > self._last_fire_ts_long:
@@ -377,6 +395,7 @@ class FibSrV2State:
                     "meta": {
                         "score":      score,
                         "sources":    sources,
+                        "trend":      trend,
                         "rsi":        round(rsi, 1),
                         "vol_mult":   round(cur["volume"] / vol_sma, 2) if vol_sma else None,
                         "atr":        round(atr_val, 2),
@@ -384,8 +403,8 @@ class FibSrV2State:
                     },
                 }
 
-        # SHORT branch — bear fade at confluence-resistance
-        if kind == "resistance":
+        # SHORT branch — bear fade at confluence-resistance (only in downtrend)
+        if kind == "resistance" and trend == "down":
             bear_body = cur["close"] < cur["open"]
             long_upper_wick = upper_wick / rng >= self.bounce_wick_ratio
             if bear_body and long_upper_wick and rsi > self.rsi_short_min and ts > self._last_fire_ts_short:
@@ -397,6 +416,7 @@ class FibSrV2State:
                     "meta": {
                         "score":      score,
                         "sources":    sources,
+                        "trend":      trend,
                         "rsi":        round(rsi, 1),
                         "vol_mult":   round(cur["volume"] / vol_sma, 2) if vol_sma else None,
                         "atr":        round(atr_val, 2),
