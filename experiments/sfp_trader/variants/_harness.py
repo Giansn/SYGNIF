@@ -44,7 +44,8 @@ import time
 from collections import Counter
 
 HERE = pathlib.Path(__file__).parent
-DATA_PATH = HERE / "_data" / "btc_1m_30d.jsonl.gz"
+DATA_DAYS = os.environ.get("SFP_DATA_DAYS", "30")
+DATA_PATH = HERE / "_data" / f"btc_1m_{DATA_DAYS}d.jsonl.gz"
 
 # ── Simulation params (env-overridable) ──────────────────────────────────
 TP_PCT          = float(os.environ.get("SFP_TP_PCT",   "0.004"))

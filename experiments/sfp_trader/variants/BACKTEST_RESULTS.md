@@ -273,3 +273,94 @@ To make this useful we need either:
 *Addendum: 2026-05-13. Total backtests across both rounds: ~50.*
 *Conclusion: signal has marginal edge at 30m + maker execution.*
 *Edge magnitude is below noise floor at current demo equity.*
+
+---
+
+# Second addendum — 90-day sample reverses the 30-day conclusion
+
+After observing positive EV_gross at HTF on the 30-day sample, we
+extended the cache to 90 days (130k bars, 2026-02-12 → 2026-05-13) to
+properly evaluate 4h SFP where 30d had only 3 trades. The result
+**invalidates the prior addendum's positive 30m / 60m / 2h findings**.
+
+## Direct 30d vs 90d comparison — TF sweep, identical filters
+
+| TF  | 30d EV gross | 30d EV net | 90d EV gross | 90d EV net | Delta gross |
+|-----|--------------|------------|--------------|------------|-------------|
+| 30m | **+0.021%**  | −0.079%    | +0.008%      | −0.092%    | −0.013pp (halved) |
+| 60m | **+0.027%**  | −0.073%    | **−0.002%**  | −0.102%    | flipped negative |
+| 2h  | **+0.039%**  | −0.061%    | **−0.040%**  | −0.140%    | massive deterioration |
+| 4h  | N/A (n=3)    | N/A        | **−0.250%**  | −0.350%    | n=18, **0/18 WR** |
+| 6h  | N/A (n=0)    | N/A        | −0.250%      | −0.350%    | n=5, 0/5 WR |
+
+| TF  | 30d WR    | 90d WR    | 30d trades | 90d trades |
+|-----|-----------|-----------|------------|------------|
+| 30m | 44.0%     | 41.4%     | 50         | 174        |
+| 60m | 47.6%     | 38.6%     | 21         | 70         |
+| 2h  | 44.4%     | 32.4%     | 9          | 34         |
+| 4h  | (n=3) 0%  | **0.0%**  | 3          | **18**     |
+| 6h  | (n=0)     | 0.0%      | 0          | 5          |
+
+## What the 90-day sample shows
+
+1. **4h SFP on BTC is anti-edge.** 18 trades, **all** SL hits. Under a 40% WR null, P(0/18 wins) ≈ 1.5e-5. The signal is *worse* than random at this TF, consistent with the hypothesis that BTC 4h is a trend-dominated regime where wicks below swing lows are typically *continuations*, not reversals.
+
+2. **30d positive results were sample artifacts.** The favorable 2026-04-13 → 2026-05-13 window appears to have been a ranging period that flattered mean-reversion entries. The prior 60 days (2026-02-12 → 2026-04-13) were unfavorable enough to flip every HTF EV_gross negative.
+
+3. **At 1m the signal is essentially flat** across both windows: baseline 30d −0.006%, 90d −0.0001%. WR ≈ 44% — consistent with random under our 1.6:1 R:R.
+
+4. **30 days is too short** to validate a 5-15 trades/week strategy. Variance of EV across 30-day BTC windows is wider than any plausible edge. Lesson for future SYGNIF research: **minimum 90 days for validation, ideally 180 days**.
+
+## Revised final conclusion
+
+The fib_sfp_trigger signal and the community-standard sfp_v2 detector
+**both have no statistical edge on BTC** across the tested 90-day
+sample, at any timeframe from 1m through 6h. The "marginal edge at 30m"
+claim in the first addendum was an artifact of sample-period luck.
+
+### What still stands
+
+- **PR #17 architecture** (mutex, kill-switch, fast-reactor coordination
+  patch) — entirely correct, reusable for whatever signal succeeds it.
+- **Math audit** — the original `fib_sfp_trigger.py` detection logic was
+  correct; the wrapper (fib confluence at 1m) was the problem; the
+  community-standard rewrite was also correct but the underlying signal
+  thesis doesn't hold on BTC.
+
+### What was overturned
+
+- ❌ "30m TF has +0.021% gross edge" — sample-window artifact
+- ❌ "60m TF has +0.027% gross edge" — sample-window artifact
+- ❌ "EV_gross monotonically improves with TF" — only on 30d, reverses on 90d
+- ❌ "Maker execution makes 30m profitable" — based on artifact
+- ❌ "Apply sfp_v2_trigger.py as canonical detector" — replaces broken
+     code with different-but-still-broken code
+
+### What this means for SYGNIF going forward
+
+1. **Don't ship any SFP-based signal** without first running ≥ 90-day
+   backtest with WR confidence intervals.
+2. **PR #17 daemon scaffold ships with sfp_v2** as a reference
+   implementation of community SFP, but with the kill-switch armed
+   permanently. Signal goes live only when a successor demonstrates
+   sustained edge on rolling 90d sample.
+3. **Need a regime gate at a minimum** — the 2026-02 to 2026-04
+   trending period killed any directional fib-SFP variant. Future SFP
+   work must include a Hurst / ADX / range-fraction filter.
+4. **Or pivot away from SFP entirely** — try VWAP-stretch reversals,
+   funding-rate mean reversion, or pure order-flow imbalance, none of
+   which depend on this swing-failure thesis.
+
+## Reproducibility — 90d data
+
+```bash
+cd experiments/sfp_trader/variants
+python _fetch_klines.py --days 90              # ~3 min, 130k bars
+SFP_DATA_DAYS=90 SFP_AGGREGATE_TF=240 python _harness.py --variant sfp_v2_5m
+```
+
+---
+
+*Second addendum: 2026-05-13. Total backtests: ~60.*
+*Final verdict: no edge on BTC at any TF, regardless of filter set.*
+*The prior "30m edge" finding does not survive sample-size extension.*

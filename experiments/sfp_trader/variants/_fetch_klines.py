@@ -1,10 +1,12 @@
-"""Fetch + cache 30 days of BTCUSDT 1m klines from Bybit public API.
+"""Fetch + cache N days of BTCUSDT 1m klines from Bybit public API.
 
-Runs once. All variants read from the cache. Avoids redundant API calls.
+Runs once per window size. All variants read from the cache.
 
 Usage:
-  python _fetch_klines.py
+  python _fetch_klines.py            # default 30d
+  python _fetch_klines.py --days 90  # for HTF (4h+) sample sufficiency
 """
+import argparse
 import gzip
 import json
 import pathlib
@@ -12,10 +14,15 @@ import time
 import urllib.request
 
 HERE = pathlib.Path(__file__).parent
-OUT  = HERE / "_data" / "btc_1m_30d.jsonl.gz"
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--days", type=int, default=30)
+args = parser.parse_args()
+
+OUT  = HERE / "_data" / f"btc_1m_{args.days}d.jsonl.gz"
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
-TARGET_BARS = 30 * 24 * 60  # 43,200 bars = 30 days × 1m
+TARGET_BARS = args.days * 24 * 60  # N days x 1440 1m bars
 
 
 def fetch(end_ms: int) -> list:
