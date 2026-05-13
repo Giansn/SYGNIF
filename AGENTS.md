@@ -1,101 +1,160 @@
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+# AGENTS.md — briefing for AI coding agents
 
-This project is indexed by GitNexus as **sygnif** (589 symbols, 1421 relationships, 47 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+If you are an AI coding agent (Jules, Claude Code, Cursor, etc.) about to
+make changes in this repo: read this file first, then read `SYGNIF.md`
+(canonical architecture spec) for depth.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+## What this repo is
 
-## Always Do
+SYGNIF is a three-process autonomous BTC trading system spread across two
+hosts plus a Bybit demo account:
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+| Tier | Host | What |
+|---|---|---|
+| **Author** | X1 (Windows, this repo's home) | sygnif-trader (NO_EXECUTE), MCP servers, master `swarm.db`, dashboards |
+| **Executor** | EC2 eu-central-1 | sygnif-trader (demo orders), NeuroLinked brain (3,000 Izhikevich neurons, STDP), 17+ intel daemons, freqtrade containers |
+| **Venue** | Bybit demo (UTA) | ≈ $1.5 k equity, perp + options |
 
-## When Debugging
+This is a **production-shaped repo**, not a playground. Real money flows
+on the executor side. Treat every change as if it could move a position.
 
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/sygnif/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+## Repository layout
 
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/sygnif/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/sygnif/clusters` | All functional areas |
-| `gitnexus://repo/sygnif/processes` | All execution flows |
-| `gitnexus://repo/sygnif/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
+```
+.
+├── SygnifStrategy.py           Freqtrade spot strategy (live)
+├── user_data/                  Freqtrade configs + journal dir
+├── docker-compose.yml          4-container stack (spot, futures, overseer, notify)
+├── docker/                     Dockerfiles
+├── trade_overseer/             Telegram commentary + NPU LLM hooks (live)
+├── finance_agent/              Briefing + strategy router (live)
+├── notification_handler.py     Webhook fan-out
+│
+├── ec2-snapshot/               READ-ONLY — exact copy of EC2 services
+│   ├── services/               46 daemons from /opt/sygnif-services/
+│   ├── systemd/                60 unit files + 7 drop-in dirs
+│   ├── neurolinked/            Brain code (no state — that's 1.9 GB and lives on EC2)
+│   └── trader/                 EC2 agent code mirror
+│
+├── archive/                    READ-ONLY — legacy files kept for blame history
+│
+├── docs/                       Architecture + ops docs
+├── tests/                      Unit tests
+│
+├── AGENTS.md                   This file
+├── CLAUDE.md                   Long-form Claude Code instructions (mirrors SYGNIF.md)
+├── SYGNIF.md                   Canonical system specification — the source of truth
+├── SNAPSHOT.md                 What the 2026-05-13 snapshot commit captured
+├── README.md                   Human-facing overview
+└── SETUP.md                    Bootstrap instructions
 ```
 
-If the index previously included embeddings, preserve them by adding `--embeddings`:
+## Where new code should land
 
-```bash
-npx gitnexus analyze --embeddings
+**Default for any experimental / sandboxed work:** create a new top-level
+`experiments/<name>/` directory and put everything there. This keeps
+sandboxed work clearly separated from production code paths.
+
+For the current in-flight Jules task (BTC Golden Cross simulator + SYGNIF
+edge-attribution / lead-lag toolkit): land everything under
+`experiments/sygnif_toolkit/` with this structure:
+
+```
+experiments/sygnif_toolkit/
+├── pyproject.toml              poetry-managed, isolated from root
+├── README.md                   how to install and run, attribution-report guide
+├── bitcoin_sim.py              Golden Cross BTC simulator (Phase 1 deliverable)
+├── edge_attrib/                Phase 1 — PnL decomposition harness
+│   ├── __init__.py
+│   ├── decompose.py            CLI: python -m edge_attrib decompose
+│   └── report.py               CLI: python -m edge_attrib report
+├── lead_lag/                   Phase 2 — cross-venue lead-lag signal
+│   ├── __init__.py
+│   ├── indicators.py           Fibonacci, S/R, SFP — shared math library
+│   ├── record.py               python -m lead_lag record
+│   ├── stream.py               python -m lead_lag stream
+│   ├── logic.py                EWMA mid-velocity + cross-correlation
+│   └── backtest.py             python -m lead_lag backtest
+├── fixtures/
+│   ├── fills.jsonl             24h synthetic fills with ground-truth components
+│   └── book_l2/<venue>/*.jsonl
+└── tests/
+    ├── test_decompose.py       per-component recovery to ±$0.01
+    ├── test_indicators.py
+    └── test_lead_lag.py
 ```
 
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
+Do NOT add this work next to `SygnifStrategy.py`, into `user_data/`, or
+into `ec2-snapshot/`. Those are live or read-only.
 
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
+## Rules (apply to every change)
 
-## CLI
+1. **Real data only.** Never fabricate prices, indicators, equity values,
+   or P&L. If you need test data, generate synthetic with clearly-marked
+   ground truth (see `fixtures/` convention above).
+2. **No secrets in commits.** API keys, `.env` files, SSH keys, AWS
+   credentials — none of these go in git. `.gitignore` already covers
+   the common ones. Verify with `git status` before committing.
+3. **Read-only directories:**
+   - `archive/` — legacy code, kept for blame history. Do not edit.
+   - `ec2-snapshot/` — verbatim mirror of EC2 state. Do not edit; if you
+     need to change a daemon, do it on EC2 and re-snapshot.
+4. **No live execution.** Demo trading is OK if explicitly invoked
+   (`SYGNIF_ORDERS_MODE=demo`). Live trading requires
+   `SYGNIF_ORDERS_LIVE=clear-for-live` AND explicit user confirmation in
+   a chat message — never as a default, never as a side effect.
+5. **PRs, not direct pushes to main.** Always work on a feature branch
+   and open a PR. Main is the deployed reference.
+6. **OrderLinkID prefix discipline.** Every order-placing daemon stamps
+   a stable prefix so post-trade attribution works:
+   - `sygFAST` — fast-reactor (the current authorized perp opener)
+   - `sygSTND` — standing-orders (inactive)
+   - `sygTRN` — training-scanner (inactive)
+   - `sygOL` / `sygCS` — options open / close-stop
+   - `perpRun` — perp-runner (inactive)
+   - **Never reuse a known prefix for a different daemon.**
+   - If you write a new order-placing daemon, pick a fresh prefix and
+     document it in `SYGNIF.md`.
+7. **Tier flags are planner-only.** `leverage_tier` and `size_tier` on a
+   plan are set by `agent.trade.plan`, never hand-injected by tools or
+   helper functions. Default tier if no justification.
+8. **WAIaaS triple-gate.** Mutating chain neurons require
+   `confirm: True` AND `i_understand_real_money: 'yes'`. Do not bypass.
+9. **Line endings.** Never check in `.py`, `.sh`, or systemd unit files
+   with CR characters. Use LF. (Windows agents: configure your editor or
+   strip CRs before staging.)
 
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+## What to ignore
 
-<!-- gitnexus:end -->
+- This file used to reference a GitNexus MCP server. Most coding agents
+  (Jules included) can't reach that. If your environment has GitNexus,
+  treat its output as one input among many. Otherwise skip it and read
+  `SYGNIF.md` for canonical structure.
+
+## Quick orientation
+
+To understand a specific area before editing:
+
+```
+# read the canonical spec
+read SYGNIF.md
+
+# what's in ec2-snapshot — the EC2 daemons
+ls ec2-snapshot/services/ ec2-snapshot/systemd/
+
+# what's actively deployed at the repo root (vs archived)
+ls -d archive/         # do not edit
+ls *.py *.md           # the live root-level files
+```
+
+## Before opening a PR
+
+1. Tests pass for whatever you touched.
+2. `git diff --cached --stat` — change set looks like what you intended;
+   no surprise files.
+3. No secrets snuck in:
+   `git diff --cached --name-only | grep -iE "\.env$|secret|password|credential|\.key$"`
+4. PR description: state the goal, what changed, how you tested, and
+   anything the reviewer should look at carefully.
+
+That's the brief. Now read `SYGNIF.md` for the full architecture.
