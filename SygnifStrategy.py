@@ -328,9 +328,53 @@ Respond with ONLY a JSON object: {{"score": <number>, "reason": "<one sentence>"
             return None
 
 
+
+# ---------------------------------------------------------------------------
+# SYGNIF Toolkit Indicators (Fibonacci, Support/Resistance, SFP)
+# ---------------------------------------------------------------------------
+
+def compute_fibonacci_levels(high, low):
+    """Compute standard Fibonacci retracement levels."""
+    diff = high - low
+    return {
+        'fib_0.0': low,
+        'fib_0.236': low + 0.236 * diff,
+        'fib_0.382': low + 0.382 * diff,
+        'fib_0.5': low + 0.5 * diff,
+        'fib_0.618': low + 0.618 * diff,
+        'fib_0.786': low + 0.786 * diff,
+        'fib_1.0': high,
+    }
+
+def detect_support_resistance(df, window=20):
+    """Detect basic rolling support and resistance levels."""
+    df['rolling_high'] = df['high'].rolling(window=window, center=True).max()
+    df['rolling_low'] = df['low'].rolling(window=window, center=True).min()
+
+    # Identify local peaks and troughs
+    df['resistance'] = df['high'] == df['rolling_high']
+    df['support'] = df['low'] == df['rolling_low']
+
+    # Forward fill to keep the last known level
+    df['last_resistance'] = df['high'].where(df['resistance']).ffill()
+    df['last_support'] = df['low'].where(df['support']).ffill()
+    return df
+
+def detect_swing_failure(df, lookback=50):
+    """Detect swing failure patterns (SFP)."""
+    # SFP long: Price sweeps below a key low but closes above it.
+    # SFP short: Price sweeps above a key high but closes below it.
+    df['key_low'] = df['low'].rolling(window=lookback).min().shift(1)
+    df['key_high'] = df['high'].rolling(window=lookback).max().shift(1)
+
+    df['sfp_long'] = (df['low'] < df['key_low']) & (df['close'] > df['key_low'])
+    df['sfp_short'] = (df['high'] > df['key_high']) & (df['close'] < df['key_high'])
+    return df
+
 # ---------------------------------------------------------------------------
 # Strategy
 # ---------------------------------------------------------------------------
+
 
 class SygnifStrategy(IStrategy):
     """
@@ -679,6 +723,17 @@ class SygnifStrategy(IStrategy):
             return df
 
     def _populate_indicators_inner(self, df: DataFrame, metadata: dict) -> DataFrame:
+        # --- SYGNIF Toolkit Math ---
+        recent_high = df['high'].rolling(288).max()
+        recent_low = df['low'].rolling(288).min()
+        diff = recent_high - recent_low
+        df['fib_0.618'] = recent_low + 0.618 * diff
+        df['fib_0.382'] = recent_low + 0.382 * diff
+
+        df = detect_support_resistance(df, window=20)
+        df = detect_swing_failure(df, lookback=50)
+        # ---------------------------
+
         tik = time.perf_counter()
 
         # --- BTC informative (all timeframes) ---
