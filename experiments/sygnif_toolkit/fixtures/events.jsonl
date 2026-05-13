@@ -1,0 +1,3 @@
+{"ts": 1778633875700, "kind": "lead_event", "data": {"leader": "coinbase", "followers": ["kraken", "bybit"], "direction": "down", "magnitude_bps": 0.65, "expected_lag_ms": 180}}
+{"ts": 1778633875800, "kind": "lead_event", "data": {"leader": "coinbase", "followers": ["kraken", "bybit"], "direction": "down", "magnitude_bps": 1.34, "expected_lag_ms": 180}}
+{"ts": 1778633875900, "kind": "lead_event", "data": {"leader": "coinbase", "followers": ["kraken", "bybit"], "direction": "down", "magnitude_bps": 1.98, "expected_lag_ms": 180}}
