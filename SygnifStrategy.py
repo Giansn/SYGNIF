@@ -348,8 +348,8 @@ def compute_fibonacci_levels(high, low):
 
 def detect_support_resistance(df, window=20):
     """Detect basic rolling support and resistance levels."""
-    df['rolling_high'] = df['high'].rolling(window=window, center=True).max()
-    df['rolling_low'] = df['low'].rolling(window=window, center=True).min()
+    df['rolling_high'] = df['high'].rolling(window=window).max()
+    df['rolling_low'] = df['low'].rolling(window=window).min()
 
     # Identify local peaks and troughs
     df['resistance'] = df['high'] == df['rolling_high']
@@ -367,8 +367,9 @@ def detect_swing_failure(df, lookback=50):
     df['key_low'] = df['low'].rolling(window=lookback).min().shift(1)
     df['key_high'] = df['high'].rolling(window=lookback).max().shift(1)
 
-    df['sfp_long'] = (df['low'] < df['key_low']) & (df['close'] > df['key_low'])
-    df['sfp_short'] = (df['high'] > df['key_high']) & (df['close'] < df['key_high'])
+    # Note: Named 'fib_sfp_long/short' to distinct from existing 48-bar 'fs_*' markers
+    df['fib_sfp_long'] = (df['low'] < df['key_low']) & (df['close'] > df['key_low'])
+    df['fib_sfp_short'] = (df['high'] > df['key_high']) & (df['close'] < df['key_high'])
     return df
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1229,20 @@ class SygnifStrategy(IStrategy):
                     if final_score >= self.sentiment_threshold_buy:
                         df.iloc[-1, df.columns.get_loc("enter_long")] = 1
                         df.iloc[-1, df.columns.get_loc("enter_tag")] = f"claude_s{sentiment:.0f}"
+
+        # --- Fib Bounce Long (guarded by SYGNIF_FIB_BOUNCE) ---
+        if os.environ.get("SYGNIF_FIB_BOUNCE", "0") == "1":
+            # Close within 0.5% of fib_0.618, RSI is oversold, fib_sfp_long is True
+            fib_cond = (
+                (df['close'] <= df['fib_0.618'] * 1.005) &
+                (df['close'] >= df['fib_0.618'] * 0.995)
+            )
+            rsi_cond = df.get("RSI_14", pd.Series(50, index=df.index)) < 30
+            sfp_cond = df.get("fib_sfp_long", pd.Series(False, index=df.index))
+
+            fib_bounce = prot & empty_ok & fib_cond & rsi_cond & sfp_cond
+            df.loc[fib_bounce & (df["enter_long"] == 0), "enter_tag"] = "fib_bounce_long"
+            df.loc[fib_bounce & (df["enter_long"] == 0), "enter_long"] = 1
 
         # --- Failure Swing entries (last candle only) ---
         if len(df) > 0 and not df.iloc[-1].get("enter_long", 0):
