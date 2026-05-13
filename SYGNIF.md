@@ -151,10 +151,40 @@ conflicting orders against the same blended Bybit UTA position.
 
 ### 4.1 Authorized lifecycle paths
 
-| Asset class | Open | Manage / Close | orderLinkId prefix |
-|---|---|---|---|
-| BTC perpetual | `sygnif-fast-reactor.service` | `sygnif-trailing-daemon.service` | `sygFAST<cid14>` |
-| Options (theta + directional) | `sygnif-trader.service` (`agent.loop`) | `sygnif-trader.service` | `sygOL` / `sygCS` |
+The perp side is **dual-opener with priority** since 2026-05-13. SFP
+signals are rare but high-conviction; fast-reactor handles the casual
+flow. A file-based mutex (`/var/lib/sygnif/strategy_claim.json`)
+coordinates so only one opener holds a position at a time.
+
+| Asset class | Open (priority 1) | Open (priority 2) | Manage / Close | Prefix(es) |
+|---|---|---|---|---|
+| BTC perp — SFP-at-Fib | `sygnif-sfp-trader.service` | — | `sygnif-trailing-daemon` | `sygSFP<cid14>` |
+| BTC perp — momentum / whale | — | `sygnif-fast-reactor.service` | `sygnif-trailing-daemon` | `sygFAST<cid14>` |
+| Options (theta + directional) | `sygnif-trader.service` (`agent.loop`) | — | `sygnif-trader.service` | `sygOL` / `sygCS` |
+
+**Mutex rules** (enforced via `strategy_claim.json`):
+
+- **SFP open** → fast-reactor refuses new perp opens (`blocked: sfp_priority`).
+- **fast-reactor open** → SFP waits silently until fast-reactor closes
+  (no preemption in v1; SFP signal is logged but skipped).
+- Both daemons read intel + check the mutex before placing orders.
+- Both routes flow through the same trailing-daemon for exits.
+
+**Fib levels are context, not signal, for fast-reactor.** Since 2026-05-13
+fast-reactor also reads the rolling 240-bar fib_0.236 / fib_0.786 levels
+and rejects:
+- Momentum/whale longs above fib_0.786 (overextended)
+- Momentum/whale shorts below fib_0.236 (capitulation)
+
+Fast-reactor does **not** fire on SFP itself — that's the SFP trader's
+exclusive domain.
+
+**Current deployment status**: the SFP trader scaffold ships in
+`experiments/sfp_trader/` but the systemd unit is **disabled by
+default** and the daemon refuses to place orders without
+`SYGNIF_SFP_TRADER_ENABLED=1`. Per PR #15's 30-day backtest, the bare
+SFP-at-Fib signal has negative net-EV on BTC 1m. Enable only after
+shipping one of the variants in §4.6.
 
 Nothing else may open positions. Adding a new opener requires the
 protocol in §4.4.

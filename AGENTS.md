@@ -248,13 +248,15 @@ first — they were stopped for a reason.
    Main is the deployed reference. The recent `force-push to main`
    for the 2026-05-13 snapshot was a one-off; don't make a habit.
 6. **OrderLinkID prefix discipline + entry/exit ownership.** As of
-   2026-05-13 there is exactly ONE authorized opener per asset class
-   and ONE authorized exit manager. See "Trading mechanics" below for
-   the full lifecycle. Prefix map:
+   2026-05-13 the perp side is **dual-opener with priority** — SFP
+   trader has priority; fast-reactor handles casual flow. A file-based
+   mutex (`/var/lib/sygnif/strategy_claim.json`) coordinates. See
+   "Trading mechanics" below for the full lifecycle. Prefix map:
 
    | Prefix | Source | Status (2026-05-13) |
    |---|---|---|
-   | `sygFAST` | fast-reactor | **active** — sole authorized perp opener |
+   | `sygSFP` | sfp-trader | **scaffolded, disabled** — signal needs work, see SYGNIF.md §4.6 |
+   | `sygFAST` | fast-reactor | **active** — casual flow (momentum + whale + fib-context veto) |
    | `sygOL` / `sygCS` | option.py — open / close-stop | **active** (agent.loop) |
    | `sygSTND` | standing-orders | **disabled** (timer killed, bracket noise) |
    | `sygTRN` | training-scanner | **disabled** |

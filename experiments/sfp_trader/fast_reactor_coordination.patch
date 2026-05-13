@@ -1,0 +1,102 @@
+# sygnif_fast_reactor.py — SFP-priority coordination + fib-zone context veto
+#
+# Two small additions to the live fast-reactor:
+#
+# 1. MUTEX RESPECT  — before fire_trade, check strategy_claim.json for an
+#    open SFP-trader position. If present, stand down. This enforces the
+#    "SFP gets priority when it signals" rule.
+#
+# 2. FIB-ZONE CONTEXT VETO  — read the rolling 240-bar fib levels and
+#    reject momentum/whale longs above fib_0.786 (overextended) and shorts
+#    below fib_0.236 (capitulation). This uses fib LEVELS as context only;
+#    fast-reactor does NOT fire on SFP itself.
+#
+# Apply on EC2:
+#   sudo cp /opt/sygnif-services/sygnif_fast_reactor.py \
+#       /opt/sygnif-services/sygnif_fast_reactor.py.pre-sfp-coord-$(date +%Y%m%d)
+#   sudo patch /opt/sygnif-services/sygnif_fast_reactor.py < fast_reactor_coordination.patch
+#   sudo systemctl restart sygnif-fast-reactor.service
+#
+# Rollback:
+#   sudo cp /opt/sygnif-services/sygnif_fast_reactor.py.pre-sfp-coord-<ts> \
+#       /opt/sygnif-services/sygnif_fast_reactor.py
+#   sudo systemctl restart sygnif-fast-reactor.service
+
+--- a/sygnif_fast_reactor.py
++++ b/sygnif_fast_reactor.py
+@@ -120,6 +120,7 @@ MAX_OPEN_REACTOR     = int(os.environ.get("SYGNIF_FAST_MAX_OPEN", "3"))
+ ORDER_PREFIX = "sygFAST"
+ DB = "/var/lib/sygnif/swarm.db"
+ BOUNCE_FILE = pathlib.Path("/var/lib/sygnif/bounce_setup.json")
+ WHALE_FILE  = pathlib.Path("/var/lib/sygnif/whale_flow.json")
+ CB_FILE     = pathlib.Path("/var/lib/sygnif/circuit_breaker.json")
++CLAIM_FILE  = pathlib.Path("/var/lib/sygnif/strategy_claim.json")
+
+ API_BASE = (os.environ.get("BYBIT_DEMO_API_BASE")
+             or "https://api-demo.bybit.com").rstrip("/")
+@@ -276,6 +277,33 @@ def signed_post(path: str, body: dict) -> dict:
+     return r
+
+
++# ============================================================================
++# SFP-priority coordination — added 2026-05-13
++# ============================================================================
++def sfp_holds_position() -> tuple[bool, str]:
++    """Check if the sygnif-sfp-trader daemon holds an open position.
++
++    Returns (holds, reason). If True, fast-reactor must stand down on perp opens.
++    """
++    try:
++        data = json.loads(CLAIM_FILE.read_text())
++    except Exception:
++        return (False, "no_claim_file")
++    for c in data.get("claims", []):
++        if c.get("status") == "open" and (c.get("owner") or "").startswith("sfp"):
++            return (True, f"sfp_open:{c.get('olid','?')[:14]}")
++    return (False, "no_sfp_open")
++
++
++def fib_zone_reject(direction: str, mid: float) -> tuple[bool, str]:
++    """Reject momentum/whale entries at extreme fib zones.
++
++    Uses the rolling 240-bar window from state['recent_bars']. Long above
++    fib_0.786 = overextended buy zone; short below fib_0.236 = capitulation
++    sell zone. Returns (reject, reason).
++    """
++    bars = list(state.get("recent_bars", []))
++    if len(bars) < 50:
++        return (False, "not_enough_bars")
++    h = max(b["high"] for b in bars); l = min(b["low"] for b in bars)
++    diff = h - l
++    if diff <= 0: return (False, "flat_range")
++    fib_236 = l + 0.236 * diff
++    fib_786 = l + 0.786 * diff
++    if direction == "long" and mid >= fib_786:
++        return (True, f"long_above_fib_0.786:${fib_786:.0f}")
++    if direction == "short" and mid <= fib_236:
++        return (True, f"short_below_fib_0.236:${fib_236:.0f}")
++    return (False, "in_zone")
++
++
+ # ============================================================================
+ # Gates
+ # ============================================================================
+@@ -340,6 +368,18 @@ def fire_trade(direction: str, trigger: str, mid: float, meta: dict) -> dict:
+             if direction == "long" and m5 <= -M5_VETO_PCT:
+                 return {"ok": False, "blocked": f"m5_veto_long m5={m5:+.2f}%"}
+
++    # 2026-05-13: SFP-priority mutex — refuse if SFP trader holds a position
++    sfp_open, sfp_reason = sfp_holds_position()
++    if sfp_open:
++        return {"ok": False, "blocked": f"sfp_priority:{sfp_reason}"}
++
++    # 2026-05-13: fib-zone context veto for momentum/whale (not SFP — fast-
++    # reactor doesn't trade SFP signals, that's the SFP trader's job)
++    if trigger in ("momentum", "whale"):
++        fzr, fzr_reason = fib_zone_reject(direction, mid)
++        if fzr:
++            return {"ok": False, "blocked": f"fib_zone:{fzr_reason}"}
++
+     # 2026-05-12: intelligence-layer veto/boost (on-chain + macro)
+     allow, intel_reason, conf_modifier = check_intel_for_direction(direction)
+     if not allow:

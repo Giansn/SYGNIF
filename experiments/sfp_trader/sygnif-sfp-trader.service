@@ -1,0 +1,31 @@
+[Unit]
+Description=SYGNIF SFP-priority perp opener (sygSFP prefix, disabled by default)
+After=network-online.target sygnif-intel-aggregator.service
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=-/etc/sygnif/trader.env
+EnvironmentFile=-/etc/sygnif/sfp-trader.env
+# Master kill-switch — daemon refuses to place orders unless this is set to "1".
+# Override per /etc/systemd/system/sygnif-sfp-trader.service.d/enable.conf or
+# directly in /etc/sygnif/sfp-trader.env. Default: trade DISABLED, signals
+# observed only.
+Environment=SYGNIF_SFP_TRADER_ENABLED=0
+Environment=SYGNIF_SFP_DRY_RUN=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sygnif/.venv/bin/python /opt/sygnif-services/sygnif_sfp_trader.py
+StandardOutput=append:/var/log/sygnif/sfp-trader.log
+StandardError=append:/var/log/sygnif/sfp-trader.log
+Restart=on-failure
+RestartSec=10
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
