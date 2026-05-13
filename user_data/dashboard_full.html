@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AlphaEdge — Full Trading Dashboard</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline'">
+<title>SYGNIF — Trading Dashboard</title>
 <link rel="icon" type="image/png" href="assets/logo_sygnif_spot.png" />
 <link rel="apple-touch-icon" href="assets/logo_sygnif_spot.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -164,6 +165,10 @@ body {
   background: var(--primary-glow);
   color: var(--primary);
 }
+.nav-item:focus-visible, a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 
 /* Stat Cards */
 .stat-card {
@@ -247,6 +252,17 @@ tr:hover { background: var(--surface-overlay); }
   70% { box-shadow: 0 0 0 6px rgba(19, 214, 131, 0); }
   100% { box-shadow: 0 0 0 0 rgba(19, 214, 131, 0); }
 }
+
+/* Retry Button */
+#retry-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
 </style>
 </head>
 <body>
@@ -255,17 +271,14 @@ tr:hover { background: var(--surface-overlay); }
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-icon">AE</div>
+      <div class="brand-icon">SY</div>
       <div>
-        <div class="font-bold">AlphaEdge</div>
-        <div class="text-xs text-muted">Pro Trader</div>
+        <div class="font-bold">SYGNIF</div>
+        <div class="text-xs text-muted">Trader</div>
       </div>
     </div>
     <nav class="flex-col mt-2">
       <a href="#" class="nav-item active">Overview</a>
-      <a href="#" class="nav-item">Analytics</a>
-      <a href="#" class="nav-item">Strategies</a>
-      <a href="#" class="nav-item">Trade Log</a>
     </nav>
     <div style="margin-top: auto; padding: 1rem;">
       <div class="card" style="padding: 0.75rem; background: var(--surface-overlay);">
@@ -390,16 +403,27 @@ tr:hover { background: var(--surface-overlay); }
 <script>
 const API = window.location.origin;
 let tk = '';
+let authFails = 0;
+let cachedConfig = null;
+let cachedWhitelist = null;
+let lastCacheUpdate = 0;
 
 // Formatting Utils
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (v, d=2) => Number(v).toLocaleString('en-US', {minimumFractionDigits:d, maximumFractionDigits:d});
 const pc = v => v >= 0 ? 'up' : 'dn';
 const bgPc = v => v >= 0 ? 'bg-up' : 'bg-dn';
 const prec = v => v < 0.001 ? 6 : v < 1 ? 4 : 2;
 
+function parseTs(s) {
+  if (!s) return null;
+  return /Z$|[+-]\d{2}:?\d{2}$/.test(s) ? new Date(s) : new Date(s + 'Z');
+}
+
 function calcDur(startStr, endStr) {
-  const s = new Date(startStr + 'Z');
-  const e = endStr ? new Date(endStr + 'Z') : new Date();
+  const s = parseTs(startStr);
+  if (!s) return '--';
+  const e = endStr ? parseTs(endStr) : new Date();
   const m = Math.floor((e - s) / 60000);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
@@ -412,7 +436,11 @@ async function autoLogin() {
     method: 'POST',
     headers: { 'Authorization': 'Basic ' + '__SYGNIF_FT_BASIC_B64__' }
   });
-  if (!r.ok) throw new Error('auth');
+  if (!r.ok) {
+    authFails++;
+    throw new Error('auth');
+  }
+  authFails = 0;
   const d = await r.json();
   tk = d.access_token;
 }
@@ -432,16 +460,43 @@ function findTodayDailyRow(dailyData) {
   return dailyData.data.find(r => r.date === todayStr);
 }
 
+function updateApiStatusError(msg) {
+  const el = document.getElementById('api-status');
+  el.className = 'text-xs font-medium dn';
+  if (authFails >= 3) {
+    el.innerHTML = `Auth failed — check credentials. <button id="retry-btn" onclick="retryAuth()">Retry</button>`;
+  } else {
+    el.textContent = 'Error: ' + msg;
+  }
+}
+
+window.retryAuth = function() {
+  authFails = 0;
+  tk = '';
+  document.getElementById('api-status').textContent = 'Retrying...';
+  tick();
+}
+
 /* ── Render ── */
 async function refresh() {
   try {
+    if (authFails >= 3) return; // Stop hammering
     if (!tk) await autoLogin();
 
     document.getElementById('api-status').textContent = 'Connected';
     document.getElementById('api-status').className = 'text-xs font-medium up';
 
-    const [statusOpen, profitRaw, cfg, wl, tradesResp, balData, daily] = await Promise.all([
-      api('status'), api('profit'), api('show_config'), api('whitelist'), api('trades?limit=100'), api('balance'), api('daily?timescale=30')
+    // Caching for infrequently changing data (5 min)
+    const now = Date.now();
+    if (!cachedConfig || !cachedWhitelist || now - lastCacheUpdate > 300000) {
+      [cachedConfig, cachedWhitelist] = await Promise.all([
+        api('show_config'), api('whitelist')
+      ]);
+      lastCacheUpdate = now;
+    }
+
+    const [statusOpen, profitRaw, tradesResp, balData, daily] = await Promise.all([
+      api('status'), api('profit'), api('trades?limit=100'), api('balance'), api('daily?timescale=30')
     ]);
 
     const allTrades = Array.isArray(tradesResp?.trades) ? tradesResp.trades : [];
@@ -450,20 +505,27 @@ async function refresh() {
     let profit = profitRaw?.all || profitRaw || {};
 
     // Config & Topbar
-    document.getElementById('bot-mode').textContent = cfg.dry_run ? 'Dry Run (Paper)' : 'Live';
-    document.getElementById('sidebar-state').textContent = (cfg.state || 'stopped').toUpperCase();
+    document.getElementById('bot-mode').textContent = cachedConfig.dry_run ? 'Dry Run (Paper)' : 'Live';
+    document.getElementById('sidebar-state').textContent = (cachedConfig.state || 'stopped').toUpperCase();
 
     // Ticker Tape (mocking with whitelist pairs since Freqtrade doesn't have a fast ticker endpoint for all)
     const tape = document.getElementById('ticker-tape');
-    const pairsToDisplay = (wl.whitelist || []).slice(0, 10);
+    const pairsToDisplay = (cachedWhitelist.whitelist || []).slice(0, 10);
     if(pairsToDisplay.length > 0) {
-        tape.innerHTML = pairsToDisplay.map(p => `<div class="flex items-center gap-1"><span class="mono text-muted text-xs">${p}</span><span class="dot" style="background:var(--dim-foreground); animation:none"></span></div>`).join('');
+        tape.innerHTML = pairsToDisplay.map(p => `<div class="flex items-center gap-1"><span class="mono text-muted text-xs">${esc(p)}</span><span class="dot" style="background:var(--dim-foreground); animation:none"></span></div>`).join('');
     }
 
     // Balance & Stats
-    const walletBalance = balData.total || balData.value || 0;
+    // Using profit_all + starting_balance for more reliable total value across different Freqtrade configs
+    const startingBal = profit.starting_balance || 0;
     const totalPnl = profit.profit_all_coin || 0;
-    document.getElementById('sidebar-bal').textContent = '$' + fmt(walletBalance);
+    let walletBalance = startingBal + totalPnl;
+
+    if (isNaN(walletBalance)) {
+        document.getElementById('sidebar-bal').textContent = '—';
+    } else {
+        document.getElementById('sidebar-bal').textContent = '$' + fmt(walletBalance);
+    }
 
     document.getElementById('stat-total-pnl').textContent = '$' + fmt(totalPnl);
     document.getElementById('stat-total-pnl').className = `stat-card-val ${pc(totalPnl)}`;
@@ -474,7 +536,7 @@ async function refresh() {
     document.getElementById('stat-wr-sub').textContent = `${w}W / ${l}L`;
 
     document.getElementById('stat-open').textContent = trades.length;
-    document.getElementById('stat-open-sub').textContent = `Out of ${cfg.max_open_trades || '∞'} allowed`;
+    document.getElementById('stat-open-sub').textContent = `Out of ${cachedConfig.max_open_trades ?? '∞'} allowed`;
 
     const tRow = findTodayDailyRow(daily);
     const tAbs = tRow ? Number(tRow.abs_profit) || 0 : 0;
@@ -496,12 +558,12 @@ async function refresh() {
         const pct = (t.profit_ratio || 0) * 100, pnl = t.profit_abs || 0;
         return `<tr>
           <td class="mono text-muted">${t.trade_id}</td>
-          <td class="font-semibold mono">${t.pair}</td>
+          <td class="font-semibold mono">${esc(t.pair)}</td>
           <td class="text-right mono">${e.toFixed(prec(e))}</td>
-          <td class="text-right mono font-semibold ${pc(pct)}">${c.toFixed(prec(e))}</td>
+          <td class="text-right mono font-semibold ${pc(pct)}">${c.toFixed(prec(c))}</td>
           <td class="text-right"><span class="badge ${bgPc(pct)}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span></td>
           <td class="text-right mono font-semibold ${pc(pnl)}">${fmt(pnl)}</td>
-          <td><span class="badge" style="background:var(--surface-overlay)">${t.enter_tag || '--'}</span></td>
+          <td><span class="badge" style="background:var(--surface-overlay)">${esc(t.enter_tag) || '--'}</span></td>
           <td class="text-right mono text-muted">${calcDur(t.open_date)}</td>
         </tr>`;
       }).join('');
@@ -517,20 +579,19 @@ async function refresh() {
       tbClosed.innerHTML = closedTrades.map(t => {
         const pct = (t.profit_ratio || 0) * 100, pnl = t.profit_abs || 0;
         return `<tr>
-          <td class="font-semibold mono">${t.pair}</td>
+          <td class="font-semibold mono">${esc(t.pair)}</td>
           <td class="text-right"><span class="badge ${bgPc(pct)}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span></td>
           <td class="text-right mono font-semibold ${pc(pnl)}">${fmt(pnl)}</td>
           <td class="mono text-muted">${t.close_date ? calcDur(t.open_date, t.close_date) : '--'}</td>
-          <td><span class="badge" style="background:var(--surface-overlay)">${t.enter_tag || '--'}</span></td>
-          <td><span class="text-xs text-muted">${t.exit_reason || '--'}</span></td>
+          <td><span class="badge" style="background:var(--surface-overlay)">${esc(t.enter_tag) || '--'}</span></td>
+          <td><span class="text-xs text-muted">${esc(t.exit_reason) || '--'}</span></td>
         </tr>`;
       }).join('');
     }
 
   } catch (e) {
     console.error(e);
-    document.getElementById('api-status').textContent = 'Error: ' + e.message;
-    document.getElementById('api-status').className = 'text-xs font-medium dn';
+    updateApiStatusError(e.message);
   }
 }
 
@@ -548,7 +609,7 @@ async function tick() {
 }
 
 tick();
-setInterval(tick, 5000);
+setInterval(tick, 15000); // 15 seconds to avoid rate limiting
 </script>
 </body>
 </html>
