@@ -274,6 +274,14 @@ first — they were stopped for a reason.
     brackets at open, mid-cross limits not panic-cross, combo orders
     for multi-leg, track per-trade slip as a first-class KPI.
 
+11. **Do not add GitNexus blocks to `AGENTS.md` or `CLAUDE.md`.**
+    If your tooling (a sandbox PostToolUse hook, `npx gitnexus analyze`,
+    etc.) auto-injects a `<!-- gitnexus:start -->...<!-- gitnexus:end -->`
+    block: strip it before staging. Recurring problem on Jules PRs.
+    The actual GitNexus instructions live in
+    `.claude/skills/gitnexus/*/SKILL.md` for the Claude Code agents that
+    can use them; `AGENTS.md` / `CLAUDE.md` should stay self-contained.
+
 ---
 
 ## File paths cheat sheet
