@@ -159,3 +159,105 @@ All env-overrides are documented in `_harness.py` module docstring.
 
 *Backtest run: 2026-05-13 on `feature/sfp-trader-separation` (PR #17).*
 *38 distinct config runs, all FAIL. Signal declared dead at 1m fib levels.*
+
+---
+
+# Addendum — sfp_v2 (community-standard rewrite)
+
+After the original 38-config sweep failed, we audited the math against
+TradingView community Pine Scripts (LuxAlgo SFP, AGPro SFP Engine,
+BullByte Structural Liquidity, cd_sfp_Cx) plus ICT/SMC and Wyckoff
+literature. Findings:
+
+- **Detection logic was textbook-correct** (`low<key_low AND close>key_low`) ✓
+- **But the wrapper was non-standard**:
+  - Used rolling 50-bar min/max instead of **confirmed pivots** (5/5 left/right)
+  - Used **fib retracement** as confluence — no community script does this
+  - Missing all 3 community filters: **wick ratio ≥ 0.55**, **reclaim ≥ 0.25 × ATR**, **volume ≥ 1.15 × SMA20**
+  - Ran on **1m** — below the 5m floor recommended by every TV author
+  - No CISD / MSS / FVG confirmation step
+
+`sfp_v2_trigger.py` ships a faithful AGPro-spec implementation. The
+harness was extended with `SFP_AGGREGATE_TF=N` (rolls up 1m → N-min bars)
+so the same cached data drives every timeframe sweep.
+
+## Timeframe sweep — sfp_v2 (TP=0.40% / SL=0.25% / fee=0.10% RT)
+
+| TF  | Trades | Fires/wk | WR   | EV gross | EV net  | Verdict |
+|-----|--------|----------|------|----------|---------|---------|
+| 1m  | 1735   | 397      | 43.9%| −0.008%  | −0.108% | FAIL    |
+| 5m  | 402    | 92       | 47.0%| **+0.009%** | −0.091% | FAIL |
+| 15m | 111    | 25.4 ✓   | 42.3%| +0.007%  | −0.093% | FAIL    |
+| 30m | 50     | 11.5 ✓   | 44.0%| **+0.021%** | −0.079% | FAIL |
+| 60m | 21     | 4.8      | 47.6%| **+0.027%** | −0.073% | FAIL |
+
+**Monotonic improvement with TF.** First time we've seen positive
+EV_gross at any TF ≥ 5m. The community canon DOES add edge — just not
+enough to clear retail taker fees.
+
+## R:R sweep at 30m TF — wider TP hurts
+
+| TP / SL                  | Trades | WR    | EV gross | Notes        |
+|--------------------------|--------|-------|----------|--------------|
+| 0.40% / 0.25% (default)  | 50     | 44.0% | +0.021%  | best         |
+| 0.60% / 0.30%            | 50     | 38.0% | +0.018%  | wider TP misses |
+| 0.80% / 0.40%            | 50     | 38.0% | −0.005%  | losses dominate |
+| 1.00% / 0.40%            | 50     | 32.0% | −0.001%  | too wide     |
+
+**Finding**: signal reversals are short-lived (~30-60 min). Wider TP turns
+winners into losers. Default symmetric-ish R:R is correct.
+
+## Fee model sweep at 30m TF — maker entry crosses break-even
+
+| Fee model                       | Fee % RT | EV gross | EV net      | Verdict     |
+|---------------------------------|----------|----------|-------------|-------------|
+| Taker entry + taker exit        | 0.100%   | +0.028%  | −0.073%     | FAIL        |
+| Limit entry + taker exit        | 0.055%   | +0.028%  | −0.027%     | FAIL        |
+| Full maker (entry + exit limit) | 0.025%   | +0.028%  | **+0.003%** | FAIL (WR<50%) |
+
+**Finding**: at full-maker fees, EV_net just barely clears positive
+(+0.003% / trade). The strict WR≥50% gate still blocks since SFP at
+asymmetric R:R settles near 44% WR — but EV_net > 0 IS achievable with
+better execution.
+
+## What this means for SYGNIF
+
+The signal has measurable edge at 30m TF on BTC, ~ +0.028% gross per trade
+(50 trades over 30 days). The economics:
+
+```
+Edge per trade (30m, full-maker):  +0.003% net
+Trades per week:                    11.5
+Equity at stake:                    $2,000 (current demo)
+Weekly P&L (at 0.5% risk-per-trade): +$0.35  ← essentially noise
+```
+
+**Edge exists but is too small to matter at $2k equity.** Per-trade
+expectancy is below the noise floor of bybit-demo execution slippage.
+To make this useful we need either:
+- **10x larger equity** so absolute P&L becomes meaningful, OR
+- **Additional orthogonal filter** to boost WR above 50% (HTF EMA bias,
+  FVG context, RSI divergence — none tested here), OR
+- **Verified maker-only execution stack** with measured slippage
+
+## Updated recommendation
+
+1. **Keep PR #17 architecture** (mutex, kill-switch, fast-reactor patch) — unchanged
+2. **Replace `fib_sfp_trigger.py` with `sfp_v2_trigger.py`** as canonical detector
+3. **Set the daemon's default TF to 30m** (not 1m) — but stay disabled until #4
+4. **Pursue maker-only execution** for the fast-reactor stack independently —
+   without it, no candidate signal beats fee drag at retail equity sizes
+5. **Add HTF bias filter as Phase-2 enhancement** — quickest path to
+   WR > 50% per community wisdom; testable via existing harness
+
+## Files added in this addendum
+
+- `experiments/sfp_trader/sfp_v2_trigger.py` — AGPro-spec community SFP detector
+- `experiments/sfp_trader/variants/sfp_v2_1m/evaluate.py` — sanity check at 1m
+- `experiments/sfp_trader/variants/sfp_v2_5m/evaluate.py` — TF-parametric runner
+
+---
+
+*Addendum: 2026-05-13. Total backtests across both rounds: ~50.*
+*Conclusion: signal has marginal edge at 30m + maker execution.*
+*Edge magnitude is below noise floor at current demo equity.*

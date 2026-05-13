@@ -53,6 +53,7 @@ MAX_HOLD_BARS   = int(  os.environ.get("SFP_MAX_HOLD", "60"))
 FEE_PCT_RT      = float(os.environ.get("SFP_FEE_PCT", "0.0010"))
 TRAIL_PCT       = float(os.environ.get("SFP_TRAIL_PCT","0"))
 TRAIL_ACT_PCT   = float(os.environ.get("SFP_TRAIL_ACT","0.001"))
+AGGREGATE_TF_MIN = int( os.environ.get("SFP_AGGREGATE_TF", "1"))  # 1=1m, 5=5m, 15=15m
 
 # ── Acceptance gates ──
 GATE_MIN_WR       = 50.0
@@ -71,7 +72,46 @@ def load_bars() -> list:
             line = line.strip()
             if not line: continue
             bars.append(json.loads(line))
+    if AGGREGATE_TF_MIN > 1:
+        bars = _aggregate_bars(bars, AGGREGATE_TF_MIN)
     return bars
+
+
+def _aggregate_bars(bars: list, tf_min: int) -> list:
+    """Roll up 1m OHLCV bars into tf_min-minute bars.
+
+    Groups by floor(ts_ms_open / (tf_min * 60_000)). Drops any partial
+    bucket so the result is consistent with a closed-bar feed.
+    """
+    if not bars: return []
+    bucket_ms = tf_min * 60_000
+    groups: dict = {}
+    for b in bars:
+        key = (b["ts_ms_open"] // bucket_ms) * bucket_ms
+        if key not in groups:
+            groups[key] = {
+                "ts_ms_open": key,
+                "open":   b["open"],
+                "high":   b["high"],
+                "low":    b["low"],
+                "close":  b["close"],
+                "volume": b["volume"],
+                "_n":     1,
+            }
+        else:
+            g = groups[key]
+            if b["high"] > g["high"]: g["high"] = b["high"]
+            if b["low"]  < g["low"]:  g["low"]  = b["low"]
+            g["close"]  = b["close"]
+            g["volume"] += b["volume"]
+            g["_n"]    += 1
+    out = []
+    for key in sorted(groups):
+        g = groups[key]
+        if g["_n"] == tf_min:  # only emit complete buckets
+            g.pop("_n", None)
+            out.append(g)
+    return out
 
 
 def load_variant(name: str):
@@ -187,8 +227,9 @@ def main():
     args = parser.parse_args()
 
     print(f"=== variant: {args.variant} ===", flush=True)
-    print(f"  params: TP={TP_PCT:.4f}  SL={SL_PCT:.4f}  hold={MAX_HOLD_BARS}m  "
-          f"fee={FEE_PCT_RT:.4f}  trail={TRAIL_PCT:.4f}  trail_act={TRAIL_ACT_PCT:.4f}")
+    print(f"  params: TP={TP_PCT:.4f}  SL={SL_PCT:.4f}  hold={MAX_HOLD_BARS}bars  "
+          f"fee={FEE_PCT_RT:.4f}  trail={TRAIL_PCT:.4f}  trail_act={TRAIL_ACT_PCT:.4f}  "
+          f"tf={AGGREGATE_TF_MIN}m")
     bars = load_bars()
     span_days = (bars[-1]["ts_ms_open"] - bars[0]["ts_ms_open"]) / 86_400_000
     print(f"  loaded {len(bars)} bars spanning {span_days:.1f} days")
