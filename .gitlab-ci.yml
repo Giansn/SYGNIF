@@ -1,0 +1,14 @@
+
+# ──────────────────────────────────────────────────────────────────────
+# 5. Pages — placeholder, to be expanded with chain_intel_v1 in a follow-up
+# ──────────────────────────────────────────────────────────────────────
+pages:
+  stage: docs
+  script:
+    - mkdir -p public
+    - cp dashboard/pages/placeholder.html public/index.html
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
