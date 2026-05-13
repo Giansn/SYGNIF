@@ -162,7 +162,7 @@ That's the brief. Now read `SYGNIF.md` for the full architecture.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **SYGNIF** (10379 symbols, 15370 relationships, 297 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **SYGNIF** (10388 symbols, 15378 relationships, 297 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
