@@ -82,7 +82,9 @@ Freqtrade caches the compiled strategy at container start.
 - `OVERSEER_AGENT_URL` (preferred) — once the language plan ships, this
   points at `http://ec2-eu1:8889/api/commentary`.
 - `ANTHROPIC_API_KEY` (legacy fallback).
-- Rules-only summary if neither is reachable.
+- Local GPU/NPU commentary (`SYGNIF_LLM_BACKEND=npu` today; CUDA/Ollama path
+  planned for the new center box — see [`docs/LEGION_T5_GPU_PLAN.md`](docs/LEGION_T5_GPU_PLAN.md)).
+- Rules-only summary if none is reachable.
 
 Telegram token priority: `SYGNIF_HEDGE_BOT_TOKEN` > `FINANCE_BOT_TOKEN` >
 `TELEGRAM_BOT_TOKEN`.
