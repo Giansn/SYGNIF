@@ -10,6 +10,7 @@
 #   C# core          Unity's scripting target, netstandard2.1 + C# 9
 #   Unity adapters   compiled against a UnityEngine shim (types, not behaviour)
 #   C++ core         Unreal's build settings: -fno-exceptions -fno-rtti -Werror
+#   Unreal module    compiled against an Unreal shim (types, not reflection)
 #
 # What is deliberately NOT claimed: that anything behaves correctly inside an
 # editor. Lifecycle order, serialisation, physics and asset loading are real
@@ -55,6 +56,14 @@ run_unity_shim_check() {
     dotnet build "$realengine/unity/ci/UnityShim/UnityShim.csproj" --nologo -v q 2>&1 | tail -4
 }
 
+run_unreal_shim_check() {
+    command -v cmake >/dev/null 2>&1 || { echo "cmake not installed; see TOOLCHAIN.md"; return 1; }
+    local dir="$realengine/unreal/ci/UnrealShim"
+    cmake -S "$dir" -B "$dir/build" -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null 2>&1 || return 1
+    cmake --build "$dir/build" 2>&1 | tail -3
+    return "${PIPESTATUS[0]:-0}"
+}
+
 run_cpp_tests() {
     command -v cmake >/dev/null 2>&1 || { echo "cmake not installed; see TOOLCHAIN.md"; return 1; }
     cmake -S "$realengine/cpp" -B "$realengine/cpp/build" -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null 2>&1 || return 1
@@ -66,6 +75,7 @@ step "Python core (from-scratch engine)" run_python_tests
 step "C# core (Unity scripting target)" run_csharp_tests
 step "Unity adapters (compile against shim)" run_unity_shim_check
 step "C++ core (Unreal build settings)" run_cpp_tests
+step "Unreal module (compile against shim)" run_unreal_shim_check
 
 printf '\n\033[1m== summary ==\033[0m\n'
 for line in "${results[@]}"; do

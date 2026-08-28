@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("UnityShimCheck")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+91ca9a36fbbf4c619f949462e532e48331f101e7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f42fc63a05b2cb8ace5d9efef2eb267e8a673884")]
 [assembly: System.Reflection.AssemblyProductAttribute("UnityShimCheck")]
 [assembly: System.Reflection.AssemblyTitleAttribute("UnityShimCheck")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
