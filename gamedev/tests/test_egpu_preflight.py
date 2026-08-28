@@ -185,6 +185,69 @@ class TestParseWindowsJson(unittest.TestCase):
         self.assertEqual(parse_windows_json('[{"AdapterRAM":123}]'), [])
 
 
+class TestLinuxSysfsHelpers(unittest.TestCase):
+    """The Linux DRM path, where an eGPU is meaningfully harder than on Windows."""
+
+    def test_connector_card_extraction(self) -> None:
+        self.assertEqual(egpu_preflight.connector_card("card0-DP-1"), "card0")
+        self.assertEqual(egpu_preflight.connector_card("card1-HDMI-A-2"), "card1")
+        self.assertEqual(egpu_preflight.connector_card("card12-eDP-1"), "card12")
+
+    def test_connector_card_rejects_non_connectors(self) -> None:
+        # The card node itself and the render node are not connectors; treating
+        # them as such would report a display on every GPU in the machine.
+        self.assertIsNone(egpu_preflight.connector_card("card0"))
+        self.assertIsNone(egpu_preflight.connector_card("renderD128"))
+        self.assertIsNone(egpu_preflight.connector_card("version"))
+
+    def test_pci_normalisation_across_the_three_formats(self) -> None:
+        """The bug this prevents is a comparison that silently never matches.
+
+        sysfs writes 0000:0c:00.0, lspci prints 0c:00.0, and nvidia-smi prints
+        00000000:0C:00.0. All three name the same device.
+        """
+        expected = "0c:00.0"
+        self.assertEqual(egpu_preflight.normalise_pci("0000:0c:00.0"), expected)
+        self.assertEqual(egpu_preflight.normalise_pci("0c:00.0"), expected)
+        self.assertEqual(egpu_preflight.normalise_pci("00000000:0C:00.0"), expected)
+        self.assertEqual(egpu_preflight.normalise_pci("  0000:0C:00.0  "), expected)
+
+    def test_pci_normalisation_is_idempotent(self) -> None:
+        once = egpu_preflight.normalise_pci("0000:0c:00.0")
+        self.assertEqual(egpu_preflight.normalise_pci(once), once)
+
+    def test_read_connected_cards_from_a_fake_sysfs(self) -> None:
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            def connector(name: str, status: str) -> None:
+                os.makedirs(os.path.join(root, name))
+                with open(os.path.join(root, name, "status"), "w", encoding="utf-8") as handle:
+                    handle.write(status + "\n")
+
+            connector("card0-eDP-1", "connected")        # internal panel
+            connector("card0-DP-1", "disconnected")
+            connector("card1-DP-1", "connected")         # monitor on the eGPU
+            connector("card1-HDMI-A-1", "disconnected")
+            os.makedirs(os.path.join(root, "renderD128"))  # not a connector
+
+            self.assertEqual(egpu_preflight.read_connected_cards(root), {"card0", "card1"})
+
+    def test_read_connected_cards_tolerates_a_missing_sysfs(self) -> None:
+        self.assertEqual(egpu_preflight.read_connected_cards("/nonexistent/drm"), set())
+
+    def test_only_disconnected_outputs_yields_nothing(self) -> None:
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "card0-DP-1"))
+            with open(os.path.join(root, "card0-DP-1", "status"), "w", encoding="utf-8") as handle:
+                handle.write("disconnected\n")
+            self.assertEqual(egpu_preflight.read_connected_cards(root), set())
+
+
 class TestToolCandidates(unittest.TestCase):
     """Which binary name gets tried, per platform.
 

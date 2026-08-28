@@ -258,6 +258,66 @@ def summarise_gpus(gpus: list[Gpu]) -> tuple[list[Gpu], list[Gpu]]:
     return discrete, integrated
 
 
+def connector_card(connector: str) -> Optional[str]:
+    """``card0-DP-1`` -> ``card0``. Returns None if it is not a connector name."""
+    match = re.match(r"^(card\d+)-", connector)
+    return match.group(1) if match else None
+
+
+def normalise_pci(address: str) -> str:
+    """Reduce a PCI address to ``bb:dd.f`` for comparison.
+
+    sysfs writes the full ``0000:0c:00.0`` with the domain; lspci prints
+    ``0c:00.0`` without it; nvidia-smi prints ``00000000:0C:00.0`` with an
+    eight-digit domain and upper case. All three describe the same device, and
+    comparing them as strings silently never matches.
+    """
+    address = address.strip().lower()
+    parts = address.split(":")
+    if len(parts) == 3:
+        address = ":".join(parts[1:])
+    return address
+
+
+def pci_of_drm_card(card: str, sysfs_root: str = "/sys/class/drm") -> Optional[str]:
+    """The PCI address behind a DRM card, via its device symlink."""
+    device_link = os.path.join(sysfs_root, card, "device")
+    try:
+        return normalise_pci(os.path.basename(os.path.realpath(device_link)))
+    except OSError:
+        return None
+
+
+def read_connected_cards(sysfs_root: str = "/sys/class/drm") -> set[str]:
+    """DRM cards that currently have a connected output."""
+    connected: set[str] = set()
+    try:
+        entries = os.listdir(sysfs_root)
+    except OSError:
+        return connected
+
+    for entry in entries:
+        card = connector_card(entry)
+        if card is None:
+            continue
+        try:
+            with open(os.path.join(sysfs_root, entry, "status"), "r", encoding="utf-8") as handle:
+                if handle.read().strip() == "connected":
+                    connected.add(card)
+        except OSError:
+            continue
+    return connected
+
+
+def kernel_driver_for(pci_address: str) -> Optional[str]:
+    """Which kernel module has claimed a PCI device."""
+    path = f"/sys/bus/pci/devices/{pci_address}/driver"
+    try:
+        return os.path.basename(os.path.realpath(path))
+    except OSError:
+        return None
+
+
 # -- probes (platform dependent) ------------------------------------------
 
 
@@ -488,6 +548,17 @@ def probe_display_attachment(report: Report) -> None:
 
     This is the single largest and least obvious eGPU performance factor.
     """
+    # On Linux the Windows resolution field is absent, so derive it from DRM:
+    # a card with a connected connector is driving a display.
+    if report.platform_name == "linux" and not any(gpu.driving_display for gpu in report.gpus):
+        connected_cards = read_connected_cards()
+        connected_pci = {pci_of_drm_card(card) for card in connected_cards}
+        connected_pci.discard(None)
+        if connected_pci:
+            for gpu in report.gpus:
+                if gpu.bus_id:
+                    gpu.driving_display = normalise_pci(gpu.bus_id) in connected_pci
+
     driving = [gpu for gpu in report.gpus if gpu.driving_display]
 
     if not driving:
@@ -533,7 +604,9 @@ def probe_graphics_apis(report: Report) -> None:
             "Vulkan",
             SKIP,
             "vulkaninfo not installed",
-            "Unreal on Linux needs Vulkan. On Windows, D3D12 is the default and Vulkan is optional.",
+            "On Linux Vulkan is the path both engines actually use, so this is not optional: "
+            "install it (Debian: vulkan-tools plus the driver's ICD, e.g. nvidia-vulkan-icd) and "
+            "re-run. On Windows, D3D12 is the default and Vulkan is optional.",
         )
 
     if report.platform_name == "windows":
@@ -547,13 +620,27 @@ def probe_graphics_apis(report: Report) -> None:
 
 def probe_gpu_preference(report: Report) -> None:
     """The trap that wastes the most time: the app runs on the wrong GPU."""
+    if report.platform_name == "linux":
+        discrete, integrated = summarise_gpus(report.gpus)
+        if discrete and integrated:
+            report.add(
+                "GPU selection (PRIME offload)",
+                WARN,
+                f"both {integrated[0].name} and {discrete[0].name} present",
+                "Linux has no per-application GPU setting: nothing picks the eGPU for you, and an "
+                "application launched normally renders on the iGPU. Launch through offload instead -- "
+                "NVIDIA: __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia <app>; "
+                "AMD/Intel: DRI_PRIME=1 <app>. Put it in the Unity Hub .desktop file's Exec line so "
+                "the editor inherits it, since the Hub launches the editor as a child process.",
+            )
+        elif discrete:
+            report.add("GPU selection (PRIME offload)", PASS, "only a discrete GPU present; no ambiguity")
+        else:
+            report.add("GPU selection (PRIME offload)", UNKNOWN, "GPU set unclear")
+        return
+
     if report.platform_name not in ("windows", "wsl"):
-        report.add(
-            "Per-application GPU preference",
-            SKIP,
-            "Windows-specific",
-            "On Linux use DRI_PRIME or __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia.",
-        )
+        report.add("Per-application GPU preference", SKIP, "not applicable on this platform")
         return
 
     discrete, integrated = summarise_gpus(report.gpus)
@@ -571,6 +658,98 @@ def probe_gpu_preference(report: Report) -> None:
         report.add("Per-application GPU preference", PASS, "only a discrete GPU present; no ambiguity")
     else:
         report.add("Per-application GPU preference", UNKNOWN, "GPU set unclear")
+
+
+def probe_kernel_driver(report: Report) -> None:
+    """Which kernel module claimed the discrete GPU.
+
+    The Linux-only blocker with no Windows equivalent. Nouveau is the reverse
+    engineered NVIDIA driver: it will light up a desktop perfectly well, so
+    everything looks fine, but it has no usable Vulkan for modern cards and
+    cannot reclock the GPU, which leaves it running at a fraction of its
+    clocks. An engine on nouveau is not slow because of Thunderbolt; it is slow
+    because the card is idling. Worth catching before any benchmark.
+    """
+    if report.platform_name != "linux":
+        report.add("Kernel driver", SKIP, "Linux-specific")
+        return
+
+    discrete, _ = summarise_gpus(report.gpus)
+    if not discrete:
+        report.add("Kernel driver", SKIP, "no discrete GPU to check")
+        return
+
+    findings: list[str] = []
+    problems: list[str] = []
+    for gpu in discrete:
+        if not gpu.bus_id:
+            continue
+        # sysfs wants the full domain-qualified address.
+        address = gpu.bus_id if gpu.bus_id.count(":") == 2 else f"0000:{gpu.bus_id}"
+        driver = kernel_driver_for(address)
+        if driver is None:
+            problems.append(f"{gpu.name}: no driver bound")
+            continue
+        findings.append(f"{gpu.name}: {driver}")
+        if driver == "nouveau":
+            problems.append(f"{gpu.name} is on nouveau")
+
+    if problems:
+        report.add(
+            "Kernel driver",
+            FAIL,
+            "; ".join(problems),
+            "Install the proprietary NVIDIA driver (Debian/Ubuntu: nvidia-driver, plus "
+            "nvidia-vulkan-icd for Vulkan) and blacklist nouveau. A GPU with no driver bound at all "
+            "usually means the module failed to load against the running kernel after an update -- "
+            "check `dmesg | grep -i nvidia` and whether DKMS rebuilt.",
+        )
+    elif findings:
+        report.add("Kernel driver", PASS, "; ".join(findings))
+    else:
+        report.add("Kernel driver", UNKNOWN, "could not resolve the driver for any discrete GPU")
+
+
+def probe_session_type(report: Report) -> None:
+    """X11 or Wayland, which changes how an eGPU behaves.
+
+    Not a pass/fail, but it decides which instructions apply, and eGPU support
+    differs sharply between them. Reported so the answer is on the record
+    rather than assumed.
+    """
+    if report.platform_name != "linux":
+        report.add("Display server", SKIP, "Linux-specific")
+        return
+
+    session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
+    if not session:
+        report.add(
+            "Display server",
+            UNKNOWN,
+            "XDG_SESSION_TYPE not set (headless shell, or an SSH session)",
+            "Run this from a terminal inside the desktop session; from SSH the display-related "
+            "checks describe nothing useful.",
+        )
+    elif session == "wayland":
+        report.add(
+            "Display server",
+            INFO,
+            "wayland",
+            "PRIME offload works on Wayland with recent NVIDIA drivers (555+), but eGPU hotplug is "
+            "less reliable than on X11 and some compositors will not use a newly attached GPU "
+            "without a restart. If the eGPU misbehaves, an X11 session is the quicker thing to "
+            "rule out.",
+        )
+    elif session == "x11":
+        report.add(
+            "Display server",
+            INFO,
+            "x11",
+            "Attach the enclosure before starting the session. X11 does not add a GPU to a running "
+            "server, so a hotplugged eGPU is typically invisible until you log out and back in.",
+        )
+    else:
+        report.add("Display server", INFO, session)
 
 
 def probe_headroom(report: Report) -> None:
@@ -621,6 +800,8 @@ def build_report() -> Report:
     probe_link_width(report)
     probe_display_attachment(report)
     probe_graphics_apis(report)
+    probe_kernel_driver(report)
+    probe_session_type(report)
     probe_gpu_preference(report)
     probe_headroom(report)
     return report
