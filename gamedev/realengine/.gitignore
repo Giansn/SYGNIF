@@ -1,0 +1,11 @@
+# Build output, everywhere under realengine/.
+bin/
+obj/
+build/
+build-*/
+
+# Unreal editor-generated directories.
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
