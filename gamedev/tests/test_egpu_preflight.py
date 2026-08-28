@@ -8,7 +8,9 @@ every fixture below is a real-world output shape that breaks a naive parser.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
+from gamedev.realengine.tools import egpu_preflight
 from gamedev.realengine.tools.egpu_preflight import (
     FAIL,
     PASS,
@@ -181,6 +183,36 @@ class TestParseWindowsJson(unittest.TestCase):
 
     def test_entries_without_a_name_are_skipped(self) -> None:
         self.assertEqual(parse_windows_json('[{"AdapterRAM":123}]'), [])
+
+
+class TestToolCandidates(unittest.TestCase):
+    """Which binary name gets tried, per platform.
+
+    This matters specifically for an eGPU. Under WSL the Windows tools are
+    reachable through interop but only as `.exe`, and it is the Windows-side
+    nvidia-smi.exe that knows about a card in a Thunderbolt enclosure attached
+    to the host. A Linux nvidia-smi inside WSL, where it exists at all,
+    describes the virtualised WSL GPU instead -- so looking only for the bare
+    name silently reports the wrong device, or none.
+    """
+
+    def test_wsl_tries_the_exe_variant(self) -> None:
+        with mock.patch.object(egpu_preflight, "detect_platform", return_value="wsl"):
+            self.assertEqual(egpu_preflight._candidates("nvidia-smi"), ["nvidia-smi", "nvidia-smi.exe"])
+
+    def test_windows_tries_the_exe_variant(self) -> None:
+        with mock.patch.object(egpu_preflight, "detect_platform", return_value="windows"):
+            self.assertEqual(egpu_preflight._candidates("vulkaninfo"), ["vulkaninfo", "vulkaninfo.exe"])
+
+    def test_native_linux_does_not(self) -> None:
+        with mock.patch.object(egpu_preflight, "detect_platform", return_value="linux"):
+            self.assertEqual(egpu_preflight._candidates("lspci"), ["lspci"])
+
+    def test_bare_name_is_preferred_when_both_exist(self) -> None:
+        # Order matters: a native tool, if present, should win over interop,
+        # which is slower and crosses a process boundary.
+        with mock.patch.object(egpu_preflight, "detect_platform", return_value="wsl"):
+            self.assertEqual(egpu_preflight._candidates("boltctl")[0], "boltctl")
 
 
 class TestSummarise(unittest.TestCase):

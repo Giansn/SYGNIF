@@ -278,6 +278,30 @@ def _run(command: list[str], timeout: int = 20) -> Optional[str]:
     return result.stdout if result.returncode == 0 else None
 
 
+def _candidates(name: str) -> list[str]:
+    """Command names to try, in order.
+
+    On WSL the Windows tools are reachable through interop, but only under
+    their ``.exe`` names. This matters more than it looks for an eGPU: the
+    Windows-side ``nvidia-smi.exe`` is the one that knows about a card in a
+    Thunderbolt enclosure attached to the host. A Linux ``nvidia-smi`` inside
+    WSL, if it exists at all, describes the virtualised WSL GPU and will
+    happily report a different device — or nothing — for the same hardware.
+    """
+    if detect_platform() in ("wsl", "windows"):
+        return [name, f"{name}.exe"]
+    return [name]
+
+
+def _run_tool(name: str, args: list[str], timeout: int = 20) -> Optional[str]:
+    """Run a tool, trying the .exe variant where the platform needs it."""
+    for candidate in _candidates(name):
+        output = _run([candidate] + args, timeout=timeout)
+        if output is not None:
+            return output
+    return None
+
+
 def _powershell(script: str) -> Optional[str]:
     for executable in ("pwsh", "powershell.exe", "powershell"):
         if shutil.which(executable) is None:
@@ -317,18 +341,15 @@ def probe_gpus(report: Report) -> None:
             gpus = parse_windows_json(output)
 
     if not gpus:
-        lspci = _run(["lspci"])
+        lspci = _run_tool("lspci", [])
         if lspci:
             gpus = parse_lspci_vga(lspci)
 
     # nvidia-smi is authoritative for VRAM and driver where it is available, so
     # let it correct anything the generic probes reported.
-    smi = _run(
-        [
-            "nvidia-smi",
-            "--query-gpu=name,memory.total,driver_version,pci.bus_id",
-            "--format=csv,noheader,nounits",
-        ]
+    smi = _run_tool(
+        "nvidia-smi",
+        ["--query-gpu=name,memory.total,driver_version,pci.bus_id", "--format=csv,noheader,nounits"],
     )
     if smi:
         for detailed in parse_nvidia_smi(smi):
@@ -384,7 +405,7 @@ def probe_thunderbolt(report: Report) -> None:
     target = report.platform_name
 
     if target in ("linux", "wsl"):
-        boltctl = _run(["boltctl", "list"])
+        boltctl = _run_tool("boltctl", ["list"])
         if boltctl:
             authorised = boltctl.lower().count("authorized: yes")
             report.add(
@@ -413,18 +434,18 @@ def probe_thunderbolt(report: Report) -> None:
 
 def probe_link_width(report: Report) -> None:
     """Check the PCIe link the GPU actually negotiated."""
-    smi = _run(
+    smi = _run_tool(
+        "nvidia-smi",
         [
-            "nvidia-smi",
             "--query-gpu=name,pcie.link.gen.current,pcie.link.width.current,pcie.link.width.max",
             "--format=csv,noheader,nounits",
-        ]
+        ],
     )
     if not smi:
         report.add(
             "PCIe link width",
             SKIP,
-            "nvidia-smi not available",
+            "nvidia-smi not available (tried nvidia-smi and nvidia-smi.exe)",
             "On an AMD card check `lspci -vv` for 'LnkSta:' and compare against 'LnkCap:'.",
         )
         return
@@ -498,7 +519,7 @@ def probe_display_attachment(report: Report) -> None:
 
 
 def probe_graphics_apis(report: Report) -> None:
-    vulkan = _run(["vulkaninfo", "--summary"], timeout=30)
+    vulkan = _run_tool("vulkaninfo", ["--summary"], timeout=30)
     if vulkan:
         devices = re.findall(r"deviceName\s*=\s*(.+)", vulkan)
         report.add(
