@@ -167,6 +167,36 @@ namespace UnityEngine
         public static void DrawLine(Vector3 from, Vector3 to) { }
     }
 
+    public enum GraphicsDeviceType
+    {
+        Null = 4,
+        Direct3D11 = 2,
+        Direct3D12 = 18,
+        OpenGLCore = 17,
+        Vulkan = 21,
+        Metal = 16,
+    }
+
+    public static class SystemInfo
+    {
+        public static string graphicsDeviceName => "Shim Adapter";
+        public static string graphicsDeviceVendor => "Shim";
+        public static string graphicsDeviceVersion => "0.0";
+        public static int graphicsMemorySize => 0;
+        public static GraphicsDeviceType graphicsDeviceType => GraphicsDeviceType.Null;
+    }
+
+    public static class Application
+    {
+        public static bool isEditor => false;
+        public static int targetFrameRate { get; set; }
+    }
+
+    public static class QualitySettings
+    {
+        public static int vSyncCount { get; set; }
+    }
+
     public static class Debug
     {
         public static void Log(object message) { }
