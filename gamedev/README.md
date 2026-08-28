@@ -21,7 +21,7 @@ gamedev/realengine/verify.sh
 ```
 
 ```
-PASS  Python core (from-scratch engine)          140 tests
+PASS  Python core (from-scratch engine)          177 tests
 PASS  C# core (Unity scripting target)            68 tests, ~150 ms
 PASS  Unity adapters (compile against shim)
 PASS  C++ core (Unreal build settings)            38 tests, 1542 checks
@@ -47,9 +47,10 @@ including the image output.
 | `render/png.py` | PNG encoder over stdlib `zlib`, with adaptive per-scanline filtering |
 | `render/font.py` | Hand-authored 5×7 bitmap font, 65 glyphs |
 | `games/pong.py` | A complete game: rallies, scoring, a beatable AI opponent |
+| `realengine/tools/egpu_preflight.py` | Read-only eGPU preflight for the machine an engine will run on |
 
 ```bash
-python3 -m unittest discover -s gamedev/tests -t .   # 140 tests
+python3 -m unittest discover -s gamedev/tests -t .   # 177 tests
 python3 -m gamedev.render.testcard                    # renders out/testcard.png
 python3 -m gamedev.games.pong                         # plays a full match, saves frames
 ```
