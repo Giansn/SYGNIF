@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compile-checks the Unity adapter scripts without Unity.
+
+    The adapters under Assets/Scripts/Runtime are compiled here against the
+    minimal UnityEngine shim in this folder. That catches every mistake a
+    compiler can catch — missing usings, wrong member names, bad overloads,
+    Vector2/Vector3 confusion — none of which would otherwise surface until
+    somebody opened the project in the editor.
+
+    It does NOT verify engine behaviour. See UnityEngineShim.cs.
+
+    Same TargetFramework and LangVersion as the real Unity assembly, so a
+    construct that this accepts and Unity would reject cannot slip through.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>UnityShimCheck</AssemblyName>
+    <RootNamespace>GameCore.Unity</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The shim intentionally has unused parameters and stub bodies. -->
+    <NoWarn>$(NoWarn);CS0169;CS0649;CS1591;IDE0060</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="UnityEngineShim.cs" />
+    <!-- The real adapter sources, compiled in place rather than copied, so this
+         check can never drift out of date with what Unity would compile. -->
+    <Compile Include="../../Assets/Scripts/Runtime/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../csharp/GameCore/GameCore.csproj" />
+  </ItemGroup>
+
+</Project>
