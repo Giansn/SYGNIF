@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unity compatibility constraints. These are not stylistic preferences; a
+    core library that violates them will not compile inside the editor.
+
+    TargetFramework  netstandard2.1 is Unity's "API Compatibility Level" for
+                     2021.2 and newer. Targeting net8.0 here would build fine
+                     on this machine and then fail the moment the DLL is
+                     dropped into Assets/.
+
+    LangVersion      Unity's Roslyn ships C# 9. Records, target-typed new and
+                     pattern matching are fine; file-scoped namespaces,
+                     required members and raw string literals are not.
+                     Pinning it means this project fails here rather than
+                     surprising me in the editor.
+
+    No engine reference. This assembly must never see UnityEngine. That is the
+    entire point: gameplay logic that can be unit-tested in milliseconds from
+    a terminal instead of by entering play mode.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>GameCore</AssemblyName>
+    <RootNamespace>GameCore</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+</Project>
