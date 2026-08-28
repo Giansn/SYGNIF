@@ -1,0 +1,15 @@
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/UnityShimCheck.deps.json
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/UnityShimCheck.dll
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/UnityShimCheck.pdb
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/GameCore.dll
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/GameCore.pdb
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/bin/Debug/netstandard2.1/GameCore.xml
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.csproj.AssemblyReference.cache
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.GeneratedMSBuildEditorConfig.editorconfig
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.AssemblyInfoInputs.cache
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.AssemblyInfo.cs
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.csproj.CoreCompileInputs.cache
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.sourcelink.json
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShim.csproj.Up2Date
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShimCheck.dll
+/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/Debug/netstandard2.1/UnityShimCheck.pdb

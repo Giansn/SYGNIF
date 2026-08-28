@@ -1,0 +1,95 @@
+{
+  "version": 3,
+  "targets": {
+    ".NETStandard,Version=v2.1": {
+      "GameCore/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.1",
+        "compile": {
+          "bin/placeholder/GameCore.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/GameCore.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "GameCore/1.0.0": {
+      "type": "project",
+      "path": "../../../csharp/GameCore/GameCore.csproj",
+      "msbuildProject": "../../../csharp/GameCore/GameCore.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    ".NETStandard,Version=v2.1": [
+      "GameCore >= 1.0.0"
+    ]
+  },
+  "packageFolders": {
+    "/root/.nuget/packages/": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/UnityShim.csproj",
+      "projectName": "UnityShimCheck",
+      "projectPath": "/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/UnityShim.csproj",
+      "packagesPath": "/root/.nuget/packages/",
+      "outputPath": "/home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/obj/",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "/root/.nuget/NuGet/NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "netstandard2.1"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "netstandard2.1": {
+          "targetAlias": "netstandard2.1",
+          "projectReferences": {
+            "/home/user/SYGNIF/gamedev/realengine/csharp/GameCore/GameCore.csproj": {
+              "projectPath": "/home/user/SYGNIF/gamedev/realengine/csharp/GameCore/GameCore.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "allWarningsAsErrors": true,
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      }
+    },
+    "frameworks": {
+      "netstandard2.1": {
+        "targetAlias": "netstandard2.1",
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "NETStandard.Library": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "/root/.dotnet/sdk/8.0.424/RuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

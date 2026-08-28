@@ -1,0 +1,3 @@
+# Core sources are synced here by sync-core.sh; only the asmdef is tracked.
+*.cs
+*.cs.meta

@@ -1,0 +1,5 @@
+is_global = true
+build_property.RootNamespace = GameCore.Unity
+build_property.ProjectDir = /home/user/SYGNIF/gamedev/realengine/unity/ci/UnityShim/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
